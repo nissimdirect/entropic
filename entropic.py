@@ -153,9 +153,9 @@ def cmd_list_projects(args):
 
 
 def cmd_ui(args):
-    """Launch the Gradio UI."""
-    from gradio_ui import launch_ui
-    launch_ui()
+    """Launch the DAW-style visual interface."""
+    from server import start
+    start()
 
 
 def main():

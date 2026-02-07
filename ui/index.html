@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entropic</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+    <!-- TOP BAR -->
+    <div id="topbar">
+        <span class="logo">Entropic</span>
+        <div id="upload-zone">
+            <label for="file-input">Load Video</label>
+            <input type="file" id="file-input" accept="video/*">
+            <span id="file-name">No file loaded</span>
+        </div>
+        <div class="transport">
+            <button onclick="previewChain()" class="primary">Update Preview</button>
+        </div>
+    </div>
+
+    <!-- LEFT SIDEBAR: Effect Browser -->
+    <div id="browser">
+        <h3>Effects</h3>
+        <div id="effect-list"></div>
+    </div>
+
+    <!-- CENTER: Video Preview Canvas -->
+    <div id="canvas-area">
+        <div id="empty-state">
+            <div class="icon">&#9654;</div>
+            <p>Load a video to start</p>
+            <p class="hint">Or drag a video file onto this window</p>
+        </div>
+        <img id="preview-img" style="display:none">
+        <div id="frame-info"></div>
+        <div id="frame-scrubber">
+            <input type="range" id="frame-slider" min="0" max="100" value="0">
+        </div>
+    </div>
+
+    <!-- BOTTOM: Effect Chain Rack -->
+    <div id="chain-area">
+        <div id="chain-header">
+            <span>Effect Chain</span>
+            <span class="count" id="chain-count">0 devices</span>
+        </div>
+        <div id="chain-rack"></div>
+    </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
