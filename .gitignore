@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Test outputs
+tests/test_input.mp4
+tests/output/
+
+# Entropic project data (user-specific)
+.entropic/
+
+# Temp
+*.tmp
+*.swp
