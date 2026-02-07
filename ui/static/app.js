@@ -246,6 +246,11 @@ function setupKeyboard() {
                     if (isShowingOriginal) img.src = data.preview;
                 });
         }
+        // Cmd/Ctrl+D = Duplicate selected
+        if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
+            e.preventDefault();
+            duplicateSelected();
+        }
         // Delete/Backspace = remove selected layer
         if ((e.key === 'Delete' || e.key === 'Backspace') && selectedLayerId !== null) {
             // Don't delete if focused on an input
@@ -369,12 +374,13 @@ function renderChain() {
         }
 
         return `
-            <div class="device ${bypassClass}" data-device-id="${device.id}" draggable="true">
+            <div class="device ${bypassClass}" data-device-id="${device.id}" draggable="true"
+                 oncontextmenu="deviceContextMenu(event, ${device.id})">
                 <div class="device-header">
                     ${gripHTML()}
                     <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                     <span class="device-name">${device.name}</span>
-                    <button class="remove-btn" onclick="removeFromChain(${device.id})" title="Remove">&times;</button>
+                    <button class="more-btn" onclick="event.stopPropagation(); deviceContextMenu(event, ${device.id})" title="More options">&#8943;</button>
                 </div>
                 <div class="device-params">
                     ${paramsHtml}
@@ -408,12 +414,13 @@ function renderLayers() {
             <div class="layer-item ${selectedClass} ${bypassedClass}"
                  data-layer-id="${device.id}"
                  onclick="selectLayer(${device.id})"
+                 oncontextmenu="layerContextMenu(event, ${device.id})"
                  draggable="true">
                 <span class="layer-eye ${eyeClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Show' : 'Hide'}">${eyeIcon}</span>
                 ${gripHTML()}
                 <span class="layer-name">${device.name}</span>
                 <span class="layer-index">${layerNum}</span>
-                <span class="layer-delete" onclick="event.stopPropagation(); removeFromChain(${device.id})" title="Delete">&times;</span>
+                <button class="more-btn" onclick="event.stopPropagation(); layerContextMenu(event, ${device.id})" title="More">&#8943;</button>
             </div>`;
     }).join('');
 
@@ -715,6 +722,152 @@ function showPreview(dataUrl) {
     img.src = dataUrl;
     img.style.display = 'block';
     document.getElementById('empty-state').style.display = 'none';
+}
+
+// ============ CONTEXT MENU ============
+
+let ctxTarget = null; // {type: 'device'|'layer'|'canvas', id: ...}
+
+function showContextMenu(e, items) {
+    e.preventDefault();
+    e.stopPropagation();
+    const menu = document.getElementById('ctx-menu');
+
+    menu.innerHTML = items.map(item => {
+        if (item === '---') return '<div class="ctx-sep"></div>';
+        const cls = item.danger ? 'ctx-item danger' : 'ctx-item';
+        const shortcut = item.shortcut ? `<span class="ctx-shortcut">${item.shortcut}</span>` : '';
+        return `<div class="${cls}" onclick="ctxAction('${item.action}'); hideContextMenu()">${item.label}${shortcut}</div>`;
+    }).join('');
+
+    // Position near cursor, keep on screen
+    const x = Math.min(e.clientX, window.innerWidth - 180);
+    const y = Math.min(e.clientY, window.innerHeight - items.length * 30);
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    menu.classList.add('visible');
+}
+
+function hideContextMenu() {
+    document.getElementById('ctx-menu').classList.remove('visible');
+    ctxTarget = null;
+}
+
+// Close menu on click anywhere
+document.addEventListener('click', hideContextMenu);
+
+function ctxAction(action) {
+    if (!ctxTarget) return;
+    const id = ctxTarget.id;
+    switch (action) {
+        case 'duplicate':
+            selectedLayerId = id;
+            duplicateSelected();
+            break;
+        case 'remove':
+            removeFromChain(id);
+            break;
+        case 'bypass':
+            toggleBypass(id);
+            break;
+        case 'moveUp':
+            moveDevice(id, -1);
+            break;
+        case 'moveDown':
+            moveDevice(id, 1);
+            break;
+        case 'solo':
+            soloDevice(id);
+            break;
+        case 'flatten':
+            flattenChain();
+            break;
+        case 'clearAll':
+            if (chain.length === 0) return;
+            chain = [];
+            selectedLayerId = null;
+            pushHistory('Clear all');
+            renderChain();
+            renderLayers();
+            schedulePreview();
+            break;
+        case 'resetParams':
+            resetDeviceParams(id);
+            break;
+    }
+}
+
+function deviceContextMenu(e, deviceId) {
+    ctxTarget = { type: 'device', id: deviceId };
+    const device = chain.find(d => d.id === deviceId);
+    const idx = chain.findIndex(d => d.id === deviceId);
+    showContextMenu(e, [
+        { label: device?.bypassed ? 'Turn On' : 'Turn Off', action: 'bypass', shortcut: 'Click power' },
+        { label: 'Solo (mute others)', action: 'solo' },
+        '---',
+        { label: 'Duplicate', action: 'duplicate', shortcut: 'Cmd+D' },
+        { label: 'Reset Parameters', action: 'resetParams' },
+        '---',
+        { label: 'Move Up', action: 'moveUp', shortcut: idx > 0 ? '' : '(first)' },
+        { label: 'Move Down', action: 'moveDown', shortcut: idx < chain.length - 1 ? '' : '(last)' },
+        '---',
+        { label: 'Remove', action: 'remove', danger: true, shortcut: 'Del' },
+    ]);
+}
+
+function layerContextMenu(e, deviceId) {
+    ctxTarget = { type: 'layer', id: deviceId };
+    const device = chain.find(d => d.id === deviceId);
+    showContextMenu(e, [
+        { label: device?.bypassed ? 'Show Layer' : 'Hide Layer', action: 'bypass' },
+        { label: 'Solo Layer', action: 'solo' },
+        '---',
+        { label: 'Duplicate Layer', action: 'duplicate' },
+        { label: 'Reset Parameters', action: 'resetParams' },
+        '---',
+        { label: 'Flatten Visible', action: 'flatten' },
+        { label: 'Clear All Layers', action: 'clearAll', danger: true },
+        '---',
+        { label: 'Delete Layer', action: 'remove', danger: true },
+    ]);
+}
+
+function moveDevice(deviceId, direction) {
+    const idx = chain.findIndex(d => d.id === deviceId);
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= chain.length) return;
+    const [device] = chain.splice(idx, 1);
+    chain.splice(newIdx, 0, device);
+    pushHistory(`Move ${device.name}`);
+    renderChain();
+    renderLayers();
+    schedulePreview();
+}
+
+function soloDevice(deviceId) {
+    chain.forEach(d => { d.bypassed = d.id !== deviceId; });
+    const device = chain.find(d => d.id === deviceId);
+    pushHistory(`Solo ${device?.name}`);
+    renderChain();
+    renderLayers();
+    schedulePreview();
+}
+
+function resetDeviceParams(deviceId) {
+    const device = chain.find(d => d.id === deviceId);
+    if (!device) return;
+    const def = effectDefs.find(e => e.name === device.name);
+    if (!def) return;
+    for (const [k, v] of Object.entries(def.params)) {
+        if (v.type === 'xy') {
+            device.params[k] = [...v.default];
+        } else {
+            device.params[k] = v.default;
+        }
+    }
+    pushHistory(`Reset ${device.name}`);
+    renderChain();
+    schedulePreview();
 }
 
 // ============ A/B COMPARE (Space Bar) ============

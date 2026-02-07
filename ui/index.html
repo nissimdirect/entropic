@@ -53,10 +53,6 @@
         <!-- Layers Tab -->
         <div id="layers-tab" class="tab-content active">
             <div id="layers-list"></div>
-            <div id="layers-footer">
-                <button onclick="flattenChain()" title="Flatten visible">Flatten</button>
-                <button onclick="duplicateSelected()" title="Duplicate layer">Dup</button>
-            </div>
         </div>
 
         <!-- History Tab -->
@@ -74,6 +70,9 @@
         <div id="chain-rack"></div>
     </div>
 </div>
+
+<!-- Context Menu (shared, repositioned dynamically) -->
+<div id="ctx-menu" class="ctx-menu"></div>
 
 <script src="/static/app.js"></script>
 </body>
