@@ -46,7 +46,7 @@ def cmd_apply(args):
             key, val = p.split("=", 1)
             # Try to parse as number or tuple
             try:
-                val = eval(val)
+                val = __import__('ast').literal_eval(val)
             except Exception:
                 pass
             params[key] = val
@@ -122,7 +122,7 @@ def cmd_branch(args):
         for p in args.params:
             key, val = p.split("=", 1)
             try:
-                val = eval(val)
+                val = __import__('ast').literal_eval(val)
             except Exception:
                 pass
             overrides["0"] = overrides.get("0", {})
