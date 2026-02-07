@@ -1,5 +1,6 @@
 // Entropic — DAW-Style UI Controller
 // Handles: effect browser, drag-to-chain, Moog knobs, real-time preview
+// Layers panel (Photoshop), History panel (Photoshop), Ableton on/off toggles
 
 const API = '';
 let effectDefs = [];      // Effect definitions from server
@@ -9,6 +10,69 @@ let currentFrame = 0;
 let totalFrames = 100;
 let deviceIdCounter = 0;
 let previewDebounce = null;
+let selectedLayerId = null;
+
+// ============ HISTORY (Undo/Redo) ============
+
+let history = [];         // Array of snapshots: [{action, chain, timestamp}, ...]
+let historyIndex = -1;    // Current position in history
+
+function pushHistory(action) {
+    // Discard any future states if we're not at the end
+    if (historyIndex < history.length - 1) {
+        history = history.splice(0, historyIndex + 1);
+    }
+    // Deep clone the chain state
+    const snapshot = JSON.parse(JSON.stringify(chain));
+    history.push({
+        action,
+        chain: snapshot,
+        timestamp: new Date(),
+    });
+    historyIndex = history.length - 1;
+    renderHistory();
+}
+
+function undo() {
+    if (historyIndex <= 0) return;
+    historyIndex--;
+    restoreFromHistory(historyIndex);
+}
+
+function redo() {
+    if (historyIndex >= history.length - 1) return;
+    historyIndex++;
+    restoreFromHistory(historyIndex);
+}
+
+function restoreFromHistory(index) {
+    const entry = history[index];
+    if (!entry) return;
+    chain = JSON.parse(JSON.stringify(entry.chain));
+    // Restore deviceIdCounter to avoid ID collisions
+    const maxId = chain.reduce((m, d) => Math.max(m, d.id), -1);
+    deviceIdCounter = maxId + 1;
+    renderChain();
+    renderLayers();
+    renderHistory();
+    schedulePreview();
+}
+
+function jumpToHistory(index) {
+    if (index < 0 || index >= history.length) return;
+    historyIndex = index;
+    restoreFromHistory(index);
+}
+
+// ============ GRIP HANDLE HTML ============
+
+function gripHTML() {
+    return `<span class="grip">
+        <span class="grip-row"><span class="grip-dot"></span><span class="grip-dot"></span></span>
+        <span class="grip-row"><span class="grip-dot"></span><span class="grip-dot"></span></span>
+        <span class="grip-row"><span class="grip-dot"></span><span class="grip-dot"></span></span>
+    </span>`;
+}
 
 // ============ INIT ============
 
@@ -18,6 +82,11 @@ async function init() {
     renderBrowser();
     setupDragDrop();
     setupFileInput();
+    setupPanelTabs();
+    setupKeyboard();
+    pushHistory('Open');
+    renderLayers();
+    renderHistory();
 }
 
 // ============ EFFECT BROWSER ============
@@ -39,6 +108,7 @@ function renderBrowser() {
             html += `
                 <div class="effect-item" draggable="true" data-effect="${name}"
                      ondragstart="onBrowserDragStart(event, '${name}')">
+                    ${gripHTML()}
                     <span class="name">${name}</span>
                 </div>`;
         }
@@ -136,6 +206,65 @@ function updateFrameInfo(info) {
     el.textContent = `${w}x${h} | ${fps}fps | Frame ${currentFrame}/${totalFrames}`;
 }
 
+// ============ PANEL TABS ============
+
+function setupPanelTabs() {
+    document.querySelectorAll('.panel-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            tab.classList.add('active');
+            const target = tab.dataset.tab;
+            document.getElementById(`${target}-tab`).classList.add('active');
+        });
+    });
+}
+
+// ============ KEYBOARD SHORTCUTS ============
+
+function setupKeyboard() {
+    document.addEventListener('keydown', e => {
+        // Cmd/Ctrl+Z = Undo
+        if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            undo();
+        }
+        // Cmd/Ctrl+Shift+Z = Redo
+        if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
+            e.preventDefault();
+            redo();
+        }
+        // Space = A/B compare
+        if (e.code === 'Space' && videoLoaded && !isShowingOriginal) {
+            e.preventDefault();
+            isShowingOriginal = true;
+            const img = document.getElementById('preview-img');
+            originalPreviewSrc = img.src;
+            fetch(`${API}/api/frame/${currentFrame}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (isShowingOriginal) img.src = data.preview;
+                });
+        }
+        // Delete/Backspace = remove selected layer
+        if ((e.key === 'Delete' || e.key === 'Backspace') && selectedLayerId !== null) {
+            // Don't delete if focused on an input
+            if (document.activeElement.tagName === 'INPUT') return;
+            e.preventDefault();
+            removeFromChain(selectedLayerId);
+        }
+    });
+
+    document.addEventListener('keyup', e => {
+        if (e.code === 'Space' && isShowingOriginal) {
+            e.preventDefault();
+            isShowingOriginal = false;
+            const img = document.getElementById('preview-img');
+            if (originalPreviewSrc) img.src = originalPreviewSrc;
+        }
+    });
+}
+
 // ============ EFFECT CHAIN ============
 
 function addToChain(effectName) {
@@ -159,13 +288,22 @@ function addToChain(effectName) {
     }
 
     chain.push(device);
+    selectedLayerId = device.id;
+    pushHistory(`Add ${effectName}`);
     renderChain();
+    renderLayers();
     schedulePreview();
 }
 
 function removeFromChain(deviceId) {
+    const device = chain.find(d => d.id === deviceId);
     chain = chain.filter(d => d.id !== deviceId);
+    if (selectedLayerId === deviceId) {
+        selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
+    }
+    pushHistory(`Remove ${device?.name || 'effect'}`);
     renderChain();
+    renderLayers();
     schedulePreview();
 }
 
@@ -173,9 +311,43 @@ function toggleBypass(deviceId) {
     const device = chain.find(d => d.id === deviceId);
     if (device) {
         device.bypassed = !device.bypassed;
+        const state = device.bypassed ? 'Off' : 'On';
+        pushHistory(`${device.name} ${state}`);
         renderChain();
+        renderLayers();
         schedulePreview();
     }
+}
+
+function duplicateSelected() {
+    if (selectedLayerId === null) return;
+    const device = chain.find(d => d.id === selectedLayerId);
+    if (!device) return;
+    const clone = {
+        id: deviceIdCounter++,
+        name: device.name,
+        params: JSON.parse(JSON.stringify(device.params)),
+        bypassed: device.bypassed,
+    };
+    // Insert after the selected device
+    const idx = chain.findIndex(d => d.id === selectedLayerId);
+    chain.splice(idx + 1, 0, clone);
+    selectedLayerId = clone.id;
+    pushHistory(`Duplicate ${device.name}`);
+    renderChain();
+    renderLayers();
+    schedulePreview();
+}
+
+function flattenChain() {
+    // Remove all bypassed effects
+    const removed = chain.filter(d => d.bypassed).length;
+    if (removed === 0) return;
+    chain = chain.filter(d => !d.bypassed);
+    pushHistory(`Flatten (removed ${removed})`);
+    renderChain();
+    renderLayers();
+    schedulePreview();
 }
 
 function renderChain() {
@@ -185,13 +357,13 @@ function renderChain() {
     rack.innerHTML = chain.map(device => {
         const def = effectDefs.find(e => e.name === device.name);
         const bypassClass = device.bypassed ? 'bypassed' : '';
+        const powerClass = device.bypassed ? 'off' : 'on';
 
         let paramsHtml = '';
         if (def) {
             for (const [key, spec] of Object.entries(def.params)) {
-                if (spec.type === 'string') continue; // Skip string params for now
+                if (spec.type === 'string') continue;
                 const value = device.params[key] ?? spec.default;
-                const displayVal = typeof value === 'number' ? value.toFixed(spec.type === 'float' ? 2 : 0) : value;
                 paramsHtml += createKnob(device.id, key, spec, value);
             }
         }
@@ -199,8 +371,9 @@ function renderChain() {
         return `
             <div class="device ${bypassClass}" data-device-id="${device.id}" draggable="true">
                 <div class="device-header">
-                    <button class="bypass-btn" onclick="toggleBypass(${device.id})" title="Bypass"></button>
-                    <span>${device.name}</span>
+                    ${gripHTML()}
+                    <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
+                    <span class="device-name">${device.name}</span>
                     <button class="remove-btn" onclick="removeFromChain(${device.id})" title="Remove">&times;</button>
                 </div>
                 <div class="device-params">
@@ -216,6 +389,110 @@ function renderChain() {
     setupDeviceReorder();
 }
 
+// ============ LAYERS PANEL (Photoshop-style) ============
+
+function renderLayers() {
+    const list = document.getElementById('layers-list');
+
+    // Layers are rendered top-to-bottom (last in chain = top layer, like Photoshop)
+    const reversed = [...chain].reverse();
+
+    list.innerHTML = reversed.map((device, i) => {
+        const layerNum = chain.length - i;
+        const selectedClass = device.id === selectedLayerId ? 'selected' : '';
+        const bypassedClass = device.bypassed ? 'bypassed-layer' : '';
+        const eyeClass = device.bypassed ? 'hidden' : '';
+        const eyeIcon = device.bypassed ? '&#9675;' : '&#9679;'; // hollow vs filled circle
+
+        return `
+            <div class="layer-item ${selectedClass} ${bypassedClass}"
+                 data-layer-id="${device.id}"
+                 onclick="selectLayer(${device.id})"
+                 draggable="true">
+                <span class="layer-eye ${eyeClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Show' : 'Hide'}">${eyeIcon}</span>
+                ${gripHTML()}
+                <span class="layer-name">${device.name}</span>
+                <span class="layer-index">${layerNum}</span>
+                <span class="layer-delete" onclick="event.stopPropagation(); removeFromChain(${device.id})" title="Delete">&times;</span>
+            </div>`;
+    }).join('');
+
+    if (chain.length === 0) {
+        list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:11px;">No effects added yet</div>';
+    }
+
+    // Setup layer drag reorder
+    setupLayerReorder();
+}
+
+function selectLayer(deviceId) {
+    selectedLayerId = deviceId;
+    renderLayers();
+}
+
+function setupLayerReorder() {
+    const items = document.querySelectorAll('.layer-item[draggable]');
+    items.forEach(item => {
+        item.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('layer-id', item.dataset.layerId);
+        });
+        item.addEventListener('dragover', e => {
+            e.preventDefault();
+            if (e.dataTransfer.types.includes('layer-id')) {
+                item.style.borderTopColor = 'var(--accent)';
+                item.style.borderTopWidth = '2px';
+            }
+        });
+        item.addEventListener('dragleave', () => {
+            item.style.borderTopColor = '';
+            item.style.borderTopWidth = '';
+        });
+        item.addEventListener('drop', e => {
+            item.style.borderTopColor = '';
+            item.style.borderTopWidth = '';
+            const fromId = parseInt(e.dataTransfer.getData('layer-id'));
+            const toId = parseInt(item.dataset.layerId);
+            if (!isNaN(fromId) && fromId !== toId) {
+                reorderChain(fromId, toId);
+            }
+        });
+    });
+}
+
+// ============ HISTORY PANEL (Photoshop-style) ============
+
+function renderHistory() {
+    const list = document.getElementById('history-list');
+
+    list.innerHTML = history.map((entry, i) => {
+        let cls = '';
+        if (i === historyIndex) cls = 'current';
+        else if (i > historyIndex) cls = 'future';
+
+        const time = entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        // Pick icon based on action
+        let icon = '+';
+        if (entry.action.startsWith('Remove')) icon = '-';
+        else if (entry.action.includes('Off') || entry.action.includes('On')) icon = '~';
+        else if (entry.action.startsWith('Reorder')) icon = '=';
+        else if (entry.action.startsWith('Duplicate')) icon = '++';
+        else if (entry.action.startsWith('Flatten')) icon = '[]';
+        else if (entry.action === 'Open') icon = '>';
+
+        return `
+            <div class="history-item ${cls}" onclick="jumpToHistory(${i})">
+                <span class="history-icon">${icon}</span>
+                <span class="history-text">${entry.action}</span>
+                <span class="history-time">${time}</span>
+            </div>`;
+    }).join('');
+
+    // Auto-scroll to current
+    const currentEl = list.querySelector('.current');
+    if (currentEl) currentEl.scrollIntoView({ block: 'nearest' });
+}
+
 // ============ MOOG KNOBS ============
 
 function createKnob(deviceId, paramName, spec, value) {
@@ -229,8 +506,8 @@ function createKnob(deviceId, paramName, spec, value) {
         normalized = (value - spec.min) / (spec.max - spec.min);
     }
 
-    const angle = -135 + normalized * 270; // -135° to +135°
-    const arcLen = 48 * Math.PI; // circumference approximation
+    const angle = -135 + normalized * 270; // -135 to +135
+    const arcLen = 48 * Math.PI;
     const dashLen = normalized * arcLen * 0.75;
 
     const displayVal = typeof value === 'number'
@@ -302,6 +579,14 @@ function setupKnobInteraction(knobEl) {
         document.removeEventListener('mouseup', onUp);
         document.removeEventListener('touchmove', onMove);
         document.removeEventListener('touchend', onUp);
+
+        // Push history after knob adjustment is done
+        const deviceId = parseInt(knobEl.dataset.device);
+        const paramName = knobEl.dataset.param;
+        const device = chain.find(d => d.id === deviceId);
+        if (device) {
+            pushHistory(`${device.name}: ${paramName}`);
+        }
     };
 
     const onDown = (e) => {
@@ -331,11 +616,10 @@ function setupKnobInteraction(knobEl) {
         updateKnobVisual(knobEl, defaultVal, spec.min ?? 0, spec.max ?? 1, spec.type);
         if (spec.type === 'xy') {
             device.params[paramName] = [defaultVal, 0];
-        } else if (spec.type === 'bool') {
-            device.params[paramName] = defaultVal;
         } else {
             device.params[paramName] = defaultVal;
         }
+        pushHistory(`Reset ${device.name}: ${paramName}`);
         schedulePreview();
     });
 }
@@ -392,7 +676,9 @@ function reorderChain(fromId, toId) {
 
     const [device] = chain.splice(fromIdx, 1);
     chain.splice(toIdx, 0, device);
+    pushHistory(`Reorder ${device.name}`);
     renderChain();
+    renderLayers();
     schedulePreview();
 }
 
@@ -435,30 +721,6 @@ function showPreview(dataUrl) {
 
 let originalPreviewSrc = null;
 let isShowingOriginal = false;
-
-document.addEventListener('keydown', e => {
-    if (e.code === 'Space' && videoLoaded && !isShowingOriginal) {
-        e.preventDefault();
-        isShowingOriginal = true;
-        const img = document.getElementById('preview-img');
-        originalPreviewSrc = img.src;
-        // Fetch raw frame without effects
-        fetch(`${API}/api/frame/${currentFrame}`)
-            .then(r => r.json())
-            .then(data => {
-                if (isShowingOriginal) img.src = data.preview;
-            });
-    }
-});
-
-document.addEventListener('keyup', e => {
-    if (e.code === 'Space' && isShowingOriginal) {
-        e.preventDefault();
-        isShowingOriginal = false;
-        const img = document.getElementById('preview-img');
-        if (originalPreviewSrc) img.src = originalPreviewSrc;
-    }
-});
 
 // ============ BOOT ============
 init();

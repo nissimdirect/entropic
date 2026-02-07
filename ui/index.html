@@ -17,6 +17,8 @@
             <span id="file-name">No file loaded</span>
         </div>
         <div class="transport">
+            <button onclick="undo()" title="Undo (Cmd+Z)">Undo</button>
+            <button onclick="redo()" title="Redo (Cmd+Shift+Z)">Redo</button>
             <button onclick="previewChain()" class="primary">Update Preview</button>
         </div>
     </div>
@@ -38,6 +40,28 @@
         <div id="frame-info"></div>
         <div id="frame-scrubber">
             <input type="range" id="frame-slider" min="0" max="100" value="0">
+        </div>
+    </div>
+
+    <!-- RIGHT SIDEBAR: Layers + History (Photoshop-style) -->
+    <div id="right-panel">
+        <div id="panel-tabs">
+            <button class="panel-tab active" data-tab="layers">Layers</button>
+            <button class="panel-tab" data-tab="history">History</button>
+        </div>
+
+        <!-- Layers Tab -->
+        <div id="layers-tab" class="tab-content active">
+            <div id="layers-list"></div>
+            <div id="layers-footer">
+                <button onclick="flattenChain()" title="Flatten visible">Flatten</button>
+                <button onclick="duplicateSelected()" title="Duplicate layer">Dup</button>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div id="history-tab" class="tab-content">
+            <div id="history-list"></div>
         </div>
     </div>
 
