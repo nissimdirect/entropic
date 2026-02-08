@@ -15,6 +15,7 @@ Usage:
 
 import sys
 import os
+import re
 import subprocess
 import argparse
 
@@ -32,9 +33,57 @@ from effects import list_effects, search_effects, list_categories, EFFECTS, CATE
 
 __version__ = "0.2.0"
 
+MAX_NAME_LEN = 100
+MAX_SEARCH_LEN = 200
+
+
+def _sanitize_name(name: str) -> str:
+    """Sanitize user-provided names for safe filesystem use."""
+    if not name:
+        return name
+    safe = re.sub(r'[^\w\s-]', '_', name)
+    safe = safe.strip()[:MAX_NAME_LEN]
+    if not safe or safe in ('.', '..'):
+        print(f"Invalid name: {name}", file=sys.stderr)
+        sys.exit(1)
+    return safe
+
+
+def _parse_param_value(val: str):
+    """Safely parse a CLI parameter value (number, tuple, or string)."""
+    # Tuple: "(10, 0)" → (10, 0)
+    if val.startswith('(') and val.endswith(')'):
+        parts = val.strip('()').split(',')
+        if len(parts) > 10:
+            raise ValueError(f"Tuple too long (max 10 elements): {val}")
+        parsed = []
+        for p in parts:
+            p = p.strip()
+            if not p:
+                raise ValueError(f"Empty tuple element in: {val}")
+            f = float(p)
+            if f != f or f == float('inf') or f == float('-inf'):
+                raise ValueError(f"NaN/Inf not allowed: {val}")
+            parsed.append(f)
+        return tuple(parsed)
+
+    # Float
+    if '.' in val or 'e' in val.lower():
+        f = float(val)
+        if f != f or f == float('inf') or f == float('-inf'):
+            raise ValueError(f"NaN/Inf not allowed: {val}")
+        return f
+
+    # Integer
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return val  # Keep as string
+
 
 def cmd_new(args):
     """Create a new project."""
+    args.name = _sanitize_name(args.name)
     # Preflight: validate source video before creating project
     info = preflight(args.source)
     print(f"Source validated: {info['size_mb']:.1f}MB {info['extension']}")
@@ -66,20 +115,15 @@ def cmd_apply(args):
     if args.params:
         for p in args.params:
             key, val = p.split("=", 1)
-            # Try to parse as number or tuple
             try:
-                if ',' in val and val.startswith('('):
-                    # Tuple: "(10, 0)" → (10, 0)
-                    parts = val.strip('()').split(',')
-                    val = tuple(float(p.strip()) for p in parts)
-                elif '.' in val:
-                    val = float(val)
-                else:
-                    val = int(val)
-            except (ValueError, TypeError):
-                pass  # Keep as string
+                val = _parse_param_value(val)
+            except ValueError as e:
+                print(f"Invalid param {key}: {e}", file=sys.stderr)
+                return
             params[key] = val
 
+    if args.name:
+        args.name = _sanitize_name(args.name)
     effects = [{"name": args.effect, "params": params}]
     recipe = create_recipe(args.project, effects, name=args.name)
     print(f"Created recipe {recipe['id']}: {recipe['name']}")
@@ -146,21 +190,17 @@ def cmd_favorite(args):
 
 def cmd_branch(args):
     """Branch a recipe with modifications."""
+    if args.name:
+        args.name = _sanitize_name(args.name)
     overrides = {}
     if args.params:
         for p in args.params:
             key, val = p.split("=", 1)
             try:
-                if ',' in val and val.startswith('('):
-                    # Tuple: "(10, 0)" → (10, 0)
-                    parts = val.strip('()').split(',')
-                    val = tuple(float(p.strip()) for p in parts)
-                elif '.' in val:
-                    val = float(val)
-                else:
-                    val = int(val)
-            except (ValueError, TypeError):
-                pass  # Keep as string
+                val = _parse_param_value(val)
+            except ValueError as e:
+                print(f"Invalid param {key}: {e}", file=sys.stderr)
+                return
             overrides["0"] = overrides.get("0", {})
             overrides["0"][key] = val
 

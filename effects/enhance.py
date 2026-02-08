@@ -29,6 +29,13 @@ def solarize(
     return np.array(result)
 
 
+def _clamp_rgb(color: tuple) -> tuple:
+    """Clamp an RGB tuple to valid 0-255 range."""
+    if not isinstance(color, (tuple, list)) or len(color) != 3:
+        return (128, 128, 128)  # Safe default
+    return tuple(max(0, min(255, int(c))) for c in color)
+
+
 def duotone(
     frame: np.ndarray,
     shadow_color: tuple = (0, 0, 80),
@@ -47,6 +54,8 @@ def duotone(
     Returns:
         Duotone frame.
     """
+    shadow_color = _clamp_rgb(shadow_color)
+    highlight_color = _clamp_rgb(highlight_color)
     img = Image.fromarray(frame)
     gray = ImageOps.grayscale(img)
     result = ImageOps.colorize(gray, black=shadow_color, white=highlight_color)

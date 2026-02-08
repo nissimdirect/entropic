@@ -320,8 +320,10 @@ def list_categories() -> list[str]:
     return list(CATEGORIES.keys())
 
 
-def search_effects(query: str) -> list[dict]:
+def search_effects(query: str, max_query_len: int = 200) -> list[dict]:
     """Search effects by name or description substring."""
+    if len(query) > max_query_len:
+        raise ValueError(f"Search query too long (max {max_query_len} chars)")
     query_lower = query.lower()
     results = []
     for name, entry in EFFECTS.items():
