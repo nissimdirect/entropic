@@ -3,7 +3,14 @@
 // Layers panel (Photoshop), History panel (Photoshop), Ableton on/off toggles
 
 const API = '';
+
+// HTML entity escaping to prevent XSS in innerHTML
+function esc(str) {
+    if (str == null) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 let effectDefs = [];      // Effect definitions from server
+let controlMap = null;    // UI control type mapping (loaded from control-map.json)
 let chain = [];           // Current effect chain: [{name, params, bypassed, id}, ...]
 let videoLoaded = false;
 let currentFrame = 0;
@@ -11,6 +18,7 @@ let totalFrames = 100;
 let deviceIdCounter = 0;
 let previewDebounce = null;
 let selectedLayerId = null;
+let mixLevel = 1.0;              // Wet/dry mix: 0.0 = original, 1.0 = full effect
 
 // ============ HISTORY (Undo/Redo) ============
 
@@ -77,8 +85,14 @@ function gripHTML() {
 // ============ INIT ============
 
 async function init() {
-    const res = await fetch(`${API}/api/effects`);
-    effectDefs = await res.json();
+    const [effectsRes, controlsRes] = await Promise.all([
+        fetch(`${API}/api/effects`),
+        fetch('/static/control-map.json').catch(() => null),
+    ]);
+    effectDefs = await effectsRes.json();
+    if (controlsRes && controlsRes.ok) {
+        controlMap = await controlsRes.json();
+    }
     renderBrowser();
     setupDragDrop();
     setupFileInput();
@@ -95,7 +109,9 @@ function renderBrowser() {
     const list = document.getElementById('effect-list');
 
     const categories = {
-        'Glitch': ['pixelsort', 'channelshift', 'scanlines', 'bitcrush'],
+        'Glitch': ['pixelsort', 'channelshift', 'displacement', 'bitcrush'],
+        'Distortion': ['wave', 'mirror', 'chromatic'],
+        'Texture': ['scanlines', 'vhs', 'noise', 'blur', 'sharpen', 'edges', 'posterize'],
         'Color': ['hueshift', 'contrast', 'saturation', 'exposure', 'invert', 'temperature'],
     };
 
@@ -145,7 +161,7 @@ function setupDragDrop() {
         e.preventDefault();
         canvas.classList.remove('drag-over');
         const files = e.dataTransfer.files;
-        if (files.length > 0 && files[0].type.startsWith('video/')) {
+        if (files.length > 0) {
             uploadVideo(files[0]);
         }
     });
@@ -170,7 +186,31 @@ function setupFileInput() {
     });
 }
 
+const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
+
 async function uploadVideo(file) {
+    // Client-side validation
+    if (file.size > MAX_FILE_SIZE) {
+        alert(`File too large (${(file.size / 1024 / 1024).toFixed(0)}MB). Maximum: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
+        return;
+    }
+    const ext = file.name.split('.').pop().toLowerCase();
+    const allowed = [
+        // Video
+        'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'wmv', 'flv', 'ts', 'mts',
+        // Image
+        'png', 'jpg', 'jpeg', 'bmp', 'tiff', 'tif', 'webp',
+        // GIF
+        'gif',
+        // Creative raw interpretation
+        'pdf', 'zip', 'txt', 'csv', 'json', 'xml', 'html', 'doc', 'docx',
+        'wav', 'mp3', 'aiff', 'flac', 'psd', 'ai', 'svg',
+    ];
+    if (!allowed.includes(ext)) {
+        alert(`Unsupported file type: .${ext}\nAllowed: ${allowed.join(', ')}`);
+        return;
+    }
+
     document.getElementById('file-name').textContent = file.name;
     document.getElementById('empty-state').style.display = 'none';
 
@@ -203,7 +243,12 @@ function updateFrameInfo(info) {
     const w = info.width || '?';
     const h = info.height || '?';
     const fps = info.fps ? info.fps.toFixed(1) : '?';
-    el.textContent = `${w}x${h} | ${fps}fps | Frame ${currentFrame}/${totalFrames}`;
+    let label = `${w}x${h} | ${fps}fps | Frame ${currentFrame}/${totalFrames}`;
+    const src = info.source_type;
+    if (src === 'image') label += ' | Still Image';
+    else if (src === 'gif') label += ' | GIF';
+    else if (src === 'raw_interpretation') label += ' | Raw Data Viz';
+    el.textContent = label;
 }
 
 // ============ PANEL TABS ============
@@ -367,9 +412,10 @@ function renderChain() {
         let paramsHtml = '';
         if (def) {
             for (const [key, spec] of Object.entries(def.params)) {
-                if (spec.type === 'string') continue;
                 const value = device.params[key] ?? spec.default;
-                paramsHtml += createKnob(device.id, key, spec, value);
+                const ctrlSpec = controlMap?.effects?.[device.name]?.params?.[key];
+                const ctrlType = ctrlSpec?.control_type || (spec.type === 'string' ? 'dropdown' : spec.type === 'bool' ? 'toggle' : 'knob');
+                paramsHtml += createControl(device.id, key, spec, value, ctrlType, ctrlSpec);
             }
         }
 
@@ -379,7 +425,7 @@ function renderChain() {
                 <div class="device-header">
                     ${gripHTML()}
                     <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
-                    <span class="device-name">${device.name}</span>
+                    <span class="device-name">${esc(device.name)}</span>
                     <button class="more-btn" onclick="event.stopPropagation(); deviceContextMenu(event, ${device.id})" title="More options">&#8943;</button>
                 </div>
                 <div class="device-params">
@@ -388,8 +434,10 @@ function renderChain() {
             </div>`;
     }).join('');
 
-    // Re-attach knob event listeners
+    // Re-attach control event listeners
     document.querySelectorAll('.knob').forEach(setupKnobInteraction);
+    document.querySelectorAll('.param-dropdown').forEach(setupDropdownInteraction);
+    document.querySelectorAll('.param-toggle').forEach(setupToggleInteraction);
 
     // Setup device reordering
     setupDeviceReorder();
@@ -418,7 +466,7 @@ function renderLayers() {
                  draggable="true">
                 <span class="layer-eye ${eyeClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Show' : 'Hide'}">${eyeIcon}</span>
                 ${gripHTML()}
-                <span class="layer-name">${device.name}</span>
+                <span class="layer-name">${esc(device.name)}</span>
                 <span class="layer-index">${layerNum}</span>
                 <button class="more-btn" onclick="event.stopPropagation(); layerContextMenu(event, ${device.id})" title="More">&#8943;</button>
             </div>`;
@@ -502,7 +550,82 @@ function renderHistory() {
 
 // ============ MOOG KNOBS ============
 
-function createKnob(deviceId, paramName, spec, value) {
+function createControl(deviceId, paramName, spec, value, ctrlType, ctrlSpec) {
+    const label = ctrlSpec?.label || paramName;
+    if (ctrlType === 'dropdown') {
+        return createDropdown(deviceId, paramName, spec, value, label, ctrlSpec);
+    } else if (ctrlType === 'toggle') {
+        return createToggle(deviceId, paramName, spec, value, label);
+    } else {
+        return createKnob(deviceId, paramName, spec, value, label);
+    }
+}
+
+function createDropdown(deviceId, paramName, spec, value, label, ctrlSpec) {
+    const options = ctrlSpec?.options || spec.options || [];
+    let optionsHtml = '';
+    // If we have options from the control map
+    if (options.length > 0) {
+        optionsHtml = options.map(o =>
+            `<option value="${o}" ${o === value ? 'selected' : ''}>${o}</option>`
+        ).join('');
+    } else if (typeof value === 'string') {
+        // Fallback: just show current value
+        optionsHtml = `<option value="${value}" selected>${value}</option>`;
+    }
+    return `
+        <div class="param-control dropdown-container">
+            <label>${label}</label>
+            <select class="param-dropdown" data-device="${deviceId}" data-param="${paramName}">
+                ${optionsHtml}
+            </select>
+        </div>`;
+}
+
+function createToggle(deviceId, paramName, spec, value, label) {
+    const checked = value ? 'checked' : '';
+    return `
+        <div class="param-control toggle-container">
+            <label>${label}</label>
+            <button class="param-toggle ${value ? 'on' : ''}" data-device="${deviceId}" data-param="${paramName}"
+                    data-value="${value ? '1' : '0'}">
+                ${value ? 'ON' : 'OFF'}
+            </button>
+        </div>`;
+}
+
+function setupDropdownInteraction(selectEl) {
+    selectEl.addEventListener('change', () => {
+        const deviceId = parseInt(selectEl.dataset.device);
+        const paramName = selectEl.dataset.param;
+        const device = chain.find(d => d.id === deviceId);
+        if (device) {
+            device.params[paramName] = selectEl.value;
+            pushHistory(`${device.name}: ${paramName}`);
+            schedulePreview();
+        }
+    });
+}
+
+function setupToggleInteraction(btnEl) {
+    btnEl.addEventListener('click', () => {
+        const deviceId = parseInt(btnEl.dataset.device);
+        const paramName = btnEl.dataset.param;
+        const device = chain.find(d => d.id === deviceId);
+        if (device) {
+            const newVal = !device.params[paramName];
+            device.params[paramName] = newVal;
+            btnEl.dataset.value = newVal ? '1' : '0';
+            btnEl.classList.toggle('on', newVal);
+            btnEl.textContent = newVal ? 'ON' : 'OFF';
+            pushHistory(`${device.name}: ${paramName}`);
+            schedulePreview();
+        }
+    });
+}
+
+function createKnob(deviceId, paramName, spec, value, label) {
+    label = label || paramName;
     let normalized;
     if (spec.type === 'bool') {
         normalized = value ? 1 : 0;
@@ -523,7 +646,7 @@ function createKnob(deviceId, paramName, spec, value) {
 
     return `
         <div class="knob-container">
-            <label>${paramName}</label>
+            <label>${label}</label>
             <div class="knob" data-device="${deviceId}" data-param="${paramName}"
                  data-min="${spec.min}" data-max="${spec.max}" data-type="${spec.type}"
                  data-value="${typeof value === 'object' ? value[0] : value}">
@@ -708,7 +831,7 @@ async function previewChain() {
         const res = await fetch(`${API}/api/preview`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ effects: activeEffects, frame_number: currentFrame }),
+            body: JSON.stringify({ effects: activeEffects, frame_number: currentFrame, mix: mixLevel }),
         });
         const data = await res.json();
         showPreview(data.preview);
@@ -803,7 +926,7 @@ function deviceContextMenu(e, deviceId) {
     const idx = chain.findIndex(d => d.id === deviceId);
     showContextMenu(e, [
         { label: device?.bypassed ? 'Turn On' : 'Turn Off', action: 'bypass', shortcut: 'Click power' },
-        { label: 'Solo (mute others)', action: 'solo' },
+        { label: 'Isolate (hide others)', action: 'solo' },
         '---',
         { label: 'Duplicate', action: 'duplicate', shortcut: 'Cmd+D' },
         { label: 'Reset Parameters', action: 'resetParams' },
@@ -820,7 +943,7 @@ function layerContextMenu(e, deviceId) {
     const device = chain.find(d => d.id === deviceId);
     showContextMenu(e, [
         { label: device?.bypassed ? 'Show Layer' : 'Hide Layer', action: 'bypass' },
-        { label: 'Solo Layer', action: 'solo' },
+        { label: 'Isolate Layer', action: 'solo' },
         '---',
         { label: 'Duplicate Layer', action: 'duplicate' },
         { label: 'Reset Parameters', action: 'resetParams' },
@@ -847,7 +970,7 @@ function moveDevice(deviceId, direction) {
 function soloDevice(deviceId) {
     chain.forEach(d => { d.bypassed = d.id !== deviceId; });
     const device = chain.find(d => d.id === deviceId);
-    pushHistory(`Solo ${device?.name}`);
+    pushHistory(`Isolate ${device?.name}`);
     renderChain();
     renderLayers();
     schedulePreview();
@@ -870,10 +993,259 @@ function resetDeviceParams(deviceId) {
     schedulePreview();
 }
 
+// ============ RANDOMIZE ============
+
+async function randomizeChain() {
+    try {
+        const res = await fetch(`${API}/api/randomize`);
+        const data = await res.json();
+        // Clear chain and add random effects
+        chain = [];
+        for (const eff of data.effects) {
+            const def = effectDefs.find(e => e.name === eff.name);
+            if (!def) continue;
+            const device = {
+                id: deviceIdCounter++,
+                name: eff.name,
+                params: eff.params,
+                bypassed: false,
+            };
+            chain.push(device);
+        }
+        selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
+        pushHistory('Randomize');
+        renderChain();
+        renderLayers();
+        schedulePreview();
+    } catch (err) {
+        console.error('Randomize failed:', err);
+    }
+}
+
+// ============ WET/DRY MIX ============
+
+function onMixChange(value) {
+    mixLevel = parseInt(value) / 100;
+    document.getElementById('mix-value').textContent = `${parseInt(value)}%`;
+    schedulePreview();
+}
+
+// ============ RENDER / EXPORT ============
+
+function renderVideo() {
+    if (!videoLoaded) { alert('Load a file first.'); return; }
+    if (chain.length === 0) { alert('Add at least one effect.'); return; }
+    openExportDialog();
+}
+
+function openExportDialog() {
+    document.getElementById('export-overlay').style.display = 'flex';
+    document.getElementById('export-mix').value = mixLevel * 100;
+    document.getElementById('export-mix-val').textContent = Math.round(mixLevel * 100) + '%';
+    onExportFormatChange();
+}
+
+function closeExportDialog() {
+    document.getElementById('export-overlay').style.display = 'none';
+}
+
+function onExportFormatChange() {
+    const fmt = document.getElementById('export-format').value;
+    document.getElementById('h264-quality-row').style.display = (fmt === 'mp4' || fmt === 'webm') ? 'flex' : 'none';
+    document.getElementById('h264-preset-row').style.display = fmt === 'mp4' ? 'flex' : 'none';
+    document.getElementById('prores-row').style.display = fmt === 'mov' ? 'flex' : 'none';
+    document.getElementById('gif-row').style.display = fmt === 'gif' ? 'flex' : 'none';
+}
+
+function onExportResChange() {
+    const val = document.getElementById('export-resolution').value;
+    document.getElementById('custom-dims-row').style.display = val === 'custom' ? 'flex' : 'none';
+}
+
+async function startExport() {
+    const btn = document.getElementById('export-go-btn');
+    const origText = btn.textContent;
+    btn.textContent = 'Exporting...';
+    btn.disabled = true;
+
+    const effects = chain.filter(d => !d.bypassed).map(d => ({
+        name: d.name,
+        params: { ...d.params },
+    }));
+
+    const fmt = document.getElementById('export-format').value;
+    const resPre = document.getElementById('export-resolution').value;
+    const scaleFactor = document.getElementById('export-scale').value;
+
+    const settings = {
+        format: fmt,
+        effects,
+        mix: parseInt(document.getElementById('export-mix').value) / 100,
+        audio_mode: document.getElementById('export-audio').value,
+        scale_algorithm: document.getElementById('export-algo').value,
+    };
+
+    // Resolution
+    if (resPre === 'custom') {
+        settings.width = parseInt(document.getElementById('export-width').value) || null;
+        settings.height = parseInt(document.getElementById('export-height').value) || null;
+    } else if (resPre !== 'source') {
+        settings.resolution_preset = resPre;
+    }
+
+    // Scale factor overrides resolution
+    if (scaleFactor) {
+        settings.scale_factor = parseFloat(scaleFactor);
+    }
+
+    // FPS
+    const fpsVal = document.getElementById('export-fps').value;
+    if (fpsVal) settings.fps_preset = fpsVal;
+
+    // Format-specific
+    if (fmt === 'mp4') {
+        settings.h264_crf = parseInt(document.getElementById('export-crf').value);
+        settings.h264_preset = document.getElementById('export-h264-preset').value;
+    } else if (fmt === 'mov') {
+        settings.prores_profile = document.getElementById('export-prores').value;
+    } else if (fmt === 'gif') {
+        settings.gif_colors = parseInt(document.getElementById('export-gif-colors').value);
+    } else if (fmt === 'webm') {
+        settings.webm_crf = parseInt(document.getElementById('export-crf').value);
+    }
+
+    try {
+        const res = await fetch(`${API}/api/export`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings),
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            closeExportDialog();
+            const info = data.size_mb
+                ? `Size: ${data.size_mb}MB | ${data.dimensions} | ${data.format}`
+                : `Format: ${data.format} | ${data.dimensions} | ${data.frames} frames`;
+            alert(`Export complete!\nFile: ${data.path}\n${info}`);
+        } else {
+            alert(`Export failed: ${data.detail || 'Unknown error'}`);
+        }
+    } catch (err) {
+        alert(`Export error: ${err.message}`);
+    } finally {
+        btn.textContent = origText;
+        btn.disabled = false;
+    }
+}
+
 // ============ A/B COMPARE (Space Bar) ============
 
 let originalPreviewSrc = null;
 let isShowingOriginal = false;
+
+// ============ PRESETS ============
+
+let presets = [];
+
+function switchBrowserTab(tab) {
+    document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.browser-panel').forEach(p => p.classList.remove('active'));
+    document.querySelector(`.browser-tab[data-btab="${tab}"]`).classList.add('active');
+    document.getElementById(`${tab}-panel`).classList.add('active');
+    if (tab === 'presets' && presets.length === 0) loadPresets();
+}
+
+async function loadPresets() {
+    try {
+        const res = await fetch(`${API}/api/presets`);
+        const data = await res.json();
+        presets = data.presets || [];
+        renderPresets();
+    } catch (err) {
+        console.error('Failed to load presets:', err);
+    }
+}
+
+function renderPresets() {
+    const list = document.getElementById('preset-list');
+    if (presets.length === 0) {
+        list.innerHTML = '<div style="padding:12px;color:var(--text-dim);font-size:11px;">No presets yet. Add effects and save a preset.</div>';
+        return;
+    }
+
+    // Group by category
+    const grouped = {};
+    for (const p of presets) {
+        const cat = p.category || 'Uncategorized';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(p);
+    }
+
+    let html = '';
+    for (const [cat, items] of Object.entries(grouped)) {
+        html += `<div class="preset-cat-header">${esc(cat)}</div>`;
+        for (const p of items) {
+            const tags = (p.tags || []).map(t => `<span class="preset-tag">${esc(t)}</span>`).join('');
+            html += `
+                <div class="preset-item" onclick="loadPreset(${JSON.stringify(JSON.stringify(p.effects))})" title="${esc(p.description || '')}">
+                    <div class="preset-name">${esc(p.name)}</div>
+                    <div class="preset-desc">${esc(p.description || '')}</div>
+                    ${tags ? `<div class="preset-tags">${tags}</div>` : ''}
+                </div>`;
+        }
+    }
+    list.innerHTML = html;
+}
+
+function loadPreset(effectsJson) {
+    const effects = JSON.parse(effectsJson);
+    chain = [];
+    for (const eff of effects) {
+        const def = effectDefs.find(e => e.name === eff.name);
+        if (!def) continue;
+        const params = {};
+        for (const [k, v] of Object.entries(def.params)) {
+            params[k] = eff.params && eff.params[k] !== undefined ? eff.params[k] : v.default;
+        }
+        chain.push({
+            id: ++deviceIdCounter,
+            name: eff.name,
+            params,
+            bypassed: false,
+        });
+    }
+    pushHistory('Load Preset');
+    renderChain();
+    renderLayers();
+    schedulePreview();
+}
+
+async function saveCurrentAsPreset() {
+    if (chain.length === 0) { alert('Add effects to the chain first.'); return; }
+    const name = prompt('Preset name:');
+    if (!name) return;
+    const desc = prompt('Description (optional):') || '';
+
+    const effects = chain.filter(d => !d.bypassed).map(d => ({
+        name: d.name,
+        params: { ...d.params },
+    }));
+
+    try {
+        const res = await fetch(`${API}/api/presets`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, effects, description: desc, tags: [] }),
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            await loadPresets();
+            alert(`Preset "${name}" saved.`);
+        }
+    } catch (err) {
+        alert(`Failed to save preset: ${err.message}`);
+    }
+}
 
 // ============ BOOT ============
 init();

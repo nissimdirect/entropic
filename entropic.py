@@ -15,6 +15,7 @@ Usage:
 
 import sys
 import os
+import subprocess
 import argparse
 
 # Add project root to path so imports work
@@ -26,11 +27,17 @@ from core.recipe import (
     branch_recipe, favorite_recipe, recipe_tree,
 )
 from core.preview import render_recipe, preview_frame, render_sample_frames
-from effects import list_effects, EFFECTS
+from core.safety import preflight, SafetyError
+from effects import list_effects, search_effects, list_categories, EFFECTS, CATEGORIES
+
+__version__ = "0.2.0"
 
 
 def cmd_new(args):
     """Create a new project."""
+    # Preflight: validate source video before creating project
+    info = preflight(args.source)
+    print(f"Source validated: {info['size_mb']:.1f}MB {info['extension']}")
     path = create_project(args.name, args.source)
     print(f"Created project: {args.name}")
     print(f"  Location: {path}")
@@ -39,6 +46,21 @@ def cmd_new(args):
 
 def cmd_apply(args):
     """Apply an effect and create a recipe."""
+    # Validate effect name before proceeding
+    if args.effect not in EFFECTS:
+        matches = [n for n in EFFECTS if args.effect in n]
+        if matches:
+            print(f"Unknown effect: {args.effect}. Did you mean: {', '.join(matches)}?")
+        else:
+            print(f"Unknown effect: {args.effect}. Use 'entropic list-effects' to see all.")
+        return
+
+    # Show param hints when no --params given
+    if not args.params:
+        entry = EFFECTS[args.effect]
+        params_str = ", ".join(f"{k}={v}" for k, v in entry["params"].items())
+        print(f"Using defaults: {params_str}")
+
     # Build params from extra args
     params = {}
     if args.params:
@@ -46,9 +68,16 @@ def cmd_apply(args):
             key, val = p.split("=", 1)
             # Try to parse as number or tuple
             try:
-                val = __import__('ast').literal_eval(val)
-            except Exception:
-                pass
+                if ',' in val and val.startswith('('):
+                    # Tuple: "(10, 0)" → (10, 0)
+                    parts = val.strip('()').split(',')
+                    val = tuple(float(p.strip()) for p in parts)
+                elif '.' in val:
+                    val = float(val)
+                else:
+                    val = int(val)
+            except (ValueError, TypeError):
+                pass  # Keep as string
             params[key] = val
 
     effects = [{"name": args.effect, "params": params}]
@@ -62,7 +91,7 @@ def cmd_apply(args):
 
     # Open preview
     if sys.platform == "darwin":
-        os.system(f'open "{output}"')
+        subprocess.run(["open", str(output)])
 
 
 def cmd_preview(args):
@@ -70,7 +99,7 @@ def cmd_preview(args):
     path = preview_frame(args.project, args.recipe_id, frame_number=args.frame)
     print(f"Preview: {path}")
     if sys.platform == "darwin":
-        os.system(f'open "{path}"')
+        subprocess.run(["open", str(path)])
 
 
 def cmd_render(args):
@@ -122,9 +151,16 @@ def cmd_branch(args):
         for p in args.params:
             key, val = p.split("=", 1)
             try:
-                val = __import__('ast').literal_eval(val)
-            except Exception:
-                pass
+                if ',' in val and val.startswith('('):
+                    # Tuple: "(10, 0)" → (10, 0)
+                    parts = val.strip('()').split(',')
+                    val = tuple(float(p.strip()) for p in parts)
+                elif '.' in val:
+                    val = float(val)
+                else:
+                    val = int(val)
+            except (ValueError, TypeError):
+                pass  # Keep as string
             overrides["0"] = overrides.get("0", {})
             overrides["0"][key] = val
 
@@ -133,13 +169,86 @@ def cmd_branch(args):
 
 
 def cmd_list_effects(args):
-    """List all available effects."""
-    effects = list_effects()
-    print("Available effects:")
-    for e in effects:
-        params_str = ", ".join(f"{k}={v}" for k, v in e["params"].items())
-        print(f"  {e['name']:15s} — {e['description']}")
-        print(f"  {'':15s}   Params: {params_str}")
+    """List all available effects, grouped by category."""
+    category_filter = getattr(args, "category", None)
+    compact = getattr(args, "compact", False)
+
+    if category_filter:
+        effects = list_effects(category=category_filter)
+        if not effects:
+            valid = ", ".join(list_categories())
+            print(f"Unknown category: {category_filter}. Available: {valid}")
+            return
+        print(f"\n  {CATEGORIES.get(category_filter, category_filter.upper())} ({len(effects)} effects)")
+        print(f"  {'—' * 50}")
+        for e in effects:
+            print(f"    {e['name']:15s} — {e['description']}")
+            if not compact:
+                params_str = ", ".join(f"{k}={v}" for k, v in e["params"].items())
+                print(f"    {'':15s}   Params: {params_str}")
+        print()
+        return
+
+    # Group by category
+    total = 0
+    for cat_key, cat_label in CATEGORIES.items():
+        effects = list_effects(category=cat_key)
+        if not effects:
+            continue
+        total += len(effects)
+        print(f"\n  {cat_label} ({len(effects)})")
+        print(f"  {'—' * 50}")
+        for e in effects:
+            print(f"    {e['name']:15s} — {e['description']}")
+            if not compact:
+                params_str = ", ".join(f"{k}={v}" for k, v in e["params"].items())
+                print(f"    {'':15s}   Params: {params_str}")
+
+    print(f"\n  Total: {total} effects across {len(CATEGORIES)} categories")
+    print(f"  Use --category <name> to filter. Use --compact for names only.")
+    print(f"  Use 'entropic info <effect>' for details.\n")
+
+
+def cmd_info(args):
+    """Show detailed info about a single effect."""
+    name = args.effect_name
+    if name not in EFFECTS:
+        # Fuzzy match attempt
+        matches = [n for n in EFFECTS if name in n]
+        if matches:
+            print(f"Unknown effect: {name}. Did you mean: {', '.join(matches)}?")
+        else:
+            print(f"Unknown effect: {name}. Use 'entropic list-effects' to see all.")
+        return
+
+    entry = EFFECTS[name]
+    cat = entry.get("category", "other")
+    print(f"\n  {name}")
+    print(f"  {'—' * 40}")
+    print(f"  Category:    {CATEGORIES.get(cat, cat).upper()}")
+    print(f"  Description: {entry['description']}")
+    print(f"\n  Parameters:")
+    for k, v in entry["params"].items():
+        print(f"    {k:20s} = {v}")
+    print(f"\n  All effects support 'mix' param (0.0-1.0) for dry/wet blend.")
+    print(f"\n  Example:")
+    params_example = " ".join(f"--params {k}={v}" for k, v in list(entry["params"].items())[:2])
+    print(f"    entropic apply myproject --effect {name} {params_example}")
+    print()
+
+
+def cmd_search(args):
+    """Search effects by name or description."""
+    results = search_effects(args.query)
+    if not results:
+        print(f"No effects matching '{args.query}'.")
+        return
+    print(f"\n  Results for '{args.query}' ({len(results)} found):")
+    print(f"  {'—' * 50}")
+    for e in results:
+        cat = CATEGORIES.get(e["category"], e["category"]).upper()
+        print(f"    {e['name']:15s} [{cat:10s}] — {e['description']}")
+    print()
 
 
 def cmd_list_projects(args):
@@ -163,6 +272,7 @@ def main():
         prog="entropic",
         description="Entropic — Video Glitch Engine by PopChaos Labs",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     # new
@@ -210,7 +320,17 @@ def main():
     p.add_argument("--params", nargs="*", help="Param overrides as key=value pairs")
 
     # list-effects
-    sub.add_parser("list-effects", help="List all available effects")
+    p = sub.add_parser("list-effects", help="List all available effects")
+    p.add_argument("--category", choices=list_categories(), help="Filter by category")
+    p.add_argument("--compact", action="store_true", help="Compact view (names only)")
+
+    # info
+    p = sub.add_parser("info", help="Show detailed info about an effect")
+    p.add_argument("effect_name", help="Effect name")
+
+    # search
+    p = sub.add_parser("search", help="Search effects by name or description")
+    p.add_argument("query", help="Search term")
 
     # projects
     sub.add_parser("projects", help="List all projects")
@@ -230,6 +350,8 @@ def main():
         "favorite": cmd_favorite,
         "branch": cmd_branch,
         "list-effects": cmd_list_effects,
+        "info": cmd_info,
+        "search": cmd_search,
         "projects": cmd_list_projects,
         "ui": cmd_ui,
     }

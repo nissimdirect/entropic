@@ -20,6 +20,12 @@ tests/output/
 # Entropic project data (user-specific)
 .entropic/
 
+# Renders output
+renders/
+
+# Sample videos (large binaries)
+samples/
+
 # Temp
 *.tmp
 *.swp

@@ -24,6 +24,10 @@ def scanlines(frame: np.ndarray, line_width: int = 2, opacity: float = 0.3,
     result = frame.astype(np.float32)
     h, w, _ = result.shape
 
+    # Clamp parameters to prevent crashes
+    line_width = max(1, int(line_width))
+    opacity = max(0.0, min(1.0, float(opacity)))
+
     line_color = np.array(color, dtype=np.float32)
 
     # Generate scan line pattern

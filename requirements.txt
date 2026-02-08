@@ -1,0 +1,6 @@
+# Entropic — Video Glitch Engine
+# Pin major.minor to avoid breaking changes
+
+numpy>=2.0,<3.0
+Pillow>=10.0,<12.0
+opencv-python>=4.8,<5.0

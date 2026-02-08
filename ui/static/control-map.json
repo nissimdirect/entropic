@@ -1,0 +1,572 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "description": "Entropic UI control type mapping. Maps every effect parameter to its optimal UI widget.",
+    "generated": "2026-02-07"
+  },
+  "categories": {
+    "glitch": {
+      "icon": "#",
+      "label": "Glitch",
+      "order": 1,
+      "effects": ["pixelsort", "channelshift", "displacement", "bitcrush"]
+    },
+    "distortion": {
+      "icon": "~",
+      "label": "Distortion",
+      "order": 2,
+      "effects": ["wave", "mirror", "chromatic"]
+    },
+    "texture": {
+      "icon": ".:.",
+      "label": "Texture",
+      "order": 3,
+      "effects": ["scanlines", "vhs", "noise", "blur", "sharpen", "edges", "posterize"]
+    },
+    "color": {
+      "icon": "@",
+      "label": "Color",
+      "order": 4,
+      "effects": ["hueshift", "contrast", "saturation", "exposure", "invert", "temperature"]
+    }
+  },
+  "effects": {
+    "pixelsort": {
+      "category": "glitch",
+      "params": {
+        "threshold": {
+          "control_type": "knob",
+          "label": "Threshold",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.5,
+          "data_type": "float",
+          "advanced": false
+        },
+        "sort_by": {
+          "control_type": "dropdown",
+          "label": "Sort By",
+          "options": ["brightness", "hue", "saturation"],
+          "default": "brightness",
+          "data_type": "string",
+          "advanced": false
+        },
+        "direction": {
+          "control_type": "dropdown",
+          "label": "Direction",
+          "options": ["horizontal", "vertical"],
+          "default": "horizontal",
+          "data_type": "string",
+          "advanced": false
+        }
+      }
+    },
+    "channelshift": {
+      "category": "glitch",
+      "params": {
+        "r_offset": {
+          "control_type": "xy-pad",
+          "label": "Red Offset",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": [10, 0],
+          "data_type": "xy",
+          "advanced": false,
+          "tint": "#ff4444"
+        },
+        "g_offset": {
+          "control_type": "xy-pad",
+          "label": "Green Offset",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": [0, 0],
+          "data_type": "xy",
+          "advanced": false,
+          "tint": "#44ff44"
+        },
+        "b_offset": {
+          "control_type": "xy-pad",
+          "label": "Blue Offset",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": [-10, 0],
+          "data_type": "xy",
+          "advanced": false,
+          "tint": "#4488ff"
+        }
+      }
+    },
+    "displacement": {
+      "category": "glitch",
+      "params": {
+        "block_size": {
+          "control_type": "knob",
+          "label": "Block Size",
+          "min": 4,
+          "max": 64,
+          "step": 1,
+          "default": 16,
+          "data_type": "int",
+          "advanced": false
+        },
+        "intensity": {
+          "control_type": "knob",
+          "label": "Intensity",
+          "min": 0.0,
+          "max": 50.0,
+          "step": 0.5,
+          "default": 10.0,
+          "data_type": "float",
+          "advanced": false
+        },
+        "seed": {
+          "control_type": "number-input",
+          "label": "Seed",
+          "min": 0,
+          "max": 99999,
+          "step": 1,
+          "default": 42,
+          "data_type": "int",
+          "advanced": true,
+          "randomize": true
+        }
+      }
+    },
+    "bitcrush": {
+      "category": "glitch",
+      "params": {
+        "color_depth": {
+          "control_type": "knob",
+          "label": "Bit Depth",
+          "min": 1,
+          "max": 16,
+          "step": 1,
+          "default": 4,
+          "data_type": "int",
+          "advanced": false
+        },
+        "resolution_scale": {
+          "control_type": "knob",
+          "label": "Resolution",
+          "min": 0.1,
+          "max": 4.0,
+          "step": 0.1,
+          "default": 1.0,
+          "data_type": "float",
+          "advanced": false
+        }
+      }
+    },
+    "wave": {
+      "category": "distortion",
+      "params": {
+        "amplitude": {
+          "control_type": "knob",
+          "label": "Amplitude",
+          "min": 0.0,
+          "max": 50.0,
+          "step": 0.5,
+          "default": 10.0,
+          "data_type": "float",
+          "advanced": false
+        },
+        "frequency": {
+          "control_type": "knob",
+          "label": "Frequency",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.05,
+          "data_type": "float",
+          "advanced": false
+        },
+        "direction": {
+          "control_type": "dropdown",
+          "label": "Direction",
+          "options": ["horizontal", "vertical"],
+          "default": "horizontal",
+          "data_type": "string",
+          "advanced": false
+        }
+      }
+    },
+    "mirror": {
+      "category": "distortion",
+      "params": {
+        "axis": {
+          "control_type": "dropdown",
+          "label": "Axis",
+          "options": ["vertical", "horizontal"],
+          "default": "vertical",
+          "data_type": "string",
+          "advanced": false
+        },
+        "position": {
+          "control_type": "slider",
+          "label": "Position",
+          "min": 0.1,
+          "max": 0.9,
+          "step": 0.01,
+          "default": 0.5,
+          "data_type": "float",
+          "advanced": false,
+          "center_detent": false
+        }
+      }
+    },
+    "chromatic": {
+      "category": "distortion",
+      "params": {
+        "offset": {
+          "control_type": "knob",
+          "label": "Offset",
+          "min": 0,
+          "max": 20,
+          "step": 1,
+          "default": 5,
+          "data_type": "int",
+          "advanced": false
+        },
+        "direction": {
+          "control_type": "dropdown",
+          "label": "Direction",
+          "options": ["horizontal", "vertical", "radial"],
+          "default": "horizontal",
+          "data_type": "string",
+          "advanced": false
+        }
+      }
+    },
+    "scanlines": {
+      "category": "texture",
+      "params": {
+        "line_width": {
+          "control_type": "knob",
+          "label": "Line Width",
+          "min": 1,
+          "max": 10,
+          "step": 1,
+          "default": 2,
+          "data_type": "int",
+          "advanced": false
+        },
+        "opacity": {
+          "control_type": "knob",
+          "label": "Opacity",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.3,
+          "data_type": "float",
+          "advanced": false
+        },
+        "flicker": {
+          "control_type": "toggle",
+          "label": "Flicker",
+          "default": false,
+          "data_type": "bool",
+          "advanced": false
+        },
+        "color": {
+          "control_type": "color-picker",
+          "label": "Line Color",
+          "default": [0, 0, 0],
+          "data_type": "rgb",
+          "advanced": true
+        }
+      }
+    },
+    "vhs": {
+      "category": "texture",
+      "params": {
+        "tracking": {
+          "control_type": "knob",
+          "label": "Tracking",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.5,
+          "data_type": "float",
+          "advanced": false
+        },
+        "noise_amount": {
+          "control_type": "knob",
+          "label": "Noise",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.2,
+          "data_type": "float",
+          "advanced": false
+        },
+        "color_bleed": {
+          "control_type": "knob",
+          "label": "Color Bleed",
+          "min": 0,
+          "max": 20,
+          "step": 1,
+          "default": 3,
+          "data_type": "int",
+          "advanced": false
+        },
+        "seed": {
+          "control_type": "number-input",
+          "label": "Seed",
+          "min": 0,
+          "max": 99999,
+          "step": 1,
+          "default": 42,
+          "data_type": "int",
+          "advanced": true,
+          "randomize": true
+        }
+      }
+    },
+    "noise": {
+      "category": "texture",
+      "params": {
+        "amount": {
+          "control_type": "knob",
+          "label": "Amount",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.3,
+          "data_type": "float",
+          "advanced": false
+        },
+        "noise_type": {
+          "control_type": "dropdown",
+          "label": "Type",
+          "options": ["gaussian", "salt_pepper", "uniform"],
+          "default": "gaussian",
+          "data_type": "string",
+          "advanced": false
+        },
+        "seed": {
+          "control_type": "number-input",
+          "label": "Seed",
+          "min": 0,
+          "max": 99999,
+          "step": 1,
+          "default": 42,
+          "data_type": "int",
+          "advanced": true,
+          "randomize": true
+        }
+      }
+    },
+    "blur": {
+      "category": "texture",
+      "params": {
+        "radius": {
+          "control_type": "knob",
+          "label": "Radius",
+          "min": 1,
+          "max": 20,
+          "step": 1,
+          "default": 3,
+          "data_type": "int",
+          "advanced": false
+        },
+        "blur_type": {
+          "control_type": "dropdown",
+          "label": "Type",
+          "options": ["box", "motion"],
+          "default": "box",
+          "data_type": "string",
+          "advanced": false
+        }
+      }
+    },
+    "sharpen": {
+      "category": "texture",
+      "params": {
+        "amount": {
+          "control_type": "knob",
+          "label": "Amount",
+          "min": 0.0,
+          "max": 3.0,
+          "step": 0.05,
+          "default": 1.0,
+          "data_type": "float",
+          "advanced": false
+        }
+      }
+    },
+    "edges": {
+      "category": "texture",
+      "params": {
+        "threshold": {
+          "control_type": "knob",
+          "label": "Threshold",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.3,
+          "data_type": "float",
+          "advanced": false
+        },
+        "mode": {
+          "control_type": "dropdown",
+          "label": "Mode",
+          "options": ["overlay", "neon", "edges_only"],
+          "default": "overlay",
+          "data_type": "string",
+          "advanced": false
+        }
+      }
+    },
+    "posterize": {
+      "category": "texture",
+      "params": {
+        "levels": {
+          "control_type": "knob",
+          "label": "Levels",
+          "min": 2,
+          "max": 32,
+          "step": 1,
+          "default": 4,
+          "data_type": "int",
+          "advanced": false
+        }
+      }
+    },
+    "hueshift": {
+      "category": "color",
+      "params": {
+        "degrees": {
+          "control_type": "hue-wheel",
+          "label": "Hue Shift",
+          "min": 0,
+          "max": 360,
+          "step": 1,
+          "default": 180,
+          "data_type": "int",
+          "advanced": false
+        }
+      }
+    },
+    "contrast": {
+      "category": "color",
+      "params": {
+        "amount": {
+          "control_type": "knob",
+          "label": "Amount",
+          "min": 0,
+          "max": 200,
+          "step": 1,
+          "default": 50,
+          "data_type": "int",
+          "advanced": false
+        },
+        "curve": {
+          "control_type": "dropdown",
+          "label": "Curve",
+          "options": ["linear"],
+          "default": "linear",
+          "data_type": "string",
+          "advanced": true
+        }
+      }
+    },
+    "saturation": {
+      "category": "color",
+      "params": {
+        "amount": {
+          "control_type": "knob",
+          "label": "Amount",
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.05,
+          "default": 1.5,
+          "data_type": "float",
+          "advanced": false
+        },
+        "channel": {
+          "control_type": "dropdown",
+          "label": "Channel",
+          "options": ["all"],
+          "default": "all",
+          "data_type": "string",
+          "advanced": true
+        }
+      }
+    },
+    "exposure": {
+      "category": "color",
+      "params": {
+        "stops": {
+          "control_type": "slider",
+          "label": "Stops",
+          "min": -3.0,
+          "max": 3.0,
+          "step": 0.1,
+          "default": 1.0,
+          "data_type": "float",
+          "advanced": false,
+          "center_detent": true,
+          "center_value": 0.0
+        },
+        "clip_mode": {
+          "control_type": "dropdown",
+          "label": "Clip Mode",
+          "options": ["clip"],
+          "default": "clip",
+          "data_type": "string",
+          "advanced": true
+        }
+      }
+    },
+    "invert": {
+      "category": "color",
+      "params": {
+        "channel": {
+          "control_type": "dropdown",
+          "label": "Channel",
+          "options": ["all", "r", "g", "b"],
+          "default": "all",
+          "data_type": "string",
+          "advanced": false
+        },
+        "amount": {
+          "control_type": "knob",
+          "label": "Amount",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 1.0,
+          "data_type": "float",
+          "advanced": false
+        }
+      }
+    },
+    "temperature": {
+      "category": "color",
+      "params": {
+        "temp": {
+          "control_type": "slider",
+          "label": "Temperature",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 30,
+          "data_type": "int",
+          "advanced": false,
+          "center_detent": true,
+          "center_value": 0,
+          "gradient": {
+            "left": "#4488ff",
+            "right": "#ff8844",
+            "label_left": "Cool",
+            "label_right": "Warm"
+          }
+        }
+      }
+    }
+  }
+}

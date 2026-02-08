@@ -12,11 +12,11 @@
     --text-primary: #e0e0e0;
     --text-secondary: #888;
     --text-dim: #555;
-    --accent: #00d9ff;
-    --accent-glow: #00d9ff33;
+    --accent: #ff3d3d;
+    --accent-glow: #ff3d3d33;
     --accent-secondary: #7b61ff;
     --knob-track: #333;
-    --knob-fill: #00d9ff;
+    --knob-fill: #ff3d3d;
     --knob-bg: #1a1a1e;
     --bypass-color: #555;
     --active-green: #4caf50;
@@ -86,6 +86,40 @@ body {
 #topbar button.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
 #topbar button.primary:hover { filter: brightness(1.2); }
 
+/* Mix slider in top bar */
+.mix-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.mix-control label {
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 9px;
+    color: var(--text-dim);
+}
+
+.mix-control input[type="range"] {
+    width: 80px;
+    -webkit-appearance: none;
+    height: 3px;
+    background: var(--knob-track);
+    border-radius: 2px;
+    outline: none;
+}
+
+.mix-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 10px;
+    height: 10px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
 #upload-zone {
     display: flex;
     align-items: center;
@@ -140,7 +174,120 @@ body {
 #browser {
     background: var(--bg-dark);
     overflow-y: auto;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+#browser-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.browser-tab {
+    flex: 1;
     padding: 8px 0;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    background: var(--bg-dark);
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+}
+
+.browser-tab.active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent);
+}
+
+.browser-panel {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+
+.browser-panel.active {
+    display: block;
+}
+
+/* Preset items */
+.preset-item {
+    padding: 8px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    border-bottom: 1px solid var(--bg-mid);
+    transition: all 0.1s;
+}
+
+.preset-item:hover {
+    background: var(--bg-hover);
+    border-left-color: var(--accent);
+}
+
+.preset-item .preset-name {
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+
+.preset-item .preset-desc {
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.preset-item .preset-tags {
+    margin-top: 3px;
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.preset-item .preset-tag {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 2px;
+    background: var(--bg-light);
+    color: var(--text-dim);
+}
+
+.preset-cat-header {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    padding: 12px 12px 6px;
+    background: var(--bg-dark);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.preset-actions {
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.preset-actions button {
+    width: 100%;
+    padding: 6px 12px;
+    font-size: 11px;
+    background: var(--bg-light);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.preset-actions button:hover {
+    background: var(--bg-hover);
 }
 
 #browser h3 {
@@ -357,6 +504,142 @@ body {
 }
 
 /* layer-delete replaced by three-dots context menu */
+
+/* --- Export Dialog (Modal) --- */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-dialog {
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 480px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+.modal-close:hover { color: var(--text-primary); }
+
+.modal-body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.modal-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.modal-footer button {
+    padding: 8px 20px;
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg-light);
+    color: var(--text-primary);
+}
+
+.modal-footer button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    font-weight: 600;
+}
+
+.export-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.export-row label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    width: 110px;
+    flex-shrink: 0;
+    text-align: right;
+}
+
+.export-row select,
+.export-row input[type="number"] {
+    flex: 1;
+    background: var(--bg-mid);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 6px 8px;
+    font-size: 12px;
+    border-radius: 3px;
+}
+
+.export-row input[type="range"] {
+    flex: 1;
+}
+
+.export-row span {
+    font-size: 11px;
+    color: var(--text-dim);
+    min-width: 30px;
+}
+
+.export-row .hint {
+    font-size: 10px;
+    color: var(--text-dim);
+}
+
+.dim-inputs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+}
+
+.dim-inputs input {
+    width: 80px;
+    background: var(--bg-mid);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 6px 8px;
+    font-size: 12px;
+    border-radius: 3px;
+}
 
 /* --- Context Menu (right-click / three-dots) --- */
 .ctx-menu {
@@ -597,6 +880,68 @@ body {
 }
 
 /* --- KNOB (Moog-inspired) --- */
+/* Control types: knob, dropdown, toggle */
+.param-control {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 52px;
+}
+
+.param-control label {
+    font-size: 8px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+    text-align: center;
+    max-width: 70px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dropdown-container {
+    width: 80px;
+}
+
+.param-dropdown {
+    width: 100%;
+    background: var(--bg-mid);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 10px;
+    padding: 4px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.param-dropdown:hover {
+    border-color: var(--accent);
+}
+
+.toggle-container {
+    width: 52px;
+}
+
+.param-toggle {
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--off-color);
+    color: var(--text-dim);
+    font-size: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.param-toggle.on {
+    background: var(--on-color);
+    color: white;
+    border-color: var(--on-color);
+}
+
 .knob-container {
     display: flex;
     flex-direction: column;

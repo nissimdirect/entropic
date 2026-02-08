@@ -12,29 +12,47 @@
     <div id="topbar">
         <span class="logo">Entropic</span>
         <div id="upload-zone">
-            <label for="file-input">Load Video</label>
-            <input type="file" id="file-input" accept="video/*">
+            <label for="file-input">Load File</label>
+            <input type="file" id="file-input" accept="video/*,image/*,.gif,.pdf,.zip,.txt,.csv,.json,.xml,.html,.wav,.mp3,.aiff,.flac,.psd,.ai,.svg">
             <span id="file-name">No file loaded</span>
         </div>
+        <div class="mix-control">
+            <label>Mix</label>
+            <input type="range" id="mix-slider" min="0" max="100" value="100" oninput="onMixChange(this.value)">
+            <span id="mix-value">100%</span>
+        </div>
         <div class="transport">
+            <button onclick="randomizeChain()" title="Random effects">Randomize</button>
             <button onclick="undo()" title="Undo (Cmd+Z)">Undo</button>
             <button onclick="redo()" title="Redo (Cmd+Shift+Z)">Redo</button>
             <button onclick="previewChain()" class="primary">Update Preview</button>
+            <button onclick="renderVideo()" title="Export video">Export</button>
         </div>
     </div>
 
-    <!-- LEFT SIDEBAR: Effect Browser -->
+    <!-- LEFT SIDEBAR: Effect Browser + Presets -->
     <div id="browser">
-        <h3>Effects</h3>
-        <div id="effect-list"></div>
+        <div id="browser-tabs">
+            <button class="browser-tab active" data-btab="effects" onclick="switchBrowserTab('effects')">Effects</button>
+            <button class="browser-tab" data-btab="presets" onclick="switchBrowserTab('presets')">Presets</button>
+        </div>
+        <div id="effects-panel" class="browser-panel active">
+            <div id="effect-list"></div>
+        </div>
+        <div id="presets-panel" class="browser-panel">
+            <div id="preset-list"></div>
+            <div class="preset-actions">
+                <button onclick="saveCurrentAsPreset()" title="Save current chain as preset">Save Preset</button>
+            </div>
+        </div>
     </div>
 
     <!-- CENTER: Video Preview Canvas -->
     <div id="canvas-area">
         <div id="empty-state">
             <div class="icon">&#9654;</div>
-            <p>Load a video to start</p>
-            <p class="hint">Or drag a video file onto this window</p>
+            <p>Load a file to start</p>
+            <p class="hint">Drop video, image, GIF — or anything else for creative interpretation</p>
         </div>
         <img id="preview-img" style="display:none">
         <div id="frame-info"></div>
@@ -68,6 +86,130 @@
             <span class="count" id="chain-count">0 devices</span>
         </div>
         <div id="chain-rack"></div>
+    </div>
+</div>
+
+<!-- Export Dialog (modal) -->
+<div id="export-overlay" class="modal-overlay" style="display:none">
+    <div class="modal-dialog export-dialog">
+        <div class="modal-header">
+            <h2>Export</h2>
+            <button onclick="closeExportDialog()" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="export-row">
+                <label>Format</label>
+                <select id="export-format" onchange="onExportFormatChange()">
+                    <option value="mp4">MP4 (H.264) — Web/Social</option>
+                    <option value="mov">MOV (ProRes) — Editing Pipeline</option>
+                    <option value="gif">GIF — Short Loops</option>
+                    <option value="png_seq">PNG Sequence — Compositing</option>
+                    <option value="webm">WebM (VP9) — Web Embed</option>
+                </select>
+            </div>
+            <div class="export-row">
+                <label>Resolution</label>
+                <select id="export-resolution" onchange="onExportResChange()">
+                    <option value="source">Match Source</option>
+                    <option value="480p">480p (854x480)</option>
+                    <option value="720p">720p (1280x720)</option>
+                    <option value="1080p" selected>1080p (1920x1080)</option>
+                    <option value="2k">2K (2560x1440)</option>
+                    <option value="4k">4K (3840x2160)</option>
+                    <option value="instagram_square">Instagram Square (1080x1080)</option>
+                    <option value="instagram_story">Instagram Story (1080x1920)</option>
+                    <option value="tiktok">TikTok (1080x1920)</option>
+                    <option value="custom">Custom...</option>
+                </select>
+            </div>
+            <div class="export-row" id="custom-dims-row" style="display:none">
+                <label>Dimensions</label>
+                <div class="dim-inputs">
+                    <input type="number" id="export-width" placeholder="Width" min="16" max="7680">
+                    <span>&times;</span>
+                    <input type="number" id="export-height" placeholder="Height" min="16" max="4320">
+                </div>
+            </div>
+            <div class="export-row">
+                <label>Scale</label>
+                <select id="export-scale">
+                    <option value="">From Resolution</option>
+                    <option value="0.5">50%</option>
+                    <option value="0.75">75%</option>
+                    <option value="1.0">100%</option>
+                    <option value="1.5">150%</option>
+                    <option value="2.0">200%</option>
+                </select>
+            </div>
+            <div class="export-row" id="h264-quality-row">
+                <label>Quality (CRF)</label>
+                <input type="range" id="export-crf" min="0" max="51" value="23" oninput="document.getElementById('crf-val').textContent=this.value">
+                <span id="crf-val">23</span>
+                <span class="hint">(lower = better)</span>
+            </div>
+            <div class="export-row" id="h264-preset-row">
+                <label>Speed</label>
+                <select id="export-h264-preset">
+                    <option value="ultrafast">Ultrafast</option>
+                    <option value="fast">Fast</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="slow">Slow (better compression)</option>
+                    <option value="veryslow">Very Slow (best compression)</option>
+                </select>
+            </div>
+            <div class="export-row" id="prores-row" style="display:none">
+                <label>ProRes Profile</label>
+                <select id="export-prores">
+                    <option value="proxy">Proxy (smallest)</option>
+                    <option value="lt">LT (light)</option>
+                    <option value="422" selected>422 (standard)</option>
+                    <option value="422hq">422 HQ (high quality)</option>
+                    <option value="4444">4444 (with alpha)</option>
+                </select>
+            </div>
+            <div class="export-row" id="gif-row" style="display:none">
+                <label>GIF Colors</label>
+                <input type="range" id="export-gif-colors" min="2" max="256" value="256" oninput="document.getElementById('gif-colors-val').textContent=this.value">
+                <span id="gif-colors-val">256</span>
+            </div>
+            <div class="export-row">
+                <label>Frame Rate</label>
+                <select id="export-fps">
+                    <option value="">Match Source</option>
+                    <option value="24">24 fps (Film)</option>
+                    <option value="25">25 fps (PAL)</option>
+                    <option value="29.97">29.97 fps (NTSC)</option>
+                    <option value="30">30 fps</option>
+                    <option value="60">60 fps</option>
+                </select>
+            </div>
+            <div class="export-row">
+                <label>Audio</label>
+                <select id="export-audio">
+                    <option value="copy">Copy from source</option>
+                    <option value="reencode">Re-encode (AAC)</option>
+                    <option value="strip">Strip audio</option>
+                </select>
+            </div>
+            <div class="export-row">
+                <label>Scaling Algorithm</label>
+                <select id="export-algo">
+                    <option value="lanczos" selected>Lanczos (best quality)</option>
+                    <option value="bilinear">Bilinear (fast)</option>
+                    <option value="bicubic">Bicubic</option>
+                    <option value="nearest">Nearest (pixel art)</option>
+                </select>
+            </div>
+            <div class="export-row">
+                <label>Mix</label>
+                <input type="range" id="export-mix" min="0" max="100" value="100" oninput="document.getElementById('export-mix-val').textContent=this.value+'%'">
+                <span id="export-mix-val">100%</span>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeExportDialog()">Cancel</button>
+            <button onclick="startExport()" class="primary" id="export-go-btn">Export</button>
+        </div>
     </div>
 </div>
 

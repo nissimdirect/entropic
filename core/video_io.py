@@ -41,7 +41,7 @@ def probe_video(video_path: str) -> dict:
         "-show_streams",
         video_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
     data = json.loads(result.stdout)
 
     video_stream = None
@@ -100,11 +100,18 @@ def extract_frames(video_path: str, output_dir: str, scale: float = 1.0) -> list
         str(output_dir / "frame_%06d.png"),
     ]
 
-    subprocess.run(cmd, capture_output=True, check=True)
+    subprocess.run(cmd, capture_output=True, check=True, timeout=300)
 
     frames = sorted(output_dir.glob("frame_*.png"))
     if not frames:
         raise RuntimeError(f"No frames extracted from {video_path}")
+
+    MAX_FRAMES = 3000
+    if len(frames) > MAX_FRAMES:
+        raise RuntimeError(
+            f"Video has {len(frames)} frames (max {MAX_FRAMES}). "
+            f"Use a shorter clip or lower resolution."
+        )
     return frames
 
 
@@ -167,7 +174,7 @@ def reassemble_video(
         cmd += ["-c:a", "aac", "-b:a", "192k"]
 
     cmd.append(str(output_path))
-    subprocess.run(cmd, capture_output=True, check=True)
+    subprocess.run(cmd, capture_output=True, check=True, timeout=600)
 
     if not output_path.exists():
         raise RuntimeError(f"Failed to create output video: {output_path}")
@@ -179,6 +186,9 @@ def extract_single_frame(video_path: str, frame_number: int = 0) -> np.ndarray:
     """Extract a single frame as numpy array. Fast — doesn't decode entire video."""
     video_path = str(video_path)
     info = probe_video(video_path)
+    # Clamp frame number to valid range
+    total = max(1, info.get("total_frames", 1))
+    frame_number = max(0, min(frame_number, total - 1))
     timestamp = frame_number / info["fps"]
 
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
@@ -193,7 +203,7 @@ def extract_single_frame(video_path: str, frame_number: int = 0) -> np.ndarray:
             "-y",
             tmp_path,
         ]
-        subprocess.run(cmd, capture_output=True, check=True)
+        subprocess.run(cmd, capture_output=True, check=True, timeout=30)
         return load_frame(tmp_path)
     finally:
         Path(tmp_path).unlink(missing_ok=True)

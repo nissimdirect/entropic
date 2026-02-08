@@ -84,7 +84,7 @@ def render_recipe(
         total = len(frames)
         for i, frame_path in enumerate(frames):
             frame = load_frame(str(frame_path))
-            processed = apply_chain(frame, effects)
+            processed = apply_chain(frame, effects, frame_index=i, total_frames=total)
             out_frame = Path(tmp_processed) / frame_path.name
             save_frame(processed, str(out_frame))
 
