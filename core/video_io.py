@@ -182,6 +182,62 @@ def reassemble_video(
     return output_path
 
 
+def clip_video(
+    video_path: str,
+    output_path: str,
+    start: float = 0.0,
+    duration: float | None = None,
+    end: float | None = None,
+) -> Path:
+    """Extract a clip/segment from a video without re-encoding.
+
+    Fast operation — uses FFmpeg stream copy (no quality loss, near-instant).
+    Specify either duration OR end time, not both.
+
+    Args:
+        video_path: Path to input video.
+        output_path: Path for the clipped output.
+        start: Start time in seconds.
+        duration: Duration in seconds (mutually exclusive with end).
+        end: End time in seconds (mutually exclusive with duration).
+
+    Returns:
+        Path to clipped video.
+    """
+    video_path = str(video_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    info = probe_video(video_path)
+    max_duration = info["duration"]
+
+    start = max(0.0, min(float(start), max_duration))
+
+    cmd = [
+        get_ffmpeg(),
+        "-y",
+        "-ss", str(start),
+        "-i", video_path,
+    ]
+
+    if duration is not None:
+        duration = max(0.1, min(float(duration), max_duration - start))
+        cmd += ["-t", str(duration)]
+    elif end is not None:
+        end = max(start + 0.1, min(float(end), max_duration))
+        cmd += ["-to", str(end - start)]
+
+    # Stream copy = instant, no quality loss
+    cmd += ["-c", "copy", str(output_path)]
+
+    subprocess.run(cmd, capture_output=True, check=True, timeout=60)
+
+    if not output_path.exists():
+        raise RuntimeError(f"Failed to clip video: {output_path}")
+
+    return output_path
+
+
 def extract_single_frame(video_path: str, frame_number: int = 0) -> np.ndarray:
     """Extract a single frame as numpy array. Fast — doesn't decode entire video."""
     video_path = str(video_path)

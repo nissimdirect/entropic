@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import argparse
+from pathlib import Path
 
 # Add project root to path so imports work
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -358,6 +359,31 @@ def cmd_ui(args):
     start()
 
 
+def cmd_clip(args):
+    """Clip/trim a video to a specific time range before processing."""
+    from core.video_io import clip_video, probe_video
+
+    info = probe_video(args.input)
+    duration = info["duration"]
+    print(f"Source: {args.input}")
+    print(f"  Duration: {duration:.1f}s, {info['total_frames']} frames, {info['fps']:.1f} fps")
+
+    output = args.output or str(Path(args.input).stem) + f"_clip_{args.start}s.mp4"
+
+    clip_video(
+        args.input,
+        output,
+        start=args.start,
+        duration=args.duration,
+        end=args.end,
+    )
+
+    clip_info = probe_video(output)
+    print(f"Clipped: {output}")
+    print(f"  Duration: {clip_info['duration']:.1f}s, {clip_info['total_frames']} frames")
+    print(f"  Use: entropic new myproject --source {output}")
+
+
 def cmd_datamosh_ui(args):
     """Launch the Real Datamosh native desktop app."""
     from datamosh_gui import main as launch_datamosh
@@ -440,6 +466,14 @@ def main():
     # ui
     sub.add_parser("ui", help="Launch Gradio visual interface")
 
+    # clip
+    p = sub.add_parser("clip", help="Clip/trim a video to a time range (fast, no re-encode)")
+    p.add_argument("input", help="Path to input video")
+    p.add_argument("--start", type=float, default=0.0, help="Start time in seconds")
+    p.add_argument("--duration", type=float, default=None, help="Duration in seconds")
+    p.add_argument("--end", type=float, default=None, help="End time in seconds")
+    p.add_argument("--output", "-o", help="Output path (auto-generated if omitted)")
+
     # datamosh-ui
     sub.add_parser("datamosh", help="Launch Real Datamosh native desktop app")
 
@@ -460,6 +494,7 @@ def main():
         "search": cmd_search,
         "projects": cmd_list_projects,
         "ui": cmd_ui,
+        "clip": cmd_clip,
         "datamosh": cmd_datamosh_ui,
     }
 

@@ -13,6 +13,8 @@ _tapestop_state = {"frozen_frame": None, "trigger_frame": -1}
 _delay_state = {"buffer": []}
 _decimator_state = {"held_frame": None}
 _samplehold_state = {"held_frame": None, "hold_until": -1}
+_granulator_state = {"buffer": [], "grain_pos": 0.0}
+_beatrepeat_state = {"buffer": [], "repeating": False, "repeat_until": -1, "repeat_start": -1, "grid_frames": 4}
 
 
 def stutter(
@@ -410,3 +412,490 @@ def sample_and_hold(
     _samplehold_state["hold_until"] = frame_index + hold_duration - 1
 
     return frame.copy()
+
+
+def granulator(
+    frame: np.ndarray,
+    position: float = 0.5,
+    grain_size: int = 4,
+    spray: float = 0.0,
+    density: int = 1,
+    scan_speed: float = 0.0,
+    reverse_prob: float = 0.0,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    seed: int = 42,
+) -> np.ndarray:
+    """Video granulator — rearrange video slices like Ableton's Granulator II.
+
+    Buffers incoming frames and selects grains (slices) from the buffer
+    based on position, spray (randomization), and scan speed. Creates
+    stuttered, fragmented, time-scrambled textures from video.
+
+    Inspired by granular synthesis: position selects WHERE to read,
+    grain_size sets slice length, spray randomizes the read position,
+    density layers multiple grains, scan_speed auto-advances position.
+
+    Args:
+        frame: Input frame (H, W, 3) uint8.
+        position: Base read position in the buffer (0.0-1.0).
+        grain_size: Length of each grain in frames (1-60).
+        spray: Random offset range from position (0.0 = exact, 1.0 = anywhere).
+        density: Number of grains to overlay (1-4). Higher = denser texture.
+        scan_speed: Auto-advance rate for position (0.0 = static, 1.0 = normal speed).
+        reverse_prob: Probability of playing a grain in reverse (0.0-1.0).
+        frame_index: Current frame number (injected by render loop).
+        total_frames: Total frame count.
+        seed: Random seed for reproducible spray/selection.
+
+    Returns:
+        Frame (H, W, 3) uint8 — a grain selected from the buffer.
+    """
+    global _granulator_state
+
+    grain_size = max(1, min(60, int(grain_size)))
+    spray = max(0.0, min(1.0, float(spray)))
+    density = max(1, min(4, int(density)))
+    scan_speed = max(0.0, min(2.0, float(scan_speed)))
+    position = max(0.0, min(1.0, float(position)))
+    reverse_prob = max(0.0, min(1.0, float(reverse_prob)))
+
+    # Reset at frame 0
+    if frame_index == 0:
+        _granulator_state = {"buffer": [], "grain_pos": position}
+
+    buf = _granulator_state["buffer"]
+
+    # Always buffer the incoming frame
+    buf.append(frame.copy())
+
+    # Limit buffer to avoid memory issues (keep last 300 frames = ~10s at 30fps)
+    max_buf = 300
+    if len(buf) > max_buf:
+        buf[:] = buf[-max_buf:]
+
+    # Need at least a few frames before granulating
+    if len(buf) < grain_size + 1:
+        return frame.copy()
+
+    rng = np.random.RandomState(seed + frame_index)
+
+    # Advance grain position based on scan speed
+    _granulator_state["grain_pos"] += scan_speed / max(1, total_frames)
+    if _granulator_state["grain_pos"] > 1.0:
+        _granulator_state["grain_pos"] -= 1.0
+
+    current_pos = _granulator_state["grain_pos"]
+
+    # Select grain(s)
+    result = np.zeros(frame.shape, dtype=np.float32)
+
+    for grain_idx in range(density):
+        # Apply spray: randomize position
+        spray_offset = rng.uniform(-spray, spray) * 0.5
+        grain_read_pos = current_pos + spray_offset
+        grain_read_pos = max(0.0, min(1.0, grain_read_pos))
+
+        # Map position to buffer index
+        buf_idx = int(grain_read_pos * (len(buf) - 1))
+
+        # Determine which frame within the grain to show
+        grain_phase = frame_index % grain_size
+        if rng.random() < reverse_prob:
+            grain_phase = grain_size - 1 - grain_phase
+
+        read_idx = buf_idx + grain_phase
+        read_idx = max(0, min(len(buf) - 1, read_idx))
+
+        grain_frame = buf[read_idx]
+        if grain_frame.shape == frame.shape:
+            result += grain_frame.astype(np.float32)
+        else:
+            result += frame.astype(np.float32)
+
+    # Average overlapping grains
+    result = result / density
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def beat_repeat(
+    frame: np.ndarray,
+    interval: int = 16,
+    offset: int = 0,
+    gate: int = 8,
+    grid: int = 4,
+    variation: float = 0.0,
+    chance: float = 1.0,
+    decay: float = 0.0,
+    pitch_decay: float = 0.0,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    seed: int = 42,
+) -> np.ndarray:
+    """Beat Repeat — triggered frame repetition inspired by Ableton's Beat Repeat.
+
+    At regular intervals, captures a buffer window and repeats its frames.
+    Creates glitchy stutters, build-ups, and rhythmic repetitions.
+
+    Args:
+        frame: Input frame (H, W, 3) uint8.
+        interval: How often to trigger a repeat (in frames). Like "every 16 frames".
+        offset: Delay before first trigger (in frames).
+        gate: How long the repeat lasts (in frames). 0 = repeats until next trigger.
+        grid: Subdivision size for the repeated slice (in frames).
+            Smaller grid = faster stutter, larger grid = longer loops.
+        variation: Randomize grid size per repeat (0.0 = fixed, 1.0 = wild).
+        chance: Probability of triggering on each interval (0.0-1.0).
+        decay: Opacity fade per repeat cycle (0.0 = no fade, 1.0 = rapid fade).
+        pitch_decay: Speed up repeats over time (0.0 = constant, 1.0 = accelerating).
+            Simulates "pitch decay" from Beat Repeat by showing fewer frames per cycle.
+        frame_index: Current frame number (injected by render loop).
+        total_frames: Total frame count.
+        seed: Random seed for chance/variation.
+
+    Returns:
+        Frame (H, W, 3) uint8 — original or repeated from buffer.
+    """
+    global _beatrepeat_state
+
+    interval = max(1, min(120, int(interval)))
+    offset = max(0, min(60, int(offset)))
+    gate = max(0, min(120, int(gate)))
+    grid = max(1, min(60, int(grid)))
+    variation = max(0.0, min(1.0, float(variation)))
+    chance = max(0.0, min(1.0, float(chance)))
+    decay = max(0.0, min(1.0, float(decay)))
+    pitch_decay = max(0.0, min(1.0, float(pitch_decay)))
+
+    # Reset at frame 0
+    if frame_index == 0:
+        _beatrepeat_state = {
+            "buffer": [],
+            "repeating": False,
+            "repeat_until": -1,
+            "repeat_start": -1,
+            "grid_frames": grid,
+        }
+
+    state = _beatrepeat_state
+
+    # Always buffer recent frames (keep enough for the grid)
+    state["buffer"].append(frame.copy())
+    max_buf = max(grid * 2, 60)
+    if len(state["buffer"]) > max_buf:
+        state["buffer"][:] = state["buffer"][-max_buf:]
+
+    # Check if we're currently in a repeat phase
+    if state["repeating"] and frame_index <= state["repeat_until"]:
+        buf = state["buffer"]
+        frames_into_repeat = frame_index - state["repeat_start"]
+
+        # Calculate effective grid with pitch decay
+        effective_grid = state["grid_frames"]
+        if pitch_decay > 0.0:
+            # Reduce grid size over time (speeds up repeats)
+            repeat_progress = frames_into_repeat / max(1, gate if gate > 0 else interval)
+            effective_grid = max(1, int(effective_grid * (1.0 - pitch_decay * repeat_progress)))
+
+        # Which frame in the grid to show
+        grid_phase = frames_into_repeat % max(1, effective_grid)
+
+        # How many complete repeat cycles we've done
+        repeat_cycle = frames_into_repeat // max(1, effective_grid)
+
+        # Index into the captured buffer
+        buf_read = min(grid_phase, len(buf) - 1)
+        # Read from the frames captured AT the trigger point
+        capture_start = max(0, len(buf) - state["grid_frames"] - (frame_index - state["repeat_start"]))
+        read_idx = min(capture_start + grid_phase, len(buf) - 1)
+        read_idx = max(0, read_idx)
+
+        repeated = buf[read_idx]
+
+        # Apply decay (opacity fade per repeat cycle)
+        if decay > 0.0 and repeat_cycle > 0:
+            opacity = max(0.0, 1.0 - decay * repeat_cycle)
+            repeated = np.clip(
+                repeated.astype(np.float32) * opacity +
+                frame.astype(np.float32) * (1.0 - opacity),
+                0, 255
+            ).astype(np.uint8)
+
+        if repeated.shape == frame.shape:
+            return repeated
+        return frame.copy()
+    else:
+        state["repeating"] = False
+
+    # Check for trigger
+    adjusted_frame = frame_index - offset
+    if adjusted_frame >= 0 and adjusted_frame % interval == 0:
+        rng = np.random.RandomState(seed + frame_index)
+
+        # Roll for chance
+        if rng.random() < chance:
+            # Apply variation to grid
+            effective_grid = grid
+            if variation > 0.0:
+                grid_var = rng.uniform(1.0 - variation * 0.5, 1.0 + variation * 0.5)
+                effective_grid = max(1, int(grid * grid_var))
+
+            state["repeating"] = True
+            state["repeat_start"] = frame_index
+            state["repeat_until"] = frame_index + (gate if gate > 0 else interval) - 1
+            state["grid_frames"] = effective_grid
+
+            # Return current frame (first frame of the repeat)
+            return frame.copy()
+
+    return frame.copy()
+
+
+def strobe(
+    frame: np.ndarray,
+    rate: float = 4.0,
+    color: str = "white",
+    shape: str = "full",
+    opacity: float = 1.0,
+    duty: float = 0.5,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    fps: float = 30.0,
+    seed: int = 42,
+) -> np.ndarray:
+    """Video strobe — flash a color, shape, or pattern at regular intervals.
+
+    Like a strobe light in a club. Can overlay solid colors, geometric shapes,
+    bars, or inverted versions of the frame. Creates rhythmic visual pulses.
+
+    Args:
+        frame: Input frame (H, W, 3) uint8.
+        rate: Strobe speed in Hz (flashes per second). 4.0 = club strobe.
+        color: Flash color — "white", "black", "red", "blue", "green",
+            "invert" (inverts the frame), "random" (random color per flash).
+        shape: Flash shape — "full" (whole frame), "circle" (center circle),
+            "bars_h" (horizontal bars), "bars_v" (vertical bars),
+            "grid" (checkerboard grid).
+        opacity: Flash opacity (0.0-1.0). 1.0 = fully opaque flash.
+        duty: Duty cycle (0.0-1.0). 0.5 = on half the time. Lower = sharper flash.
+        frame_index: Current frame number.
+        total_frames: Total frame count.
+        fps: Frames per second.
+        seed: Random seed for "random" color mode.
+
+    Returns:
+        Frame (H, W, 3) uint8.
+    """
+    rate = max(0.1, min(30.0, float(rate)))
+    opacity = max(0.0, min(1.0, float(opacity)))
+    duty = max(0.05, min(0.95, float(duty)))
+    fps = max(1.0, float(fps))
+
+    # Determine if we're in the "on" phase of the strobe
+    t = frame_index / fps
+    cycle_pos = (t * rate) % 1.0
+    is_on = cycle_pos < duty
+
+    if not is_on:
+        return frame.copy()
+
+    h, w = frame.shape[:2]
+
+    # Build the flash color
+    color_map = {
+        "white": (255, 255, 255),
+        "black": (0, 0, 0),
+        "red": (255, 0, 0),
+        "green": (0, 255, 0),
+        "blue": (0, 0, 255),
+        "yellow": (255, 255, 0),
+        "cyan": (0, 255, 255),
+        "magenta": (255, 0, 255),
+    }
+
+    if color == "invert":
+        flash_frame = 255 - frame
+    elif color == "random":
+        rng = np.random.RandomState(seed + int(t * rate))
+        rc = tuple(int(x) for x in rng.randint(0, 256, 3))
+        flash_frame = np.full_like(frame, rc)
+    else:
+        rgb = color_map.get(color, (255, 255, 255))
+        flash_frame = np.full_like(frame, rgb)
+
+    # Build the shape mask
+    mask = np.zeros((h, w), dtype=np.float32)
+
+    if shape == "full":
+        mask[:] = 1.0
+    elif shape == "circle":
+        cy, cx = h // 2, w // 2
+        radius = min(h, w) // 3
+        y_coords, x_coords = np.ogrid[:h, :w]
+        dist = np.sqrt((x_coords - cx) ** 2 + (y_coords - cy) ** 2)
+        mask[dist <= radius] = 1.0
+    elif shape == "bars_h":
+        bar_height = max(4, h // 8)
+        for y in range(0, h, bar_height * 2):
+            mask[y:min(y + bar_height, h), :] = 1.0
+    elif shape == "bars_v":
+        bar_width = max(4, w // 8)
+        for x in range(0, w, bar_width * 2):
+            mask[:, x:min(x + bar_width, w)] = 1.0
+    elif shape == "grid":
+        cell_h = max(4, h // 6)
+        cell_w = max(4, w // 6)
+        for y in range(0, h, cell_h * 2):
+            for x in range(0, w, cell_w * 2):
+                mask[y:min(y + cell_h, h), x:min(x + cell_w, w)] = 1.0
+    else:
+        mask[:] = 1.0
+
+    # Apply: blend flash onto frame using mask and opacity
+    mask_3d = mask[:, :, np.newaxis] * opacity
+    result = frame.astype(np.float32) * (1.0 - mask_3d) + flash_frame.astype(np.float32) * mask_3d
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def lfo(
+    frame: np.ndarray,
+    rate: float = 2.0,
+    depth: float = 0.5,
+    target: str = "brightness",
+    waveform: str = "sine",
+    frame_index: int = 0,
+    total_frames: int = 1,
+    fps: float = 30.0,
+    seed: int = 42,
+) -> np.ndarray:
+    """Multi-target LFO — oscillate ANY visual parameter over time.
+
+    Enhanced version of tremolo. Instead of just brightness, the LFO can
+    modulate pixel displacement, channel shift, blur, moiré patterns,
+    and glitch intensity. Think of it as a video synth LFO.
+
+    Args:
+        frame: Input frame (H, W, 3) uint8.
+        rate: Oscillation speed in Hz.
+        depth: Modulation depth (0.0-1.0).
+        target: What to modulate:
+            "brightness" — classic tremolo (lighter/darker)
+            "displacement" — pixel warp/displacement oscillation
+            "channelshift" — RGB channels drift apart and back
+            "blur" — blur amount oscillates (focus breathing)
+            "moire" — interference pattern overlay that shifts
+            "glitch" — row shift/block corruption intensity oscillates
+            "invert" — oscillating color inversion
+            "posterize" — color levels oscillate (lo-fi breathing)
+        waveform: LFO shape — "sine", "square", "saw", "triangle", "random".
+        frame_index: Current frame number.
+        total_frames: Total frame count.
+        fps: Frames per second.
+        seed: Random seed for "random" waveform.
+
+    Returns:
+        Frame (H, W, 3) uint8.
+    """
+    rate = max(0.1, min(20.0, float(rate)))
+    depth = max(0.0, min(1.0, float(depth)))
+    fps = max(1.0, float(fps))
+
+    t = frame_index / fps
+    phase = (t * rate) % 1.0
+
+    # Generate LFO value based on waveform shape (0.0 to 1.0)
+    if waveform == "sine":
+        lfo_val = 0.5 * (1.0 + np.sin(2.0 * np.pi * phase))
+    elif waveform == "square":
+        lfo_val = 1.0 if phase < 0.5 else 0.0
+    elif waveform == "saw":
+        lfo_val = phase
+    elif waveform == "triangle":
+        lfo_val = 2.0 * phase if phase < 0.5 else 2.0 * (1.0 - phase)
+    elif waveform == "random":
+        rng = np.random.RandomState(seed + int(t * rate))
+        lfo_val = rng.random()
+    else:
+        lfo_val = 0.5 * (1.0 + np.sin(2.0 * np.pi * phase))
+
+    # Scale by depth
+    amount = lfo_val * depth
+    h, w = frame.shape[:2]
+    f = frame.astype(np.float32)
+
+    if target == "brightness":
+        mod = 1.0 - depth + amount
+        result = np.clip(f * mod, 0, 255)
+
+    elif target == "displacement":
+        # Pixel displacement — rows shift left/right based on LFO
+        max_shift = int(amount * 40)
+        result = f.copy()
+        if max_shift > 0:
+            for y in range(h):
+                row_shift = int(np.sin(y * 0.1 + phase * 6.28) * max_shift)
+                result[y] = np.roll(f[y], row_shift, axis=0)
+
+    elif target == "channelshift":
+        # RGB channels drift apart
+        offset = int(amount * 20)
+        result = np.zeros_like(f)
+        result[:, :, 0] = np.roll(f[:, :, 0], offset, axis=1)      # R shifts right
+        result[:, :, 1] = f[:, :, 1]                                 # G stays
+        result[:, :, 2] = np.roll(f[:, :, 2], -offset, axis=1)      # B shifts left
+
+    elif target == "blur":
+        # Blur amount oscillates
+        from cv2 import GaussianBlur
+        ksize = max(1, int(amount * 21)) | 1  # Must be odd
+        if ksize > 1:
+            result = GaussianBlur(frame, (ksize, ksize), 0).astype(np.float32)
+        else:
+            result = f.copy()
+
+    elif target == "moire":
+        # Interference pattern overlay — sine gratings that shift with LFO
+        y_coords = np.arange(h).reshape(-1, 1)
+        x_coords = np.arange(w).reshape(1, -1)
+        freq1 = 0.05 + amount * 0.15
+        freq2 = 0.07 + amount * 0.1
+        pattern = np.sin(y_coords * freq1 + phase * 6.28) * np.sin(x_coords * freq2 + phase * 3.14)
+        pattern = (pattern * 0.5 + 0.5)  # Normalize to 0-1
+        pattern_3d = np.stack([pattern] * 3, axis=-1) * 255.0 * amount
+        result = f * (1.0 - amount * 0.5) + pattern_3d * (amount * 0.5)
+
+    elif target == "glitch":
+        # Row shift + block corruption intensity oscillates
+        result = f.copy()
+        if amount > 0.05:
+            rng = np.random.RandomState(seed + frame_index)
+            num_rows = int(amount * h * 0.3)
+            for _ in range(num_rows):
+                y = rng.randint(0, h)
+                shift = rng.randint(-int(amount * 50), int(amount * 50) + 1)
+                result[y] = np.roll(f[y], shift, axis=0)
+            # Block corruption
+            num_blocks = int(amount * 10)
+            for _ in range(num_blocks):
+                by = rng.randint(0, max(1, h - 16))
+                bx = rng.randint(0, max(1, w - 16))
+                bh = rng.randint(4, 20)
+                bw = rng.randint(4, 20)
+                result[by:min(by+bh, h), bx:min(bx+bw, w)] = rng.randint(0, 256, (min(bh, h-by), min(bw, w-bx), 3))
+
+    elif target == "invert":
+        # Oscillating color inversion
+        result = f * (1.0 - amount) + (255.0 - f) * amount
+
+    elif target == "posterize":
+        # Color levels oscillate — at peak, very lo-fi
+        levels = max(2, int(16 - amount * 14))
+        step = 256.0 / levels
+        result = np.floor(f / step) * step
+
+    else:
+        # Fallback to brightness
+        mod = 1.0 - depth + amount
+        result = np.clip(f * mod, 0, 255)
+
+    return np.clip(result, 0, 255).astype(np.uint8)

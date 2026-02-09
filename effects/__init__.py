@@ -39,7 +39,7 @@ from effects.texture import (
     tv_static,
     contour_lines,
 )
-from effects.temporal import stutter, frame_drop, time_stretch, feedback, tape_stop, tremolo, delay, decimator, sample_and_hold
+from effects.temporal import stutter, frame_drop, time_stretch, feedback, tape_stop, tremolo, delay, decimator, sample_and_hold, granulator, beat_repeat, strobe, lfo
 from effects.modulation import ring_mod, gate, wavefold, am_radio
 from effects.enhance import solarize, duotone, emboss, auto_levels, median_filter, false_color, histogram_eq, clahe, parallel_compression
 from effects.destruction import (
@@ -293,6 +293,42 @@ EFFECTS = {
         "category": "temporal",
         "params": {"hold_min": 4, "hold_max": 15, "seed": 42},
         "description": "Freeze at random intervals (sample & hold)",
+    },
+    "granulator": {
+        "fn": granulator,
+        "category": "temporal",
+        "params": {
+            "position": 0.5, "grain_size": 4, "spray": 0.0,
+            "density": 1, "scan_speed": 0.0, "reverse_prob": 0.0, "seed": 42,
+        },
+        "description": "Video granular synthesis — rearrange slices by position, spray, grain size, density. Inspired by Ableton Granulator II.",
+    },
+    "beatrepeat": {
+        "fn": beat_repeat,
+        "category": "temporal",
+        "params": {
+            "interval": 16, "offset": 0, "gate": 8, "grid": 4,
+            "variation": 0.0, "chance": 1.0, "decay": 0.0, "pitch_decay": 0.0, "seed": 42,
+        },
+        "description": "Triggered frame repetition — captures buffer on trigger and repeats with grid subdivision, decay, pitch decay. Inspired by Ableton Beat Repeat.",
+    },
+    "strobe": {
+        "fn": strobe,
+        "category": "temporal",
+        "params": {
+            "rate": 4.0, "color": "white", "shape": "full",
+            "opacity": 1.0, "duty": 0.5, "seed": 42,
+        },
+        "description": "Video strobe — flash color/shape/invert at regular intervals. Colors: white, black, red, blue, green, invert, random. Shapes: full, circle, bars_h, bars_v, grid.",
+    },
+    "lfo": {
+        "fn": lfo,
+        "category": "temporal",
+        "params": {
+            "rate": 2.0, "depth": 0.5, "target": "brightness",
+            "waveform": "sine", "seed": 42,
+        },
+        "description": "Multi-target LFO — oscillate brightness, displacement, channelshift, blur, moire, glitch, invert, or posterize. Waveforms: sine, square, saw, triangle, random.",
     },
 
     # === MODULATION ===
