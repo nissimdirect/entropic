@@ -34,6 +34,12 @@ scripts/
 # Gradio (deprecated - no web UIs per Principle #29)
 gradio_datamosh.py
 
+# Build artifacts
+dist/
+build/
+*.dmg
+*.spec
+
 # Temp
 *.tmp
 *.swp
