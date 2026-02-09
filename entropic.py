@@ -131,6 +131,9 @@ def cmd_apply(args):
     if args.region:
         params["region"] = args.region
     if args.feather:
+        if not args.region:
+            print("Note: --feather has no effect without --region. "
+                  "Feather controls edge blending for region selections.", file=sys.stderr)
         params["feather"] = args.feather
 
     if args.name:
@@ -138,6 +141,26 @@ def cmd_apply(args):
     effects = [{"name": args.effect, "params": params}]
     recipe = create_recipe(args.project, effects, name=args.name)
     print(f"Created recipe {recipe['id']}: {recipe['name']}")
+
+    # Region feedback
+    if args.region:
+        from core.region import parse_region, REGION_PRESETS
+        try:
+            source = get_source_video(args.project)
+            # Get frame dimensions from source
+            import cv2
+            cap = cv2.VideoCapture(str(source))
+            frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            rx, ry, rw, rh = parse_region(args.region, frame_h, frame_w)
+            pct = (rw * rh) / (frame_w * frame_h) * 100
+            label = f"preset '{args.region}'" if args.region in REGION_PRESETS else f"'{args.region}'"
+            print(f"  Region: {label} ({rx},{ry} to {rx+rw},{ry+rh} — {rw}x{rh}px, {pct:.0f}% of frame)")
+            if args.feather:
+                print(f"  Feather: {args.feather}px (smooth edge blend)")
+        except Exception:
+            pass  # Don't fail if we can't resolve — the effect will still work
 
     # Auto-render lo-res preview
     print("Rendering lo-res preview...")
@@ -296,9 +319,12 @@ def cmd_info(args):
     for k, v in entry["params"].items():
         print(f"    {k:20s} = {v}")
     print(f"\n  All effects support 'mix' param (0.0-1.0) for dry/wet blend.")
+    print(f"  All effects support --region and --feather for spatial targeting.")
+    print(f"  Use 'entropic list-presets' to see region presets.")
     print(f"\n  Example:")
     params_example = " ".join(f"--params {k}={v}" for k, v in list(entry["params"].items())[:2])
     print(f"    entropic apply myproject --effect {name} {params_example}")
+    print(f"    entropic apply myproject --effect {name} --region center --feather 10")
     print()
 
 
@@ -352,7 +378,7 @@ def main():
     p.add_argument("--source", required=True, help="Path to source video")
 
     # apply
-    p = sub.add_parser("apply", help="Apply an effect (creates recipe + lo-res preview)")
+    p = sub.add_parser("apply", help="Apply an effect (supports --region for spatial targeting)")
     p.add_argument("project", help="Project name")
     p.add_argument("--effect", required=True, help="Effect name")
     p.add_argument("--name", help="Recipe name (auto-generated if omitted)")

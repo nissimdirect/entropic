@@ -140,7 +140,9 @@ def validate_region(region_spec, frame_width: int = None, frame_height: int = No
         for key in ("x", "y", "w", "h"):
             if key in region_spec:
                 try:
-                    float(region_spec[key])
+                    v = float(region_spec[key])
+                    if v != v or v == float('inf') or v == float('-inf'):
+                        raise SafetyError(f"NaN/Inf not allowed for region key '{key}'")
                 except (TypeError, ValueError):
                     raise SafetyError(f"Invalid region value for '{key}': {region_spec[key]}")
 

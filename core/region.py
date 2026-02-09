@@ -75,6 +75,13 @@ def parse_region(spec, frame_height: int, frame_width: int) -> tuple[int, int, i
         except ValueError:
             raise RegionError(f"Region values must be numbers. Got: '{spec}'")
 
+        # NaN/Inf defense
+        for v in values:
+            if v != v:  # NaN
+                raise RegionError(f"NaN not allowed in region: '{spec}'")
+            if v == float('inf') or v == float('-inf'):
+                raise RegionError(f"Inf not allowed in region: '{spec}'")
+
         # Check for percent mode (all values between 0 and 1)
         if all(0.0 <= v <= 1.0 for v in values):
             # Could be pixels 0,0,1,1 or percentages — treat as percent
@@ -95,6 +102,12 @@ def parse_region(spec, frame_height: int, frame_width: int) -> tuple[int, int, i
         except (TypeError, ValueError) as e:
             raise RegionError(f"Invalid region dict values: {e}")
 
+        for name, v in [("x", x), ("y", y), ("w", w), ("h", h)]:
+            if v != v:
+                raise RegionError(f"NaN not allowed for region key '{name}'")
+            if v == float('inf') or v == float('-inf'):
+                raise RegionError(f"Inf not allowed for region key '{name}'")
+
         if all(0.0 <= v <= 1.0 for v in [x, y, w, h]):
             return _percent_to_pixels(x, y, w, h, frame_width, frame_height)
         return _validate_pixels(int(x), int(y), int(w), int(h),
@@ -105,6 +118,11 @@ def parse_region(spec, frame_height: int, frame_width: int) -> tuple[int, int, i
         if len(spec) != 4:
             raise RegionError(f"Region tuple must have 4 values (x,y,w,h). Got {len(spec)}.")
         x, y, w, h = [float(v) for v in spec]
+        for v in [x, y, w, h]:
+            if v != v:
+                raise RegionError(f"NaN not allowed in region tuple")
+            if v == float('inf') or v == float('-inf'):
+                raise RegionError(f"Inf not allowed in region tuple")
         if all(0.0 <= v <= 1.0 for v in [x, y, w, h]):
             return _percent_to_pixels(x, y, w, h, frame_width, frame_height)
         return _validate_pixels(int(x), int(y), int(w), int(h),

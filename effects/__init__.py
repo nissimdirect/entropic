@@ -587,6 +587,18 @@ def apply_effect(frame, effect_name: str, frame_index: int = 0, total_frames: in
     if "total_frames" in sig.parameters:
         merged["total_frames"] = total_frames
 
+    # Warn about temporal effects + region (experimental interaction)
+    _TEMPORAL_EFFECTS = {"stutter", "dropout", "feedback", "tapestop", "tremolo",
+                         "delay", "decimator", "samplehold"}
+    if region is not None and effect_name in _TEMPORAL_EFFECTS:
+        import warnings
+        warnings.warn(
+            f"Region + temporal effect '{effect_name}' is experimental. "
+            f"Temporal state is shared globally and may produce unexpected results "
+            f"when combined with region masking.",
+            stacklevel=2
+        )
+
     # Apply with region masking if specified
     if region is not None:
         from core.region import apply_to_region
