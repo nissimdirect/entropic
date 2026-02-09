@@ -62,6 +62,8 @@ from effects.adsr import adsr_wrap, ADSREnvelope
 from effects.physics import (
     pixel_liquify, pixel_gravity, pixel_vortex,
     pixel_explode, pixel_elastic, pixel_melt,
+    pixel_blackhole, pixel_antigravity, pixel_magnetic,
+    pixel_timewarp, pixel_dimensionfold,
 )
 
 # Real datamosh is video-level (not per-frame), but we register a marker
@@ -594,6 +596,38 @@ EFFECTS = {
         "category": "distortion",
         "params": {"heat": 3.0, "gravity": 2.0, "viscosity": 0.95, "melt_source": "top", "seed": 42},
         "description": "Melt — pixels drip and flow downward like melting wax",
+    },
+
+    # === IMPOSSIBLE PHYSICS ===
+    "pixelblackhole": {
+        "fn": pixel_blackhole,
+        "category": "distortion",
+        "params": {"mass": 10.0, "spin": 3.0, "event_horizon": 0.08, "spaghettify": 5.0, "accretion_glow": 0.8, "hawking": 0.0, "position": "center", "seed": 42},
+        "description": "Black hole — singularity with event horizon, spaghettification, and accretion glow",
+    },
+    "pixelantigravity": {
+        "fn": pixel_antigravity,
+        "category": "distortion",
+        "params": {"repulsion": 8.0, "num_zones": 4, "zone_radius": 0.2, "oscillate": 1.0, "damping": 0.93, "seed": 42},
+        "description": "Anti-gravity — repulsion zones push pixels outward with oscillating direction",
+    },
+    "pixelmagnetic": {
+        "fn": pixel_magnetic,
+        "category": "distortion",
+        "params": {"field_type": "dipole", "strength": 6.0, "poles": 2, "rotation_speed": 0.5, "damping": 0.92, "seed": 42},
+        "description": "Magnetic fields — pixels curve along dipole/quadrupole/toroidal field lines",
+    },
+    "pixeltimewarp": {
+        "fn": pixel_timewarp,
+        "category": "distortion",
+        "params": {"warp_speed": 2.0, "echo_count": 3, "echo_decay": 0.6, "reverse_probability": 0.3, "damping": 0.9, "seed": 42},
+        "description": "Time warp — displacement reverses with ghosting echoes",
+    },
+    "pixeldimensionfold": {
+        "fn": pixel_dimensionfold,
+        "category": "distortion",
+        "params": {"num_folds": 3, "fold_depth": 8.0, "fold_width": 0.15, "rotation_speed": 0.3, "mirror_folds": True, "seed": 42},
+        "description": "Dimension fold — space folds over itself along rotating axes",
     },
 
     # === DSP FILTERS ===

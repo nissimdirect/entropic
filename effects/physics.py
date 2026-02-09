@@ -500,3 +500,449 @@ def pixel_melt(
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# IMPOSSIBLE PHYSICS — Things that don't exist in nature
+# ══════════════════════════════════════════════════════════════════════
+
+def pixel_blackhole(
+    frame: np.ndarray,
+    mass: float = 10.0,
+    spin: float = 3.0,
+    event_horizon: float = 0.08,
+    spaghettify: float = 5.0,
+    accretion_glow: float = 0.8,
+    hawking: float = 0.0,
+    position: str = "center",
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+) -> np.ndarray:
+    """Black hole — singularity with event horizon, spaghettification, accretion disk.
+
+    Pixels are pulled toward a singularity with increasing force. Inside the
+    event horizon, pixels are stretched radially (spaghettification). An
+    accretion disk glows around the boundary. Hawking radiation creates
+    pixel noise near the horizon.
+
+    Args:
+        mass: Gravitational pull strength (1-30).
+        spin: Frame-dragging rotation strength (0-10).
+        event_horizon: Radius as fraction of frame size (0.02-0.3).
+        spaghettify: Radial stretch inside horizon (0-15).
+        accretion_glow: Brightness boost around horizon (0-2).
+        hawking: Noise emission near horizon (0-3).
+        position: Singularity location ("center", "random", "wander").
+    """
+    h, w = frame.shape[:2]
+    key = f"blackhole_{seed}"
+    state = _get_state(key, h, w)
+
+    rng = np.random.default_rng(seed)
+    t = frame_index / 30.0
+
+    # Singularity position
+    if position == "center":
+        cx, cy = w / 2, h / 2
+    elif position == "random":
+        srng = np.random.default_rng(seed)
+        cx, cy = srng.random() * w, srng.random() * h
+    else:  # wander
+        cx = w / 2 + np.sin(t * 0.3) * w * 0.2
+        cy = h / 2 + np.cos(t * 0.4) * h * 0.2
+
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+    dx = x_grid - cx
+    dy = y_grid - cy
+    dist = np.sqrt(dx * dx + dy * dy) + 0.1
+    horizon_px = event_horizon * max(h, w)
+
+    # Gravitational pull — extreme near singularity
+    grav_force = mass * 500.0 / (dist * dist + horizon_px * 0.5)
+
+    # Radial pull
+    fx = -dx / dist * grav_force * 0.02
+    fy = -dy / dist * grav_force * 0.02
+
+    # Frame-dragging (spin) — tangential force increases near horizon
+    spin_factor = spin * np.exp(-dist / (horizon_px * 3))
+    fx += -dy / dist * spin_factor * 0.5
+    fy += dx / dist * spin_factor * 0.5
+
+    # Spaghettification — stretch radially inside horizon
+    inside_horizon = (dist < horizon_px * 2).astype(np.float32)
+    stretch = spaghettify * inside_horizon * (1.0 - dist / (horizon_px * 2))
+    stretch = np.clip(stretch, 0, spaghettify)
+    fx += dx / dist * stretch * 0.3
+    fy += dy / dist * stretch * 0.3
+
+    state["vx"] = state["vx"] * 0.92 + fx
+    state["vy"] = state["vy"] * 0.92 + fy
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.5
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    result = _remap_frame(frame, state["dx"], state["dy"])
+
+    # Accretion glow — ring around event horizon
+    if accretion_glow > 0:
+        ring = np.exp(-((dist - horizon_px * 1.5) ** 2) / (horizon_px * horizon_px * 0.5))
+        glow = (ring * accretion_glow * 80).astype(np.float32)
+        result = result.astype(np.float32)
+        result[:, :, 2] += glow  # Red channel glow
+        result[:, :, 1] += glow * 0.5  # Warm orange
+        result[:, :, 0] += glow * 0.2  # Slight blue
+
+    # Hawking radiation — noise near horizon
+    if hawking > 0:
+        hawking_zone = np.exp(-((dist - horizon_px) ** 2) / (horizon_px * horizon_px * 0.3))
+        noise = rng.random((h, w)).astype(np.float32) * hawking * 60 * hawking_zone
+        result = result.astype(np.float32)
+        for c in range(min(3, result.shape[2] if result.ndim == 3 else 1)):
+            result[:, :, c] += noise
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_antigravity(
+    frame: np.ndarray,
+    repulsion: float = 8.0,
+    num_zones: int = 4,
+    zone_radius: float = 0.2,
+    oscillate: float = 1.0,
+    damping: float = 0.93,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+) -> np.ndarray:
+    """Anti-gravity — repulsion zones push pixels away, gravity direction flips.
+
+    Zones of repulsion scatter pixels outward. The gravity direction
+    oscillates between push and pull, creating breathing/pulsing distortion.
+
+    Args:
+        repulsion: Push-away force (1-20).
+        num_zones: Number of repulsion centers (1-10).
+        zone_radius: Size of each zone as fraction of frame (0.1-0.8).
+        oscillate: Gravity flip rate in Hz (0=constant repulsion, 0.5-3=pulsing).
+        damping: Velocity decay (0.8-0.99).
+    """
+    h, w = frame.shape[:2]
+    key = f"antigrav_{seed}"
+    state = _get_state(key, h, w)
+
+    rng = np.random.default_rng(seed)
+    t = frame_index / 30.0
+
+    # Gravity direction oscillation
+    if oscillate > 0:
+        grav_dir = np.sin(t * oscillate * np.pi * 2)  # -1 to 1
+    else:
+        grav_dir = -1.0  # Pure repulsion
+
+    # Zone positions
+    positions = rng.random((num_zones, 2))
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+    radius_px = zone_radius * max(h, w)
+
+    fx_total = np.zeros((h, w), dtype=np.float32)
+    fy_total = np.zeros((h, w), dtype=np.float32)
+
+    for i in range(num_zones):
+        zx = positions[i, 0] * w
+        zy = positions[i, 1] * h
+        dx = x_grid - zx
+        dy = y_grid - zy
+        dist = np.sqrt(dx * dx + dy * dy) + 1.0
+        force = repulsion * grav_dir * np.exp(-dist / radius_px) * 100.0 / (dist + 10.0)
+        fx_total += dx / dist * force
+        fy_total += dy / dist * force
+
+    state["vx"] = state["vx"] * damping + fx_total * 0.005
+    state["vy"] = state["vy"] * damping + fy_total * 0.005
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.4
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    result = _remap_frame(frame, state["dx"], state["dy"])
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_magnetic(
+    frame: np.ndarray,
+    field_type: str = "dipole",
+    strength: float = 6.0,
+    poles: int = 2,
+    rotation_speed: float = 0.5,
+    damping: float = 0.92,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+) -> np.ndarray:
+    """Magnetic fields — pixels flow along field lines.
+
+    Simulates magnetic field patterns. Pixels experience Lorentz-like force
+    perpendicular to their velocity (creating curved paths along field lines).
+
+    Args:
+        field_type: "dipole" (N-S), "quadrupole" (4 poles), "toroidal" (donut),
+                    "chaotic" (random field lines).
+        strength: Magnetic force (1-20).
+        poles: Number of poles for multipole fields (2-8).
+        rotation_speed: Field rotation rate (0-2).
+        damping: Velocity decay (0.8-0.99).
+    """
+    h, w = frame.shape[:2]
+    key = f"magnetic_{seed}"
+    state = _get_state(key, h, w)
+
+    rng = np.random.default_rng(seed)
+    t = frame_index / 30.0
+    angle = t * rotation_speed
+
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+    cx, cy = w / 2, h / 2
+    nx = (x_grid - cx) / max(w, 1)
+    ny = (y_grid - cy) / max(h, 1)
+
+    # Rotate field over time
+    rnx = nx * np.cos(angle) - ny * np.sin(angle)
+    rny = nx * np.sin(angle) + ny * np.cos(angle)
+
+    if field_type == "dipole":
+        r = np.sqrt(rnx * rnx + rny * rny) + 0.01
+        bx = 3.0 * rnx * rny / (r ** 4) * strength
+        by = (2.0 * rny * rny - rnx * rnx) / (r ** 4) * strength
+
+    elif field_type == "quadrupole":
+        bx = np.zeros((h, w), dtype=np.float32)
+        by = np.zeros((h, w), dtype=np.float32)
+        for p in range(poles):
+            theta = p * 2 * np.pi / poles
+            px = 0.25 * np.cos(theta)
+            py = 0.25 * np.sin(theta)
+            ddx = rnx - px
+            ddy = rny - py
+            r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
+            sign = (-1) ** p
+            bx += sign * ddx / (r ** 3) * strength * 0.3
+            by += sign * ddy / (r ** 3) * strength * 0.3
+
+    elif field_type == "toroidal":
+        r = np.sqrt(rnx * rnx + rny * rny) + 0.01
+        ring_dist = np.abs(r - 0.3)
+        ring_force = np.exp(-ring_dist * 10) * strength
+        bx = -rny / r * ring_force
+        by = rnx / r * ring_force
+
+    else:  # chaotic
+        bx = np.zeros((h, w), dtype=np.float32)
+        by = np.zeros((h, w), dtype=np.float32)
+        for _ in range(5):
+            rpx = (rng.random() - 0.5) * 0.8
+            rpy = (rng.random() - 0.5) * 0.8
+            ddx = rnx - rpx
+            ddy = rny - rpy
+            r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
+            bx += ddy / (r ** 3) * strength * 0.2
+            by += -ddx / (r ** 3) * strength * 0.2
+
+    # Lorentz-like force: F perpendicular to v
+    if frame_index == 0:
+        state["vx"] = bx * 0.01
+        state["vy"] = by * 0.01
+    else:
+        b_mag = np.sqrt(bx * bx + by * by) + 0.01
+        fx = state["vy"] * b_mag * 0.1 + bx * 0.01
+        fy = -state["vx"] * b_mag * 0.1 + by * 0.01
+        state["vx"] = state["vx"] * damping + fx
+        state["vy"] = state["vy"] * damping + fy
+
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.4
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    result = _remap_frame(frame, state["dx"], state["dy"])
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_timewarp(
+    frame: np.ndarray,
+    warp_speed: float = 2.0,
+    echo_count: int = 3,
+    echo_decay: float = 0.6,
+    reverse_probability: float = 0.3,
+    damping: float = 0.9,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+) -> np.ndarray:
+    """Time warp — displacement reverses, echoes, and ghosts.
+
+    The displacement field periodically reverses direction (pixels spring
+    back to origin then overshoot). Multiple "echo" copies of the displacement
+    create ghosting/afterimage trails.
+
+    Args:
+        warp_speed: How fast time fluctuates (0.5-5).
+        echo_count: Number of displacement echoes (1-8).
+        echo_decay: How much each echo fades (0.3-0.9).
+        reverse_probability: Chance of direction flip per frame (0-1).
+        damping: Velocity decay (0.8-0.99).
+    """
+    h, w = frame.shape[:2]
+    key = f"timewarp_{seed}"
+    state = _get_state(key, h, w)
+
+    # Extra state for echoes
+    if "echoes_dx" not in state:
+        state["echoes_dx"] = [np.zeros((h, w), dtype=np.float32) for _ in range(echo_count)]
+        state["echoes_dy"] = [np.zeros((h, w), dtype=np.float32) for _ in range(echo_count)]
+        state["time_dir"] = 1.0
+
+    rng = np.random.default_rng(seed + frame_index)
+    t = frame_index / 30.0
+
+    # Periodic time reversal
+    if rng.random() < reverse_probability * 0.1:
+        state["time_dir"] *= -1.0
+
+    # Sinusoidal time warping
+    time_factor = state["time_dir"] * (1.0 + np.sin(t * warp_speed * np.pi) * 0.5)
+
+    # Turbulent force
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+    phase = rng.random() * 100
+    fx = 3.0 * np.sin(x_grid / 30.0 + t * 2 + phase) * np.cos(y_grid / 25.0 + t * 1.5)
+    fy = 3.0 * np.cos(x_grid / 25.0 + t * 1.8) * np.sin(y_grid / 30.0 + t * 2.2 + phase)
+
+    state["vx"] = state["vx"] * damping + fx * time_factor * 0.05
+    state["vy"] = state["vy"] * damping + fy * time_factor * 0.05
+
+    # Shift echo history
+    for i in range(echo_count - 1, 0, -1):
+        state["echoes_dx"][i] = state["echoes_dx"][i - 1].copy()
+        state["echoes_dy"][i] = state["echoes_dy"][i - 1].copy()
+    state["echoes_dx"][0] = state["dx"].copy()
+    state["echoes_dy"][0] = state["dy"].copy()
+
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.3
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    # Composite: current + echoes
+    result = _remap_frame(frame, state["dx"], state["dy"]).astype(np.float32)
+    total_weight = 1.0
+
+    for i in range(echo_count):
+        weight = echo_decay ** (i + 1)
+        echo_result = _remap_frame(frame, state["echoes_dx"][i], state["echoes_dy"][i])
+        result += echo_result.astype(np.float32) * weight
+        total_weight += weight
+
+    result /= total_weight
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_dimensionfold(
+    frame: np.ndarray,
+    num_folds: int = 3,
+    fold_depth: float = 8.0,
+    fold_width: float = 0.15,
+    rotation_speed: float = 0.3,
+    mirror_folds: bool = True,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+) -> np.ndarray:
+    """Dimension fold — space folds over itself along rotating axes.
+
+    Strips of the image fold over like pages in a book along
+    rotating axes. Pixels on one side of a fold get displaced to the
+    other side, creating impossible spatial overlaps.
+
+    Args:
+        num_folds: Number of fold axes (1-8).
+        fold_depth: How far pixels fold (2-20).
+        fold_width: Width of fold zone as fraction of frame (0.05-0.5).
+        rotation_speed: How fast fold axes rotate (0-2).
+        mirror_folds: Whether folded pixels mirror or wrap.
+    """
+    h, w = frame.shape[:2]
+    key = f"dimensionfold_{seed}"
+    state = _get_state(key, h, w)
+
+    rng = np.random.default_rng(seed)
+    t = frame_index / 30.0
+
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+    cx, cy = w / 2, h / 2
+
+    fold_offsets = rng.random(num_folds) - 0.5
+    fold_base_angles = rng.random(num_folds) * np.pi
+
+    fx_total = np.zeros((h, w), dtype=np.float32)
+    fy_total = np.zeros((h, w), dtype=np.float32)
+    fold_width_px = fold_width * max(h, w)
+
+    for i in range(num_folds):
+        angle = fold_base_angles[i] + t * rotation_speed * ((-1) ** i)
+        cos_a = np.cos(angle)
+        sin_a = np.sin(angle)
+
+        offset_px = fold_offsets[i] * max(h, w)
+        signed_dist = (x_grid - cx) * cos_a + (y_grid - cy) * sin_a - offset_px
+
+        fold_zone = np.exp(-(signed_dist ** 2) / (fold_width_px ** 2 + 1))
+
+        if mirror_folds:
+            fold_force = -2.0 * signed_dist / (fold_width_px + 1) * fold_depth
+        else:
+            fold_force = fold_depth * np.sign(signed_dist)
+
+        fx_total += cos_a * fold_force * fold_zone * 0.3
+        fy_total += sin_a * fold_force * fold_zone * 0.3
+
+    state["vx"] = state["vx"] * 0.88 + fx_total * 0.05
+    state["vy"] = state["vy"] * 0.88 + fy_total * 0.05
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.4
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    result = _remap_frame(frame, state["dx"], state["dy"])
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
