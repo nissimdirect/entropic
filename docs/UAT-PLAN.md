@@ -1,9 +1,10 @@
-# Entropic v0.2 — User Acceptance Testing Plan
+# Entropic v0.5.1 — User Acceptance Testing Plan
 
-> **Date:** 2026-02-08
-> **Version:** 0.2.0 (37 effects, 7 categories, 27 presets, 31 package recipes)
+> **Date:** 2026-02-09
+> **Version:** 0.5.1 (109 effects, 10 categories, 76 recipes, 12 packages)
 > **Tester:** nissimdirect
 > **Prepared by:** CTO, Red Team, Mad Scientist, Lenny
+> **Updated:** Added Sections 13-17 for Sidechain, DSP Filters, Pixel Physics, Impossible Physics, and Print Degradation
 
 ---
 
@@ -34,10 +35,10 @@ python3 entropic.py new uat-test --source test-videos/clips/YOURCLIP.mp4
 |---|------|---------|----------|--------|-------|
 | 1.1 | Python runs | `python3 --version` | 3.x output | [ ] | |
 | 1.2 | FFmpeg installed | `ffmpeg -version` | Version info | [ ] | |
-| 1.3 | Import works | `python3 -c "from effects import EFFECTS; print(len(EFFECTS))"` | `37` | [ ] | |
+| 1.3 | Import works | `python3 -c "from effects import EFFECTS; print(len(EFFECTS))"` | `109` | [ ] | |
 | 1.4 | CLI help | `python3 entropic.py --help` | Shows commands | [ ] | |
 | 1.5 | Version | `python3 entropic.py --version` | `entropic 0.2.0` | [ ] | |
-| 1.6 | List effects | `python3 entropic.py list-effects --compact` | 37 effects, 7 categories | [ ] | |
+| 1.6 | List effects | `python3 entropic.py list-effects --compact` | 109 effects, 10 categories | [ ] | |
 | 1.7 | Packages CLI help | `python3 entropic_packages.py --help` | Shows commands | [ ] | |
 | 1.8 | Packages list | `python3 entropic_packages.py list` | 7 packages | [ ] | |
 | 1.9 | Existing tests pass | `python3 -m pytest tests/ -v` | All pass (312 expected) | [ ] | |
@@ -365,6 +366,126 @@ Test that "light" recipes are visibly less intense than "heavy" recipes:
 
 ---
 
+## SECTION 13: PIXEL PHYSICS (6 effects)
+
+> **Goal:** All pixel physics effects produce visible displacement and accumulate over frames.
+> **Time:** ~15 minutes
+> **Method:** Apply each effect, verify displacement builds over time (not a static filter).
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 13.1 | pixelliquify | `python3 entropic.py apply uat-test --effect pixelliquify` | Fluid motion, pixels flow and wash | [ ] | |
+| 13.2 | pixelgravity | `python3 entropic.py apply uat-test --effect pixelgravity` | Pixels pulled toward moving points | [ ] | |
+| 13.3 | pixelvortex | `python3 entropic.py apply uat-test --effect pixelvortex` | Swirling whirlpool distortion | [ ] | |
+| 13.4 | pixelexplode | `python3 entropic.py apply uat-test --effect pixelexplode` | Outward blast from center | [ ] | |
+| 13.5 | pixelelastic | `python3 entropic.py apply uat-test --effect pixelelastic` | Stretchy jello-like bounce | [ ] | |
+| 13.6 | pixelmelt | `python3 entropic.py apply uat-test --effect pixelmelt` | Downward dripping motion | [ ] | |
+
+### 13B. Boundary Modes
+
+| # | Test | Command | Expected | Result | Notes |
+|---|------|---------|----------|--------|-------|
+| 13.7 | Wrap boundary | `python3 entropic.py apply uat-test --effect pixelliquify --params boundary=wrap` | Pixels wrap around edges (top↔bottom, left↔right) | [ ] | |
+| 13.8 | Black boundary | `python3 entropic.py apply uat-test --effect pixelexplode --params boundary=black` | Black void where pixels leave frame | [ ] | |
+| 13.9 | Mirror boundary | `python3 entropic.py apply uat-test --effect pixelelastic --params boundary=mirror` | Pixels reflect at edges | [ ] | |
+| 13.10 | Clamp boundary | `python3 entropic.py apply uat-test --effect pixelmelt --params boundary=clamp` | Edge pixels stretch (smear) | [ ] | |
+
+---
+
+## SECTION 14: IMPOSSIBLE PHYSICS (10 effects)
+
+> **Goal:** Impossible physics effects produce visually distinct, otherworldly results.
+> **Time:** ~20 minutes
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 14.1 | pixelblackhole | `python3 entropic.py apply uat-test --effect pixelblackhole` | Singularity with accretion glow, spaghettification | [ ] | |
+| 14.2 | pixelantigravity | `python3 entropic.py apply uat-test --effect pixelantigravity` | Pixels repulsed outward, oscillating | [ ] | |
+| 14.3 | pixelmagnetic | `python3 entropic.py apply uat-test --effect pixelmagnetic` | Curved field line distortion | [ ] | |
+| 14.4 | pixeltimewarp | `python3 entropic.py apply uat-test --effect pixeltimewarp` | Displacement reverses with echo ghosts | [ ] | |
+| 14.5 | pixeldimensionfold | `python3 entropic.py apply uat-test --effect pixeldimensionfold` | Space folds over itself | [ ] | |
+| 14.6 | pixelwormhole | `python3 entropic.py apply uat-test --effect pixelwormhole` | Portal distortion with tunneling | [ ] | |
+| 14.7 | pixelquantum | `python3 entropic.py apply uat-test --effect pixelquantum` | Barrier tunneling + superposition ghosts | [ ] | |
+| 14.8 | pixeldarkenergy | `python3 entropic.py apply uat-test --effect pixeldarkenergy` | Expanding void, pixel separation | [ ] | |
+| 14.9 | pixelsuperfluid | `python3 entropic.py apply uat-test --effect pixelsuperfluid` | Zero-friction flow with glowing vortex cores | [ ] | |
+| 14.10 | pixelbubbles | `python3 entropic.py apply uat-test --effect pixelbubbles` | Multiple bubble portals with void inside | [ ] | |
+
+### 14B. Void Modes (Bubbles)
+
+| # | Test | Command | Expected | Result | Notes |
+|---|------|---------|----------|--------|-------|
+| 14.11 | Black void | `python3 entropic.py apply uat-test --effect pixelbubbles --params void_mode=black` | Black inside portals | [ ] | |
+| 14.12 | White void | `python3 entropic.py apply uat-test --effect pixelbubbles --params void_mode=white` | White inside portals | [ ] | |
+| 14.13 | Invert void | `python3 entropic.py apply uat-test --effect pixelbubbles --params void_mode=invert` | Inverted colors inside portals | [ ] | |
+
+---
+
+## SECTION 15: ORACLE-INSPIRED + PRINT DEGRADATION (5 effects)
+
+> **Goal:** Art-theory-inspired and print simulation effects produce distinctive visuals.
+> **Time:** ~15 minutes
+
+### 15A. Oracle-Inspired
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 15.1 | pixelinkdrop | `python3 entropic.py apply uat-test --effect pixelinkdrop` | Paint drops expanding in water with tendrils | [ ] | |
+| 15.2 | inkdrop soap | `python3 entropic.py apply uat-test --effect pixelinkdrop --params marangoni=5.0 tendrils=12` | Pronounced Marangoni finger instabilities | [ ] | |
+| 15.3 | pixelhaunt | `python3 entropic.py apply uat-test --effect pixelhaunt` | Ghostly afterimages with crackle noise | [ ] | |
+| 15.4 | haunt radial | `python3 entropic.py apply uat-test --effect pixelhaunt --params force_type=radial` | Radial ghost pattern, different from turbulence | [ ] | |
+
+### 15B. Print Degradation
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 15.5 | pixelxerox | `python3 entropic.py apply uat-test --effect pixelxerox` | Progressive copy degradation (contrast, noise, halftone) | [ ] | |
+| 15.6 | xerox heavy | `python3 entropic.py apply uat-test --effect pixelxerox --params generations=20 toner_skip=0.1` | Heavily degraded, near B&W with toner gaps | [ ] | |
+| 15.7 | pixelfax | `python3 entropic.py apply uat-test --effect pixelfax` | Monochrome fax with dither, warm paper tone | [ ] | |
+| 15.8 | fax no-dither | `python3 entropic.py apply uat-test --effect pixelfax --params dither=False` | Continuous-tone grayscale fax (no halftone) | [ ] | |
+| 15.9 | pixelrisograph | `python3 entropic.py apply uat-test --effect pixelrisograph` | Blue+red riso print with ink bleed and misregistration | [ ] | |
+| 15.10 | riso 3-color | `python3 entropic.py apply uat-test --effect pixelrisograph --params num_colors=3 registration_offset=5` | 3-layer riso with visible misalignment | [ ] | |
+
+---
+
+## SECTION 16: DSP FILTERS (12 effects)
+
+> **Goal:** Audio DSP-inspired video filters produce visible modulation effects.
+> **Time:** ~15 minutes
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 16.1 | videoflanger | `python3 entropic.py apply uat-test --effect videoflanger` | Temporal interference pattern | [ ] | |
+| 16.2 | videophaser | `python3 entropic.py apply uat-test --effect videophaser` | Sweeping notch pattern | [ ] | |
+| 16.3 | spatialflanger | `python3 entropic.py apply uat-test --effect spatialflanger` | Diagonal sweep flanging | [ ] | |
+| 16.4 | channelphaser | `python3 entropic.py apply uat-test --effect channelphaser` | Color fringing/tearing | [ ] | |
+| 16.5 | brightnessphaser | `python3 entropic.py apply uat-test --effect brightnessphaser` | Psychedelic solarization sweep | [ ] | |
+| 16.6 | hueflanger | `python3 entropic.py apply uat-test --effect hueflanger` | Color interference oscillation | [ ] | |
+| 16.7 | resonantfilter | `python3 entropic.py apply uat-test --effect resonantfilter` | Synth filter sweep on video | [ ] | |
+| 16.8 | combfilter | `python3 entropic.py apply uat-test --effect combfilter` | Multi-tooth interference | [ ] | |
+| 16.9 | feedbackphaser | `python3 entropic.py apply uat-test --effect feedbackphaser` | Self-oscillation build-up | [ ] | |
+| 16.10 | spectralfreeze | `python3 entropic.py apply uat-test --effect spectralfreeze` | Spectral imprint at intervals | [ ] | |
+| 16.11 | visualreverb | `python3 entropic.py apply uat-test --effect visualreverb` | Visual echo/room convolution | [ ] | |
+| 16.12 | freqflanger | `python3 entropic.py apply uat-test --effect freqflanger` | Spectral ghosting | [ ] | |
+
+---
+
+## SECTION 17: SIDECHAIN EFFECTS (6 effects)
+
+> **Goal:** Sidechain effects respond to internal signal or cross-video input.
+> **Time:** ~10 minutes
+> **Note:** Cross-video effects (sidechaincross, crossfeed, interference) need two input videos.
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 17.1 | sidechainduck | `python3 entropic.py apply uat-test --effect sidechainduck` | Brightness ducks on signal | [ ] | |
+| 17.2 | sidechainpump | `python3 entropic.py apply uat-test --effect sidechainpump` | Rhythmic 4-on-floor ducking | [ ] | |
+| 17.3 | sidechaingate | `python3 entropic.py apply uat-test --effect sidechaingate` | Video gates on/off by signal | [ ] | |
+| 17.4 | sidechaincross | Requires 2 videos — see sidechain docs | One video busts through another | [ ] | |
+| 17.5 | sidechaincrossfeed | Requires 2 videos — see sidechain docs | Channel mixing between videos | [ ] | |
+| 17.6 | sidechaininterference | Requires 2 videos — see sidechain docs | Phase/amplitude interference | [ ] | |
+
+---
+
 ## SCORING SUMMARY
 
 Fill this in after testing:
@@ -383,9 +504,14 @@ Fill this in after testing:
 | 10. Visual Quality | 9 | | | |
 | 11. Edge Cases | 7 | | | |
 | 12. Clip Extraction | 5 | | | |
-| **TOTAL** | **134** | | | |
+| 13. Pixel Physics | 10 | | | |
+| 14. Impossible Physics | 13 | | | |
+| 15. Oracle + Print | 10 | | | |
+| 16. DSP Filters | 12 | | | |
+| 17. Sidechain | 6 | | | |
+| **TOTAL** | **185** | | | |
 
-**Ship criteria:** 90%+ pass rate (121+ of 134), zero critical failures in Sections 1, 2, 9.
+**Ship criteria:** 90%+ pass rate (167+ of 185), zero critical failures in Sections 1, 2, 9.
 
 ---
 

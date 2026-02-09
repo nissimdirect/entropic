@@ -28,12 +28,44 @@ def _get_state(key, h, w):
     return _physics_state[key]
 
 
-def _remap_frame(frame, dx, dy):
-    """Remap frame through displacement field."""
+def _remap_frame(frame, dx, dy, boundary="clamp"):
+    """Remap frame through displacement field.
+
+    Args:
+        boundary: What happens when pixels leave the frame.
+            "clamp"  — edge pixel stretches (original behavior)
+            "black"  — out-of-bounds reveals black void
+            "wrap"   — tiles: bottom bleeds into top, right into left
+            "mirror" — reflects at edges
+    """
     h, w = frame.shape[:2]
     y_coords, x_coords = np.mgrid[0:h, 0:w].astype(np.float32)
-    map_x = np.clip(x_coords + dx, 0, w - 1).astype(np.float32)
-    map_y = np.clip(y_coords + dy, 0, h - 1).astype(np.float32)
+    raw_x = x_coords + dx
+    raw_y = y_coords + dy
+
+    if boundary == "wrap":
+        map_x = (raw_x % w).astype(np.float32)
+        map_y = (raw_y % h).astype(np.float32)
+    elif boundary == "mirror":
+        # Reflect: fold coordinates back at boundaries
+        map_x = raw_x % (2 * w)
+        map_x = np.where(map_x >= w, 2 * w - map_x - 1, map_x)
+        map_x = np.clip(map_x, 0, w - 1).astype(np.float32)
+        map_y = raw_y % (2 * h)
+        map_y = np.where(map_y >= h, 2 * h - map_y - 1, map_y)
+        map_y = np.clip(map_y, 0, h - 1).astype(np.float32)
+    elif boundary == "black":
+        map_x = raw_x.astype(np.float32)
+        map_y = raw_y.astype(np.float32)
+        result = cv2.remap(
+            frame.astype(np.float32), map_x, map_y,
+            cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0),
+        )
+        return result
+    else:  # clamp
+        map_x = np.clip(raw_x, 0, w - 1).astype(np.float32)
+        map_y = np.clip(raw_y, 0, h - 1).astype(np.float32)
+
     return cv2.remap(frame.astype(np.float32), map_x, map_y, cv2.INTER_LINEAR)
 
 
@@ -46,6 +78,7 @@ def pixel_liquify(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "wrap",
 ) -> np.ndarray:
     """Liquify — pixels become fluid and wash around.
 
@@ -95,7 +128,7 @@ def pixel_liquify(
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
-    result = _remap_frame(frame, state["dx"], state["dy"])
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
     if frame_index >= total_frames - 1:
         _physics_state.pop(f"liquify_{seed}", None)
@@ -113,6 +146,7 @@ def pixel_gravity(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "black",
 ) -> np.ndarray:
     """Gravity attractors — pixels get pulled toward random points.
 
@@ -171,7 +205,7 @@ def pixel_gravity(
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
-    result = _remap_frame(frame, state["dx"], state["dy"])
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
     if frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
@@ -189,6 +223,7 @@ def pixel_vortex(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "wrap",
 ) -> np.ndarray:
     """Vortex — swirling whirlpools pull pixels into spirals.
 
@@ -247,7 +282,7 @@ def pixel_vortex(
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
-    result = _remap_frame(frame, state["dx"], state["dy"])
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
     if frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
@@ -265,6 +300,7 @@ def pixel_explode(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "black",
 ) -> np.ndarray:
     """Explode — pixels blast outward from a point.
 
@@ -330,7 +366,7 @@ def pixel_explode(
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
-    result = _remap_frame(frame, state["dx"], state["dy"])
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
     if frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
@@ -348,6 +384,7 @@ def pixel_elastic(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "mirror",
 ) -> np.ndarray:
     """Elastic — pixels are on springs that stretch and snap back.
 
@@ -427,7 +464,7 @@ def pixel_elastic(
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
-    result = _remap_frame(frame, state["dx"], state["dy"])
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
     if frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
@@ -444,6 +481,7 @@ def pixel_melt(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "black",
 ) -> np.ndarray:
     """Melt — pixels drip and flow downward like melting wax.
 
@@ -494,7 +532,7 @@ def pixel_melt(
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
-    result = _remap_frame(frame, state["dx"], state["dy"])
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
     if frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
@@ -518,6 +556,7 @@ def pixel_blackhole(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "black",
 ) -> np.ndarray:
     """Black hole — singularity with event horizon, spaghettification, accretion disk.
 
@@ -586,7 +625,7 @@ def pixel_blackhole(
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
-    result = _remap_frame(frame, state["dx"], state["dy"])
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
     # Accretion glow — ring around event horizon
     if accretion_glow > 0:
@@ -621,6 +660,7 @@ def pixel_antigravity(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "wrap",
 ) -> np.ndarray:
     """Anti-gravity — repulsion zones push pixels away, gravity direction flips.
 
@@ -674,7 +714,7 @@ def pixel_antigravity(
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
-    result = _remap_frame(frame, state["dx"], state["dy"])
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
     if frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
@@ -692,6 +732,7 @@ def pixel_magnetic(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "wrap",
 ) -> np.ndarray:
     """Magnetic fields — pixels flow along field lines.
 
@@ -779,7 +820,7 @@ def pixel_magnetic(
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
-    result = _remap_frame(frame, state["dx"], state["dy"])
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
     if frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
@@ -797,6 +838,7 @@ def pixel_timewarp(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "wrap",
 ) -> np.ndarray:
     """Time warp — displacement reverses, echoes, and ghosts.
 
@@ -855,12 +897,12 @@ def pixel_timewarp(
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
     # Composite: current + echoes
-    result = _remap_frame(frame, state["dx"], state["dy"]).astype(np.float32)
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary).astype(np.float32)
     total_weight = 1.0
 
     for i in range(echo_count):
         weight = echo_decay ** (i + 1)
-        echo_result = _remap_frame(frame, state["echoes_dx"][i], state["echoes_dy"][i])
+        echo_result = _remap_frame(frame, state["echoes_dx"][i], state["echoes_dy"][i], boundary)
         result += echo_result.astype(np.float32) * weight
         total_weight += weight
 
@@ -882,6 +924,7 @@ def pixel_dimensionfold(
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
+    boundary: str = "wrap",
 ) -> np.ndarray:
     """Dimension fold — space folds over itself along rotating axes.
 
@@ -940,9 +983,1068 @@ def pixel_dimensionfold(
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
 
-    result = _remap_frame(frame, state["dx"], state["dy"])
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
     if frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# IMPOSSIBLE PHYSICS II — Deeper into the impossible
+# ══════════════════════════════════════════════════════════════════════
+
+def pixel_wormhole(
+    frame: np.ndarray,
+    portal_radius: float = 0.1,
+    tunnel_strength: float = 8.0,
+    spin: float = 2.0,
+    distortion_ring: float = 1.5,
+    wander: float = 0.3,
+    damping: float = 0.9,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    boundary: str = "black",
+) -> np.ndarray:
+    """Wormhole — paired portals teleport pixels between two points.
+
+    Two connected portals warp space so pixels near one get displaced toward
+    the other. The throat of each portal spins and distorts surrounding pixels.
+    Space between the portals stretches like a rubber sheet.
+
+    Args:
+        portal_radius: Size of each portal as fraction of frame (0.03-0.3).
+        tunnel_strength: How strongly pixels get pulled through (1-20).
+        spin: Rotational distortion at each mouth (0-10).
+        distortion_ring: Width of warped ring around portals (0.5-3).
+        wander: How much portals drift over time (0-1).
+        damping: Velocity decay (0.8-0.99).
+    """
+    h, w = frame.shape[:2]
+    key = f"wormhole_{seed}"
+    state = _get_state(key, h, w)
+
+    rng = np.random.default_rng(seed)
+    t = frame_index / 30.0
+
+    # Two portal positions — kept apart in opposite quadrants
+    base = rng.random((2, 2))
+    p1x = base[0, 0] * 0.4 * w + w * 0.1
+    p1y = base[0, 1] * 0.4 * h + h * 0.1
+    p2x = base[1, 0] * 0.4 * w + w * 0.5
+    p2y = base[1, 1] * 0.4 * h + h * 0.5
+
+    if wander > 0:
+        p1x += np.sin(t * 0.4) * w * wander * 0.15
+        p1y += np.cos(t * 0.5) * h * wander * 0.15
+        p2x += np.sin(t * 0.3 + 2.0) * w * wander * 0.15
+        p2y += np.cos(t * 0.45 + 1.5) * h * wander * 0.15
+
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+    radius_px = portal_radius * max(h, w)
+
+    fx_total = np.zeros((h, w), dtype=np.float32)
+    fy_total = np.zeros((h, w), dtype=np.float32)
+
+    portals = [(p1x, p1y, p2x, p2y), (p2x, p2y, p1x, p1y)]
+    for src_x, src_y, dst_x, dst_y in portals:
+        dx = x_grid - src_x
+        dy = y_grid - src_y
+        dist = np.sqrt(dx * dx + dy * dy) + 0.1
+
+        # Tunnel pull: near this portal -> push toward the other
+        proximity = np.exp(-(dist * dist) / (radius_px * radius_px * distortion_ring * distortion_ring))
+        tunnel_dx = (dst_x - x_grid) * proximity * tunnel_strength * 0.01
+        tunnel_dy = (dst_y - y_grid) * proximity * tunnel_strength * 0.01
+
+        # Spin at the mouth
+        spin_factor = spin * np.exp(-dist / (radius_px * 2))
+        spin_fx = -dy / dist * spin_factor * 0.3
+        spin_fy = dx / dist * spin_factor * 0.3
+
+        fx_total += tunnel_dx + spin_fx
+        fy_total += tunnel_dy + spin_fy
+
+    state["vx"] = state["vx"] * damping + fx_total
+    state["vy"] = state["vy"] * damping + fy_total
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.5
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
+
+    # Portal glow — bright rings at each mouth
+    result = result.astype(np.float32)
+    for px, py in [(p1x, p1y), (p2x, p2y)]:
+        pdx = x_grid - px
+        pdy = y_grid - py
+        pdist = np.sqrt(pdx * pdx + pdy * pdy) + 0.1
+        ring = np.exp(-((pdist - radius_px) ** 2) / (radius_px * radius_px * 0.2))
+        glow = ring * 60
+        result[:, :, 0] += glow * 0.3
+        result[:, :, 1] += glow * 0.6
+        result[:, :, 2] += glow * 1.0
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_quantum(
+    frame: np.ndarray,
+    tunnel_prob: float = 0.3,
+    barrier_count: int = 4,
+    barrier_width: float = 0.05,
+    uncertainty: float = 5.0,
+    superposition: float = 0.4,
+    decoherence: float = 0.02,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    boundary: str = "wrap",
+) -> np.ndarray:
+    """Quantum — pixels tunnel through barriers and exist in superposition.
+
+    Barriers slice the frame into zones. Pixels near a barrier have a
+    probability of tunneling through (teleporting past). Between barriers,
+    pixels spread into probability clouds. Multiple superposition copies
+    fade in and out, collapsing via decoherence.
+
+    Args:
+        tunnel_prob: Chance of tunneling through a barrier (0-1).
+        barrier_count: Number of barriers across the frame (1-10).
+        barrier_width: Width of each barrier as fraction of frame (0.01-0.15).
+        uncertainty: Heisenberg spread — position smear amount (1-15).
+        superposition: Strength of ghost copies (0-1). 0=off.
+        decoherence: Rate at which superposition collapses (0-0.1).
+    """
+    h, w = frame.shape[:2]
+    key = f"quantum_{seed}"
+    state = _get_state(key, h, w)
+
+    rng = np.random.default_rng(seed)
+    t = frame_index / 30.0
+
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+
+    # Barrier positions (vertical slices with subtle drift)
+    barrier_positions = []
+    for i in range(barrier_count):
+        bx = (i + 1) * w / (barrier_count + 1)
+        bx += np.sin(t * 0.5 + i * 1.3) * w * 0.03
+        barrier_positions.append(bx)
+
+    barrier_width_px = barrier_width * w
+
+    fx_total = np.zeros((h, w), dtype=np.float32)
+    fy_total = np.zeros((h, w), dtype=np.float32)
+
+    for bx in barrier_positions:
+        dist_to_barrier = x_grid - bx
+        in_barrier = np.exp(-(dist_to_barrier ** 2) / (barrier_width_px ** 2))
+
+        # Tunnel: random pixels near barrier get pushed through
+        tunnel_rng = np.random.default_rng(seed + frame_index + int(bx))
+        tunnel_mask = tunnel_rng.random((h, w)).astype(np.float32) < tunnel_prob
+        tunnel_push = in_barrier * tunnel_mask * np.sign(dist_to_barrier) * barrier_width_px * 2
+        fx_total += tunnel_push * 0.3
+
+    # Heisenberg uncertainty: random displacement grows over time
+    uncertainty_t = uncertainty * min(1.0, frame_index / max(total_frames * 0.3, 1))
+    unc_rng = np.random.default_rng(seed + frame_index * 7)
+    fx_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.2
+    fy_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.2
+
+    state["vx"] = state["vx"] * 0.85 + fx_total * 0.08
+    state["vy"] = state["vy"] * 0.85 + fy_total * 0.08
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.4
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
+
+    # Superposition: ghost copies at offset positions
+    if superposition > 0:
+        ghost_strength = superposition * max(0, 1.0 - decoherence * frame_index)
+        if ghost_strength > 0.01:
+            result = result.astype(np.float32)
+            for copy_i in range(2):
+                offset_x = np.sin(t * (1.5 + copy_i) + copy_i * 2.5) * uncertainty_t * 3
+                offset_y = np.cos(t * (1.2 + copy_i) + copy_i * 1.8) * uncertainty_t * 3
+                ghost = _remap_frame(frame, state["dx"] + offset_x, state["dy"] + offset_y, boundary)
+                result += ghost.astype(np.float32) * ghost_strength * 0.5
+            result /= (1.0 + ghost_strength)
+
+    # Barrier visualization: faint green vertical lines
+    result = result.astype(np.float32)
+    for bx in barrier_positions:
+        dist = np.abs(x_grid - bx)
+        barrier_vis = np.exp(-(dist ** 2) / (barrier_width_px ** 2 * 0.3))
+        result[:, :, 1] += barrier_vis * 30
+        result[:, :, 2] += barrier_vis * 15
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_darkenergy(
+    frame: np.ndarray,
+    expansion_rate: float = 3.0,
+    acceleration: float = 0.05,
+    void_color: tuple = (5, 0, 15),
+    structure: float = 0.5,
+    hubble_zones: int = 6,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    boundary: str = "black",
+) -> np.ndarray:
+    """Dark energy — accelerating expansion tears pixels apart.
+
+    Every point expands away from every other point (Hubble expansion).
+    The expansion accelerates over time. Gaps between pixel clusters
+    fill with void. Structure creates cosmic web — filaments that resist
+    expansion while voids grow.
+
+    Args:
+        expansion_rate: Base expansion speed (0.5-10).
+        acceleration: How much expansion speeds up per frame (0-0.2).
+        void_color: RGB color of void between pixels (dark purple default).
+        structure: Cosmic web resistance (0-1). Higher = more filaments resist.
+        hubble_zones: Number of expansion centers (2-12).
+    """
+    h, w = frame.shape[:2]
+    key = f"darkenergy_{seed}"
+    state = _get_state(key, h, w)
+
+    if "expansion_factor" not in state:
+        state["expansion_factor"] = 1.0
+    state["expansion_factor"] += acceleration
+    current_rate = expansion_rate * state["expansion_factor"]
+
+    rng = np.random.default_rng(seed)
+
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+
+    fx_total = np.zeros((h, w), dtype=np.float32)
+    fy_total = np.zeros((h, w), dtype=np.float32)
+
+    # Hubble expansion from multiple centers
+    zone_positions = rng.random((hubble_zones, 2))
+    for i in range(hubble_zones):
+        zx = zone_positions[i, 0] * w
+        zy = zone_positions[i, 1] * h
+        dx = x_grid - zx
+        dy = y_grid - zy
+        dist = np.sqrt(dx * dx + dy * dy) + 1.0
+
+        # Hubble's law: velocity proportional to distance
+        expand = current_rate * dist * 0.0001
+        fx_total += dx / dist * expand
+        fy_total += dy / dist * expand
+
+    # Cosmic web: edges = dense filaments that resist expansion
+    if structure > 0:
+        gray = np.mean(frame.astype(np.float32), axis=2)
+        edges = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3) ** 2 + \
+                cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3) ** 2
+        edges = np.sqrt(edges)
+        edges = edges / (edges.max() + 0.01)
+        resistance = 1.0 - edges * structure
+        fx_total *= resistance
+        fy_total *= resistance
+
+    state["vx"] = state["vx"] * 0.95 + fx_total
+    state["vy"] = state["vy"] * 0.95 + fy_total
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.6
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
+
+    # Void fill: displaced pixels reveal dark void
+    disp_magnitude = np.sqrt(state["dx"] ** 2 + state["dy"] ** 2)
+    void_threshold = max(h, w) * 0.05
+    void_mask = np.clip((disp_magnitude - void_threshold) / (void_threshold * 2), 0, 1)
+
+    if void_mask.max() > 0.01:
+        result = result.astype(np.float32)
+        for c in range(3):
+            result[:, :, c] = result[:, :, c] * (1 - void_mask) + void_color[c] * void_mask
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_superfluid(
+    frame: np.ndarray,
+    flow_speed: float = 6.0,
+    quantized_vortices: int = 5,
+    vortex_strength: float = 4.0,
+    climb_force: float = 2.0,
+    viscosity: float = 0.0,
+    thermal_noise: float = 0.5,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    boundary: str = "wrap",
+) -> np.ndarray:
+    """Superfluid — zero-friction flow with quantized vortices and edge climbing.
+
+    Pixels flow with zero viscosity (no energy loss). Vortices only exist at
+    quantized strengths (integer multiples). Flow climbs up frame edges
+    (superfluidity). Below critical velocity, flow is smooth; above it,
+    quantized vortices nucleate.
+
+    Args:
+        flow_speed: Base flow velocity (1-15).
+        quantized_vortices: Number of quantized vortex cores (1-12).
+        vortex_strength: Strength per vortex (integer units) (1-10).
+        climb_force: How strongly flow climbs edges (0-5).
+        viscosity: 0 for true superfluid, >0 adds drag (0-0.5).
+        thermal_noise: Random perturbation (phonon excitations) (0-3).
+    """
+    h, w = frame.shape[:2]
+    key = f"superfluid_{seed}"
+    state = _get_state(key, h, w)
+
+    rng = np.random.default_rng(seed)
+    t = frame_index / 30.0
+
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+
+    # Base laminar flow
+    base_angle = rng.random() * np.pi * 2
+    base_fx = np.cos(base_angle) * flow_speed * 0.02
+    base_fy = np.sin(base_angle) * flow_speed * 0.02
+
+    fx_total = np.full((h, w), base_fx, dtype=np.float32)
+    fy_total = np.full((h, w), base_fy, dtype=np.float32)
+
+    # Quantized vortices with integer circulation
+    vortex_positions = rng.random((quantized_vortices, 2))
+    vortex_charges = rng.choice([-1, 1], size=quantized_vortices)
+
+    for i in range(quantized_vortices):
+        vx = vortex_positions[i, 0] * w + np.sin(t * 0.3 + i * 1.7) * w * 0.05
+        vy = vortex_positions[i, 1] * h + np.cos(t * 0.4 + i * 2.3) * h * 0.05
+
+        ddx = x_grid - vx
+        ddy = y_grid - vy
+        dist = np.sqrt(ddx * ddx + ddy * ddy) + 1.0
+
+        quant = int(round(vortex_strength)) * vortex_charges[i]
+        circ = quant / (dist + 5.0) * 50.0
+
+        fx_total += -ddy / dist * circ * 0.02
+        fy_total += ddx / dist * circ * 0.02
+
+    # Edge climbing: flow creeps up frame boundaries
+    if climb_force > 0:
+        near_left = np.exp(-x_grid / (w * 0.05))
+        near_right = np.exp(-(w - x_grid) / (w * 0.05))
+        near_top = np.exp(-y_grid / (h * 0.05))
+        near_bottom = np.exp(-(h - y_grid) / (h * 0.05))
+
+        fx_total += -(near_top + near_bottom) * climb_force * 0.3
+        fy_total += -(near_left + near_right) * climb_force * 0.3
+
+    # Thermal noise (phonon excitations)
+    if thermal_noise > 0:
+        noise_rng = np.random.default_rng(seed + frame_index * 3)
+        fx_total += (noise_rng.random((h, w)).astype(np.float32) - 0.5) * thermal_noise * 0.3
+        fy_total += (noise_rng.random((h, w)).astype(np.float32) - 0.5) * thermal_noise * 0.3
+
+    # Zero viscosity = no damping (energy conserved)
+    effective_damping = 1.0 - viscosity * 0.1
+    state["vx"] = state["vx"] * effective_damping + fx_total * 0.03
+    state["vy"] = state["vy"] * effective_damping + fy_total * 0.03
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.5
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
+
+    # Vortex core glow: colored dots at quantized cores
+    result = result.astype(np.float32)
+    for i in range(quantized_vortices):
+        vx_pos = vortex_positions[i, 0] * w + np.sin(t * 0.3 + i * 1.7) * w * 0.05
+        vy_pos = vortex_positions[i, 1] * h + np.cos(t * 0.4 + i * 2.3) * h * 0.05
+        cdx = x_grid - vx_pos
+        cdy = y_grid - vy_pos
+        cdist = np.sqrt(cdx * cdx + cdy * cdy) + 0.1
+        core_glow = np.exp(-(cdist ** 2) / 100.0) * 40
+        if vortex_charges[i] > 0:
+            result[:, :, 0] += core_glow * 0.4
+            result[:, :, 1] += core_glow * 0.6
+            result[:, :, 2] += core_glow
+        else:
+            result[:, :, 2] += core_glow
+            result[:, :, 1] += core_glow * 0.3
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# IMPOSSIBLE PHYSICS III — Oracle-inspired ("Do we need holes?")
+# ══════════════════════════════════════════════════════════════════════
+
+def pixel_bubbles(
+    frame: np.ndarray,
+    num_portals: int = 6,
+    min_radius: float = 0.03,
+    max_radius: float = 0.12,
+    pull_strength: float = 6.0,
+    spin: float = 1.5,
+    void_mode: str = "black",
+    wander: float = 0.4,
+    damping: float = 0.91,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    boundary: str = "black",
+) -> np.ndarray:
+    """Bubbles — multiple portals of random size with negative space inside.
+
+    Like wormhole, but with controllable count, random sizes, and black
+    void inside each portal. Inspired by "Do we need holes?" and
+    "Astro-Black — color the void."
+
+    Args:
+        num_portals: Number of bubble portals (1-20).
+        min_radius: Smallest portal as fraction of frame (0.01-0.1).
+        max_radius: Largest portal as fraction of frame (0.05-0.3).
+        pull_strength: Inward pull toward each portal center (1-15).
+        spin: Rotational distortion at each mouth (0-8).
+        void_mode: What fills the portal interior ("black", "white", "invert").
+        wander: How much portals drift (0-1).
+        damping: Velocity decay (0.8-0.99).
+    """
+    h, w = frame.shape[:2]
+    key = f"bubbles_{seed}"
+    state = _get_state(key, h, w)
+
+    rng = np.random.default_rng(seed)
+    t = frame_index / 30.0
+
+    # Generate portal positions and radii (seeded)
+    positions = rng.random((num_portals, 2))
+    radii_frac = rng.uniform(min_radius, max_radius, num_portals)
+
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+    fx_total = np.zeros((h, w), dtype=np.float32)
+    fy_total = np.zeros((h, w), dtype=np.float32)
+
+    portal_data = []
+    for i in range(num_portals):
+        px = positions[i, 0] * w
+        py = positions[i, 1] * h
+        radius_px = radii_frac[i] * max(h, w)
+
+        if wander > 0:
+            px += np.sin(t * (0.3 + i * 0.1) + i * 2.1) * w * wander * 0.1
+            py += np.cos(t * (0.4 + i * 0.15) + i * 1.7) * h * wander * 0.1
+
+        portal_data.append((px, py, radius_px))
+
+        dx = x_grid - px
+        dy = y_grid - py
+        dist = np.sqrt(dx * dx + dy * dy) + 0.1
+
+        # Inward pull with strong falloff
+        proximity = np.exp(-(dist * dist) / (radius_px * radius_px * 4))
+        fx_total += -dx / dist * pull_strength * proximity * 0.3
+        fy_total += -dy / dist * pull_strength * proximity * 0.3
+
+        # Spin at mouth
+        spin_factor = spin * np.exp(-dist / (radius_px * 1.5))
+        fx_total += -dy / dist * spin_factor * 0.2
+        fy_total += dx / dist * spin_factor * 0.2
+
+    state["vx"] = state["vx"] * damping + fx_total * 0.05
+    state["vy"] = state["vy"] * damping + fy_total * 0.05
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.5
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
+    result = result.astype(np.float32)
+
+    # Void inside each portal + glow ring around edge
+    for px, py, radius_px in portal_data:
+        dx = x_grid - px
+        dy = y_grid - py
+        dist = np.sqrt(dx * dx + dy * dy) + 0.1
+
+        # Void mask: inside the portal
+        void_mask = np.clip(1.0 - dist / radius_px, 0, 1)
+        # Smooth edge with sigmoid
+        void_mask = 1.0 / (1.0 + np.exp((dist - radius_px * 0.7) / (radius_px * 0.1 + 0.1)))
+
+        if void_mode == "black":
+            for c in range(3):
+                result[:, :, c] *= (1.0 - void_mask)
+        elif void_mode == "white":
+            for c in range(3):
+                result[:, :, c] = result[:, :, c] * (1.0 - void_mask) + 255.0 * void_mask
+        elif void_mode == "invert":
+            for c in range(3):
+                result[:, :, c] = result[:, :, c] * (1.0 - void_mask) + (255.0 - result[:, :, c]) * void_mask
+
+        # Glow ring at edge
+        ring = np.exp(-((dist - radius_px) ** 2) / (radius_px * radius_px * 0.08))
+        result[:, :, 0] += ring * 25
+        result[:, :, 1] += ring * 40
+        result[:, :, 2] += ring * 50
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_inkdrop(
+    frame: np.ndarray,
+    num_drops: int = 4,
+    diffusion_rate: float = 3.0,
+    surface_tension: float = 0.6,
+    marangoni: float = 2.0,
+    tendrils: int = 8,
+    drop_interval: float = 0.3,
+    color_shift: float = 0.5,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    boundary: str = "wrap",
+) -> np.ndarray:
+    """Ink drop — paint dropping into water with diffusion and surface tension.
+
+    Simulates ink/paint drops falling into water. Each drop creates an
+    expanding ring that develops tendrils (Marangoni convection from soap).
+    Drops interact — their diffusion fronts push against each other.
+    Inspired by "Water music — what happens when the medium dissolves?"
+
+    Args:
+        num_drops: Number of ink drops (1-12).
+        diffusion_rate: How fast ink spreads (0.5-8).
+        surface_tension: Resistance at diffusion front (0-1). Higher = tighter circles.
+        marangoni: Tendril/finger instability strength (0-5). The soap effect.
+        tendrils: Number of fingers/tendrils per drop (3-16).
+        drop_interval: Time between drops as fraction of duration (0-1). 0=all at once.
+        color_shift: How much drops shift hue as they spread (0-2).
+    """
+    h, w = frame.shape[:2]
+    key = f"inkdrop_{seed}"
+    state = _get_state(key, h, w)
+
+    rng = np.random.default_rng(seed)
+    t = frame_index / 30.0
+    progress = frame_index / max(total_frames - 1, 1)
+
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+
+    # Generate drop positions and timing
+    drop_positions = rng.random((num_drops, 2))
+    drop_phases = rng.random(num_drops) * np.pi * 2  # angular offset for tendrils
+
+    fx_total = np.zeros((h, w), dtype=np.float32)
+    fy_total = np.zeros((h, w), dtype=np.float32)
+
+    for i in range(num_drops):
+        # Staggered drop timing
+        drop_start = i * drop_interval / max(num_drops - 1, 1) if num_drops > 1 else 0
+        if progress < drop_start:
+            continue
+
+        drop_age = (progress - drop_start) / max(1.0 - drop_start, 0.01)
+        drop_age = min(drop_age, 1.0)
+
+        dx_pos = drop_positions[i, 0] * w
+        dy_pos = drop_positions[i, 1] * h
+
+        dx = x_grid - dx_pos
+        dy = y_grid - dy_pos
+        dist = np.sqrt(dx * dx + dy * dy) + 0.1
+
+        # Expanding diffusion front
+        front_radius = drop_age * max(h, w) * 0.2 * diffusion_rate
+        front_width = front_radius * 0.15 + 5.0
+
+        # Distance from the expanding front
+        dist_from_front = dist - front_radius
+        at_front = np.exp(-(dist_from_front ** 2) / (front_width ** 2))
+
+        # Radial expansion force
+        expand_force = at_front * diffusion_rate * 0.5
+        fx_total += dx / dist * expand_force
+        fy_total += dy / dist * expand_force
+
+        # Surface tension: pulls front inward slightly (smoothing)
+        if surface_tension > 0:
+            tension_force = -surface_tension * at_front * np.sign(dist_from_front) * 0.3
+            fx_total += dx / dist * tension_force
+            fy_total += dy / dist * tension_force
+
+        # Marangoni convection (soap effect): creates tendrils/fingers
+        if marangoni > 0 and tendrils > 0:
+            angle = np.arctan2(dy, dx)
+            # Tendril pattern: sinusoidal modulation around the ring
+            tendril_pattern = np.sin(angle * tendrils + drop_phases[i] + t * 0.5)
+            tendril_force = tendril_pattern * at_front * marangoni * 0.4
+
+            # Tendrils push outward at peaks, inward at troughs
+            fx_total += dx / dist * tendril_force * 0.3
+            fy_total += dy / dist * tendril_force * 0.3
+
+            # Tangential swirl at tendrils
+            swirl = tendril_pattern * at_front * marangoni * 0.2
+            fx_total += -dy / dist * swirl * 0.15
+            fy_total += dx / dist * swirl * 0.15
+
+    state["vx"] = state["vx"] * 0.88 + fx_total * 0.04
+    state["vy"] = state["vy"] * 0.88 + fy_total * 0.04
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.4
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
+
+    # Color shift at diffusion fronts
+    if color_shift > 0:
+        disp_mag = np.sqrt(state["dx"] ** 2 + state["dy"] ** 2)
+        shift_mask = np.clip(disp_mag / (max(h, w) * 0.1), 0, 1) * color_shift
+
+        if shift_mask.max() > 0.01:
+            result = result.astype(np.float32)
+            # Hue rotation proportional to displacement
+            r, g, b = result[:, :, 0], result[:, :, 1], result[:, :, 2]
+            cos_a = np.cos(shift_mask * np.pi * 0.5)
+            sin_a = np.sin(shift_mask * np.pi * 0.5)
+            new_r = r * cos_a + g * sin_a
+            new_g = g * cos_a - r * sin_a * 0.5 + b * sin_a * 0.5
+            new_b = b * cos_a - g * sin_a
+            result[:, :, 0] = new_r
+            result[:, :, 1] = new_g
+            result[:, :, 2] = new_b
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_haunt(
+    frame: np.ndarray,
+    force_type: str = "turbulence",
+    force_strength: float = 4.0,
+    ghost_persistence: float = 0.95,
+    ghost_opacity: float = 0.4,
+    crackle: float = 0.3,
+    damping: float = 0.9,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    boundary: str = "wrap",
+) -> np.ndarray:
+    """Haunt — ghostly afterimages linger where pixels used to be.
+
+    As pixels get displaced, their old positions leave behind ghosts —
+    semi-transparent afterimages that slowly fade. The ghost is the
+    presence of an absence. Crackle adds medium-memory noise at ghost
+    boundaries. Inspired by Hauntology: "the medium's memory showing through."
+
+    Args:
+        force_type: What drives the displacement ("turbulence", "radial", "drift").
+        force_strength: How hard pixels get pushed (1-15).
+        ghost_persistence: How slowly ghosts fade (0.8-0.99). Higher = longer haunting.
+        ghost_opacity: Peak ghost brightness (0.1-1.0).
+        crackle: Medium-memory noise at ghost edges (0-1).
+        damping: Velocity decay (0.8-0.99).
+    """
+    h, w = frame.shape[:2]
+    key = f"haunt_{seed}"
+    state = _get_state(key, h, w)
+
+    # Extra state: ghost buffer (accumulated afterimage)
+    if "ghost" not in state:
+        state["ghost"] = np.zeros((h, w, 3), dtype=np.float32)
+
+    rng = np.random.default_rng(seed)
+    t = frame_index / 30.0
+
+    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+
+    # Generate displacement force
+    if force_type == "turbulence":
+        phase_x = rng.random() * 100
+        phase_y = rng.random() * 100
+        fx = force_strength * np.sin(x_grid / 35.0 + t * 1.5 + phase_x) * np.cos(y_grid / 30.0 + t * 1.2 + phase_y)
+        fy = force_strength * np.cos(x_grid / 30.0 + t * 1.8 + phase_x) * np.sin(y_grid / 35.0 + t * 2.0 + phase_y)
+    elif force_type == "radial":
+        cx, cy = w / 2, h / 2
+        ddx = x_grid - cx
+        ddy = y_grid - cy
+        dist = np.sqrt(ddx * ddx + ddy * ddy) + 1.0
+        pulse = np.sin(t * 2) * force_strength
+        fx = ddx / dist * pulse * 0.2
+        fy = ddy / dist * pulse * 0.2
+    else:  # drift
+        angle = t * 0.3
+        fx = np.full((h, w), np.cos(angle) * force_strength * 0.3, dtype=np.float32)
+        fy = np.full((h, w), np.sin(angle) * force_strength * 0.3, dtype=np.float32)
+
+    state["vx"] = state["vx"] * damping + fx * 0.03
+    state["vy"] = state["vy"] * damping + fy * 0.03
+    state["dx"] += state["vx"]
+    state["dy"] += state["vy"]
+
+    max_disp = max(h, w) * 0.35
+    state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
+    state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
+
+    # Ghost buffer: accumulate where pixels are NOW (before displacement)
+    # This captures what the frame looks like at each position
+    state["ghost"] = state["ghost"] * ghost_persistence + frame.astype(np.float32) * (1.0 - ghost_persistence) * ghost_opacity
+
+    # Remap the current frame through displacement
+    result = _remap_frame(frame, state["dx"], state["dy"], boundary)
+    result = result.astype(np.float32)
+
+    # Composite: displaced pixels on top of ghost afterimage
+    # Where displacement is large, the ghost shows through more
+    disp_mag = np.sqrt(state["dx"] ** 2 + state["dy"] ** 2)
+    ghost_reveal = np.clip(disp_mag / (max(h, w) * 0.1), 0, 1)
+
+    for c in range(3):
+        result[:, :, c] = result[:, :, c] * (1.0 - ghost_reveal * ghost_opacity) + \
+                          state["ghost"][:, :, c] * ghost_reveal
+
+    # Crackle: medium-memory noise at ghost boundaries
+    if crackle > 0:
+        crackle_rng = np.random.default_rng(seed + frame_index * 5)
+        # Noise concentrated where ghosts are visible
+        grad = cv2.Sobel(ghost_reveal, cv2.CV_32F, 1, 0, ksize=3) ** 2 + \
+               cv2.Sobel(ghost_reveal, cv2.CV_32F, 0, 1, ksize=3) ** 2
+        grad = np.sqrt(grad)
+        grad = grad / (grad.max() + 0.01)
+        noise = (crackle_rng.random((h, w)).astype(np.float32) - 0.5) * crackle * 80 * grad
+        for c in range(3):
+            result[:, :, c] += noise
+
+    if frame_index >= total_frames - 1:
+        _physics_state.pop(key, None)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# PRINT DEGRADATION — Fax, Xerox, Risograph
+# ══════════════════════════════════════════════════════════════════════
+
+def pixel_xerox(
+    frame: np.ndarray,
+    generations: int = 8,
+    contrast_gain: float = 1.15,
+    noise_amount: float = 0.06,
+    halftone_size: int = 4,
+    edge_fuzz: float = 1.5,
+    toner_skip: float = 0.05,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    boundary: str = "clamp",
+) -> np.ndarray:
+    """Xerox — generational copy loss like a billion photocopies.
+
+    Each frame simulates more copy generations: contrast crushes toward
+    black and white, noise accumulates, edges get fuzzy, toner skips
+    leave white gaps. Progressive degradation over the clip duration.
+
+    Args:
+        generations: How many copy generations to simulate (1-30).
+        contrast_gain: Per-generation contrast boost (1.0-1.5). Crushes midtones.
+        noise_amount: Per-generation noise (0-0.3).
+        halftone_size: Dot screen size for halftone pattern (2-8).
+        edge_fuzz: Edge blur per generation (0-4).
+        toner_skip: Probability of white toner gaps per generation (0-0.2).
+    """
+    h, w = frame.shape[:2]
+    rng = np.random.default_rng(seed + frame_index)
+    progress = frame_index / max(total_frames - 1, 1)
+
+    # Number of generations scales with progress
+    current_gens = max(1, int(generations * progress + 1))
+
+    result = frame.astype(np.float32)
+
+    for gen in range(current_gens):
+        gen_rng = np.random.default_rng(seed + gen * 7)
+
+        # Contrast crush: push toward black/white
+        mean = np.mean(result)
+        result = (result - mean) * contrast_gain + mean
+
+        # Noise accumulation (copy machine sensor noise)
+        noise = gen_rng.normal(0, noise_amount * 255, result.shape).astype(np.float32)
+        result += noise
+
+        # Edge fuzz (optical blur from glass contact)
+        if edge_fuzz > 0 and gen % 2 == 0:
+            ksize = max(3, int(edge_fuzz) * 2 + 1)
+            result = cv2.GaussianBlur(result, (ksize, ksize), edge_fuzz * 0.5)
+
+        # Toner skip: random white rectangles
+        if toner_skip > 0:
+            num_skips = int(toner_skip * w * h / 2000)
+            for _ in range(num_skips):
+                sx = gen_rng.integers(0, w)
+                sy = gen_rng.integers(0, h)
+                sw = gen_rng.integers(2, max(3, w // 30))
+                sh = gen_rng.integers(1, 3)
+                result[sy:min(sy + sh, h), sx:min(sx + sw, w)] = 255.0
+
+    # Halftone pattern overlay (copier dot screen)
+    if halftone_size >= 2:
+        hs = halftone_size
+        gray = np.mean(result, axis=2)
+        dot_y = np.arange(h) % hs
+        dot_x = np.arange(w) % hs
+        dot_pattern = np.sqrt((dot_y[:, None] - hs / 2) ** 2 + (dot_x[None, :] - hs / 2) ** 2)
+        dot_threshold = (dot_pattern / (hs * 0.7)) * 255
+        halftone_influence = progress * 0.3
+        for c in range(3):
+            channel = result[:, :, c]
+            halftone = np.where(gray > dot_threshold, channel * 1.1, channel * 0.85)
+            result[:, :, c] = channel * (1.0 - halftone_influence) + halftone * halftone_influence
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_fax(
+    frame: np.ndarray,
+    scan_noise: float = 0.3,
+    toner_bleed: float = 2.0,
+    paper_texture: float = 0.4,
+    compression_bands: int = 8,
+    thermal_fade: float = 0.2,
+    dither: bool = True,
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    boundary: str = "clamp",
+) -> np.ndarray:
+    """Fax — thermal printing with all its characteristic artifacts.
+
+    Converts to near-monochrome with horizontal scan noise, toner bleed,
+    thermal fade bands, paper texture, and optional Floyd-Steinberg dither.
+
+    Args:
+        scan_noise: Horizontal scan line noise (0-1).
+        toner_bleed: Horizontal ink spread (0-5). Higher = more smear.
+        paper_texture: Off-white paper grain (0-1).
+        compression_bands: Horizontal banding from thermal head (0-20).
+        thermal_fade: Vertical fade streaks from uneven heating (0-1).
+        dither: Apply Floyd-Steinberg dither for halftone effect.
+    """
+    h, w = frame.shape[:2]
+    rng = np.random.default_rng(seed + frame_index)
+
+    # Convert to grayscale (fax is monochrome)
+    if frame.ndim == 3:
+        gray = np.mean(frame.astype(np.float32), axis=2)
+    else:
+        gray = frame.astype(np.float32)
+
+    # Thermal fade: vertical columns that are lighter (uneven print head)
+    if thermal_fade > 0:
+        fade_cols = rng.integers(3, max(4, w // 20))
+        fade_pattern = np.ones(w, dtype=np.float32)
+        for _ in range(fade_cols):
+            col = rng.integers(0, w)
+            fade_w = rng.integers(5, max(6, w // 8))
+            x = np.arange(w, dtype=np.float32)
+            fade_pattern *= 1.0 - thermal_fade * np.exp(-((x - col) ** 2) / (fade_w ** 2))
+        gray *= fade_pattern[None, :]
+
+    # Horizontal scan noise (jitter)
+    if scan_noise > 0:
+        for row in range(h):
+            if rng.random() < scan_noise * 0.3:
+                shift = rng.integers(-3, 4)
+                gray[row] = np.roll(gray[row], shift)
+                gray[row] += rng.normal(0, scan_noise * 30, w).astype(np.float32)
+
+    # Compression bands (thermal head segments)
+    if compression_bands > 0:
+        band_h = max(1, h // compression_bands)
+        for band in range(compression_bands):
+            y0 = band * band_h
+            y1 = min(y0 + band_h, h)
+            band_offset = rng.normal(0, 8)
+            gray[y0:y1] += band_offset
+
+    # Toner bleed: horizontal motion blur
+    if toner_bleed > 0:
+        ksize = max(3, int(toner_bleed * 2) | 1)
+        kernel = np.zeros((1, ksize), dtype=np.float32)
+        kernel[0] = 1.0 / ksize
+        gray = cv2.filter2D(gray, -1, kernel)
+
+    # Dither (Floyd-Steinberg) — use downsampled for performance
+    if dither:
+        # Downsample for speed, then upsample
+        scale = max(1, min(h, w) // 200)
+        if scale > 1:
+            sh, sw = h // scale, w // scale
+            small = cv2.resize(gray, (sw, sh), interpolation=cv2.INTER_AREA)
+        else:
+            small = gray.copy()
+            sh, sw = h, w
+
+        threshold = 128.0
+        for y in range(sh - 1):
+            for x in range(1, sw - 1):
+                old = small[y, x]
+                new = 255.0 if old > threshold else 0.0
+                small[y, x] = new
+                err = old - new
+                small[y, x + 1] += err * 7 / 16
+                small[y + 1, x - 1] += err * 3 / 16
+                small[y + 1, x] += err * 5 / 16
+                small[y + 1, x + 1] += err * 1 / 16
+
+        if scale > 1:
+            gray = cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+        else:
+            gray = small
+
+    # Paper texture
+    if paper_texture > 0:
+        paper = rng.normal(245, paper_texture * 15, (h, w)).astype(np.float32)
+        paper_mask = np.clip(gray / 255.0, 0, 1)
+        gray = gray * (1.0 - paper_mask * 0.3) + paper * paper_mask * 0.3
+
+    # Convert back to 3-channel (warm fax tone)
+    result = np.zeros((h, w, 3), dtype=np.float32)
+    gray = np.clip(gray, 0, 255)
+    result[:, :, 0] = gray * 0.95
+    result[:, :, 1] = gray * 0.92
+    result[:, :, 2] = gray * 0.88
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def pixel_risograph(
+    frame: np.ndarray,
+    ink_bleed: float = 2.5,
+    registration_offset: int = 3,
+    paper_grain: float = 0.3,
+    ink_coverage: float = 0.85,
+    num_colors: int = 2,
+    color_a: tuple = (0, 90, 180),
+    color_b: tuple = (220, 50, 50),
+    seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
+    boundary: str = "clamp",
+) -> np.ndarray:
+    """Risograph — drum printer ink bleed with misregistration.
+
+    Simulates risograph/screen printing: limited color palette,
+    ink bleeding into paper fibers, layer misregistration (each color
+    layer slightly offset), paper grain shows through in light areas.
+
+    Args:
+        ink_bleed: How much ink spreads into paper (0-6).
+        registration_offset: Max pixel offset between color layers (0-10).
+        paper_grain: Paper texture visibility (0-1).
+        ink_coverage: How much ink the drum lays down (0.5-1.0). Lower = more white.
+        num_colors: Color separation layers (1-3).
+        color_a: First ink color RGB (e.g., blue).
+        color_b: Second ink color RGB (e.g., red/pink).
+    """
+    h, w = frame.shape[:2]
+    rng = np.random.default_rng(seed)
+
+    # Handle list/tuple color args
+    color_a = tuple(int(c) for c in color_a)
+    color_b = tuple(int(c) for c in color_b)
+
+    # Convert to grayscale for separation
+    gray = np.mean(frame.astype(np.float32), axis=2) / 255.0
+
+    # Paper base (warm white with grain)
+    paper = np.ones((h, w, 3), dtype=np.float32) * 240
+    if paper_grain > 0:
+        grain = rng.normal(0, paper_grain * 20, (h, w)).astype(np.float32)
+        for c in range(3):
+            paper[:, :, c] += grain
+
+    result = paper.copy()
+
+    # Color separation layers
+    colors = [list(color_a)]
+    if num_colors >= 2:
+        colors.append(list(color_b))
+    if num_colors >= 3:
+        colors.append([
+            255 - (color_a[0] + color_b[0]) // 2,
+            255 - (color_a[1] + color_b[1]) // 2,
+            255 - (color_a[2] + color_b[2]) // 2,
+        ])
+
+    for layer_idx, ink_color in enumerate(colors):
+        if layer_idx == 0:
+            layer_mask = np.clip(1.0 - gray, 0, 1)
+        elif layer_idx == 1:
+            layer_mask = np.clip(gray * 2 - 0.3, 0, 1) * np.clip(1.5 - gray * 2, 0, 1)
+        else:
+            layer_mask = np.clip(gray - 0.5, 0, 1) * 2
+
+        layer_mask *= ink_coverage
+
+        if ink_bleed > 0:
+            ksize = max(3, int(ink_bleed * 2) | 1)
+            layer_mask = cv2.GaussianBlur(layer_mask, (ksize, ksize), ink_bleed * 0.5)
+
+        if registration_offset > 0 and layer_idx > 0:
+            ox = rng.integers(-registration_offset, registration_offset + 1)
+            oy = rng.integers(-registration_offset, registration_offset + 1)
+            layer_mask = np.roll(np.roll(layer_mask, ox, axis=1), oy, axis=0)
+
+        ink_noise = rng.normal(1.0, 0.08, (h, w)).astype(np.float32)
+        layer_mask *= ink_noise
+
+        for c in range(3):
+            ink_value = ink_color[c] / 255.0
+            result[:, :, c] *= (1.0 - layer_mask * (1.0 - ink_value))
 
     return np.clip(result, 0, 255).astype(np.uint8)

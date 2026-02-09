@@ -64,6 +64,9 @@ from effects.physics import (
     pixel_explode, pixel_elastic, pixel_melt,
     pixel_blackhole, pixel_antigravity, pixel_magnetic,
     pixel_timewarp, pixel_dimensionfold,
+    pixel_wormhole, pixel_quantum, pixel_darkenergy, pixel_superfluid,
+    pixel_bubbles, pixel_inkdrop, pixel_haunt,
+    pixel_xerox, pixel_fax, pixel_risograph,
 )
 
 # Real datamosh is video-level (not per-frame), but we register a marker
@@ -564,37 +567,37 @@ EFFECTS = {
     "pixelliquify": {
         "fn": pixel_liquify,
         "category": "distortion",
-        "params": {"viscosity": 0.92, "turbulence": 3.0, "flow_scale": 40.0, "speed": 1.0, "seed": 42},
+        "params": {"viscosity": 0.92, "turbulence": 3.0, "flow_scale": 40.0, "speed": 1.0, "seed": 42, "boundary": "wrap"},
         "description": "Liquify — pixels become fluid and wash around in turbulent flow",
     },
     "pixelgravity": {
         "fn": pixel_gravity,
         "category": "distortion",
-        "params": {"num_attractors": 5, "gravity_strength": 8.0, "damping": 0.95, "attractor_radius": 0.3, "wander": 0.5, "seed": 42},
+        "params": {"num_attractors": 5, "gravity_strength": 8.0, "damping": 0.95, "attractor_radius": 0.3, "wander": 0.5, "seed": 42, "boundary": "black"},
         "description": "Gravity attractors — pixels get pulled toward random wandering points",
     },
     "pixelvortex": {
         "fn": pixel_vortex,
         "category": "distortion",
-        "params": {"num_vortices": 3, "spin_strength": 5.0, "pull_strength": 2.0, "radius": 0.25, "damping": 0.93, "seed": 42},
+        "params": {"num_vortices": 3, "spin_strength": 5.0, "pull_strength": 2.0, "radius": 0.25, "damping": 0.93, "seed": 42, "boundary": "wrap"},
         "description": "Vortex — swirling whirlpools pull pixels into spirals",
     },
     "pixelexplode": {
         "fn": pixel_explode,
         "category": "distortion",
-        "params": {"origin": "center", "force": 10.0, "damping": 0.96, "gravity": 0.0, "scatter": 0.0, "seed": 42},
+        "params": {"origin": "center", "force": 10.0, "damping": 0.96, "gravity": 0.0, "scatter": 0.0, "seed": 42, "boundary": "black"},
         "description": "Explode — pixels blast outward from a point with optional gravity",
     },
     "pixelelastic": {
         "fn": pixel_elastic,
         "category": "distortion",
-        "params": {"stiffness": 0.3, "mass": 1.0, "force_type": "turbulence", "force_strength": 5.0, "damping": 0.9, "seed": 42},
+        "params": {"stiffness": 0.3, "mass": 1.0, "force_type": "turbulence", "force_strength": 5.0, "damping": 0.9, "seed": 42, "boundary": "mirror"},
         "description": "Elastic — pixels on springs that stretch, bounce, and snap back",
     },
     "pixelmelt": {
         "fn": pixel_melt,
         "category": "distortion",
-        "params": {"heat": 3.0, "gravity": 2.0, "viscosity": 0.95, "melt_source": "top", "seed": 42},
+        "params": {"heat": 3.0, "gravity": 2.0, "viscosity": 0.95, "melt_source": "top", "seed": 42, "boundary": "black"},
         "description": "Melt — pixels drip and flow downward like melting wax",
     },
 
@@ -602,32 +605,94 @@ EFFECTS = {
     "pixelblackhole": {
         "fn": pixel_blackhole,
         "category": "distortion",
-        "params": {"mass": 10.0, "spin": 3.0, "event_horizon": 0.08, "spaghettify": 5.0, "accretion_glow": 0.8, "hawking": 0.0, "position": "center", "seed": 42},
+        "params": {"mass": 10.0, "spin": 3.0, "event_horizon": 0.08, "spaghettify": 5.0, "accretion_glow": 0.8, "hawking": 0.0, "position": "center", "seed": 42, "boundary": "black"},
         "description": "Black hole — singularity with event horizon, spaghettification, and accretion glow",
     },
     "pixelantigravity": {
         "fn": pixel_antigravity,
         "category": "distortion",
-        "params": {"repulsion": 8.0, "num_zones": 4, "zone_radius": 0.2, "oscillate": 1.0, "damping": 0.93, "seed": 42},
+        "params": {"repulsion": 8.0, "num_zones": 4, "zone_radius": 0.2, "oscillate": 1.0, "damping": 0.93, "seed": 42, "boundary": "wrap"},
         "description": "Anti-gravity — repulsion zones push pixels outward with oscillating direction",
     },
     "pixelmagnetic": {
         "fn": pixel_magnetic,
         "category": "distortion",
-        "params": {"field_type": "dipole", "strength": 6.0, "poles": 2, "rotation_speed": 0.5, "damping": 0.92, "seed": 42},
+        "params": {"field_type": "dipole", "strength": 6.0, "poles": 2, "rotation_speed": 0.5, "damping": 0.92, "seed": 42, "boundary": "wrap"},
         "description": "Magnetic fields — pixels curve along dipole/quadrupole/toroidal field lines",
     },
     "pixeltimewarp": {
         "fn": pixel_timewarp,
         "category": "distortion",
-        "params": {"warp_speed": 2.0, "echo_count": 3, "echo_decay": 0.6, "reverse_probability": 0.3, "damping": 0.9, "seed": 42},
+        "params": {"warp_speed": 2.0, "echo_count": 3, "echo_decay": 0.6, "reverse_probability": 0.3, "damping": 0.9, "seed": 42, "boundary": "wrap"},
         "description": "Time warp — displacement reverses with ghosting echoes",
     },
     "pixeldimensionfold": {
         "fn": pixel_dimensionfold,
         "category": "distortion",
-        "params": {"num_folds": 3, "fold_depth": 8.0, "fold_width": 0.15, "rotation_speed": 0.3, "mirror_folds": True, "seed": 42},
+        "params": {"num_folds": 3, "fold_depth": 8.0, "fold_width": 0.15, "rotation_speed": 0.3, "mirror_folds": True, "seed": 42, "boundary": "wrap"},
         "description": "Dimension fold — space folds over itself along rotating axes",
+    },
+    "pixelwormhole": {
+        "fn": pixel_wormhole,
+        "category": "distortion",
+        "params": {"portal_radius": 0.1, "tunnel_strength": 8.0, "spin": 2.0, "distortion_ring": 1.5, "wander": 0.3, "damping": 0.9, "seed": 42, "boundary": "black"},
+        "description": "Wormhole — paired portals teleport pixels between two connected points",
+    },
+    "pixelquantum": {
+        "fn": pixel_quantum,
+        "category": "distortion",
+        "params": {"tunnel_prob": 0.3, "barrier_count": 4, "barrier_width": 0.05, "uncertainty": 5.0, "superposition": 0.4, "decoherence": 0.02, "seed": 42, "boundary": "wrap"},
+        "description": "Quantum — pixels tunnel through barriers and split into superposition ghosts",
+    },
+    "pixeldarkenergy": {
+        "fn": pixel_darkenergy,
+        "category": "distortion",
+        "params": {"expansion_rate": 3.0, "acceleration": 0.05, "void_color": [5, 0, 15], "structure": 0.5, "hubble_zones": 6, "seed": 42, "boundary": "black"},
+        "description": "Dark energy — accelerating Hubble expansion tears pixels apart, reveals void",
+    },
+    "pixelsuperfluid": {
+        "fn": pixel_superfluid,
+        "category": "distortion",
+        "params": {"flow_speed": 6.0, "quantized_vortices": 5, "vortex_strength": 4.0, "climb_force": 2.0, "viscosity": 0.0, "thermal_noise": 0.5, "seed": 42, "boundary": "wrap"},
+        "description": "Superfluid — zero-friction flow with quantized vortices that climb edges",
+    },
+    "pixelbubbles": {
+        "fn": pixel_bubbles,
+        "category": "distortion",
+        "params": {"num_portals": 6, "min_radius": 0.03, "max_radius": 0.12, "pull_strength": 6.0, "spin": 1.5, "void_mode": "black", "wander": 0.4, "damping": 0.91, "seed": 42, "boundary": "black"},
+        "description": "Bubbles — multiple portals of random size with negative space void inside",
+    },
+    "pixelinkdrop": {
+        "fn": pixel_inkdrop,
+        "category": "distortion",
+        "params": {"num_drops": 4, "diffusion_rate": 3.0, "surface_tension": 0.6, "marangoni": 2.0, "tendrils": 8, "drop_interval": 0.3, "color_shift": 0.5, "seed": 42, "boundary": "wrap"},
+        "description": "Ink drop — paint in water with diffusion, surface tension, and Marangoni tendrils",
+    },
+    "pixelhaunt": {
+        "fn": pixel_haunt,
+        "category": "distortion",
+        "params": {"force_type": "turbulence", "force_strength": 4.0, "ghost_persistence": 0.95, "ghost_opacity": 0.4, "crackle": 0.3, "damping": 0.9, "seed": 42, "boundary": "wrap"},
+        "description": "Haunt — ghostly afterimages linger where pixels used to be (hauntology)",
+    },
+
+    # === PRINT DEGRADATION ===
+    "pixelxerox": {
+        "fn": pixel_xerox,
+        "category": "destruction",
+        "params": {"generations": 8, "contrast_gain": 1.15, "noise_amount": 0.06, "halftone_size": 4, "edge_fuzz": 1.5, "toner_skip": 0.05, "seed": 42, "boundary": "clamp"},
+        "description": "Xerox — generational copy loss, each frame more degraded like a billion photocopies",
+    },
+    "pixelfax": {
+        "fn": pixel_fax,
+        "category": "destruction",
+        "params": {"scan_noise": 0.3, "toner_bleed": 2.0, "paper_texture": 0.4, "compression_bands": 8, "thermal_fade": 0.2, "dither": True, "seed": 42, "boundary": "clamp"},
+        "description": "Fax — thermal printing artifacts, scan noise, toner bleed, paper texture",
+    },
+    "pixelrisograph": {
+        "fn": pixel_risograph,
+        "category": "destruction",
+        "params": {"ink_bleed": 2.5, "registration_offset": 3, "paper_grain": 0.3, "ink_coverage": 0.85, "num_colors": 2, "color_a": [0, 90, 180], "color_b": [220, 50, 50], "seed": 42, "boundary": "clamp"},
+        "description": "Risograph — ink bleed, misregistration, paper grain, limited color palette print",
     },
 
     # === DSP FILTERS ===
@@ -854,7 +919,71 @@ def apply_effect(frame, effect_name: str, frame_index: int = 0, total_frames: in
     return np.clip(blended, 0, 255).astype(np.uint8)
 
 
-def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_frames: int = 1):
+# --- License / Watermark ---
+
+_LICENSE_PATH = None  # Set by desktop.py or checked at import time
+
+
+def _check_license():
+    """Check if user has a valid license (any amount paid on Gumroad).
+    Returns True if licensed (no watermark), False if free tier."""
+    import os
+    from pathlib import Path
+    # Check local license file
+    license_file = Path.home() / ".entropic_license"
+    if license_file.exists():
+        try:
+            key = license_file.read_text().strip()
+            # Basic format check: Gumroad keys are typically 35 chars
+            if len(key) >= 8:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _burn_watermark(frame):
+    """Burn 'Made with PopChaos Glitch' into frame pixel data.
+    Semi-transparent diagonal text in bottom-right corner."""
+    from PIL import Image, ImageDraw, ImageFont
+    h, w = frame.shape[:2]
+
+    # Create overlay with transparency
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    text = "Made with PopChaos Glitch"
+    font_size = max(12, min(w // 30, 28))
+
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Menlo.ttc", font_size)
+    except Exception:
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+        except Exception:
+            font = ImageFont.load_default()
+
+    # Get text bounding box
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    # Position: bottom-right corner with padding
+    padding = max(10, w // 50)
+    x = w - tw - padding
+    y = h - th - padding
+
+    # Draw with semi-transparency (burned into pixel data)
+    alpha = int(255 * 0.3)  # 30% opacity
+    draw.text((x, y), text, fill=(255, 255, 255, alpha), font=font)
+
+    # Composite onto frame
+    base = Image.fromarray(frame).convert("RGBA")
+    composited = Image.alpha_composite(base, overlay)
+    return np.array(composited.convert("RGB"))
+
+
+def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_frames: int = 1,
+                watermark: bool = False):
     """Apply a chain of effects sequentially.
 
     effects_list: [{"name": "pixelsort", "params": {"threshold": 0.6}}, ...]
@@ -874,6 +1003,10 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
                  "edges", "motion", "contrast", "saturation").
         rate: For LFO trigger, frequency in Hz. For time trigger,
               pulses per second. For content triggers, threshold (0-1).
+
+    Args:
+        watermark: If True (default), burns watermark on free tier exports.
+                   Set False for preview (no watermark on previews).
     """
     from core.safety import validate_chain_depth
     validate_chain_depth(effects_list)
@@ -901,4 +1034,9 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
             )
         else:
             frame = apply_effect(frame, name, frame_index=frame_index, total_frames=total_frames, **params)
+
+    # Burn watermark on free tier (only for exports, not previews)
+    if watermark and not _check_license():
+        frame = _burn_watermark(frame)
+
     return frame

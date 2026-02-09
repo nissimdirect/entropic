@@ -27,15 +27,25 @@ from packages import PACKAGES
 from core.video_io import probe_video, extract_single_frame
 from core.export_models import ExportSettings
 
-# Preset system
-PRESETS_DIR = Path(__file__).parent / "user_presets"
-PRESETS_DIR.mkdir(exist_ok=True)
+# Preset system — use writable location for bundled app
+_bundled_presets = Path(__file__).parent / "user_presets"
+try:
+    _bundled_presets.mkdir(exist_ok=True)
+    PRESETS_DIR = _bundled_presets
+except OSError:
+    # Read-only filesystem (DMG, signed .app) — use ~/Library/Application Support/
+    PRESETS_DIR = Path.home() / "Library" / "Application Support" / "Entropic" / "user_presets"
+    PRESETS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Entropic")
 
 # Serve static files (UI)
 UI_DIR = Path(__file__).parent / "ui"
 app.mount("/static", StaticFiles(directory=str(UI_DIR / "static")), name="static")
+
+# Default export directory — user-visible location
+EXPORT_DIR = Path.home() / "Movies" / "Entropic"
+EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 # In-memory state for current session
 _state = {
@@ -62,6 +72,12 @@ class RenderRequest(BaseModel):
 @app.get("/")
 async def index():
     return FileResponse(str(UI_DIR / "index.html"))
+
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for desktop app heartbeat."""
+    return {"status": "ok"}
 
 
 @app.get("/api/file-types")
@@ -358,7 +374,7 @@ async def preview_effect(chain: EffectChain):
 
         if chain.effects:
             original = frame.copy() if chain.mix < 1.0 else None
-            frame = apply_chain(frame, chain.effects)
+            frame = apply_chain(frame, chain.effects, watermark=False)
             # Wet/dry mix
             if original is not None:
                 mix = max(0.0, min(1.0, chain.mix))
@@ -528,7 +544,7 @@ async def render_video(req: RenderRequest):
                 # Apply automation overrides
                 effects = auto_session.apply_to_chain(req.effects, i) if auto_session else req.effects
                 original = frame.copy() if req.mix < 1.0 else None
-                frame = apply_chain(frame, effects)
+                frame = apply_chain(frame, effects, watermark=True)
                 if original is not None:
                     mix = max(0.0, min(1.0, req.mix))
                     frame = np.clip(
@@ -546,11 +562,8 @@ async def render_video(req: RenderRequest):
             audio_source=audio_src, quality=quality
         )
 
-        # Copy to persistent location
-        renders_dir = Path(__file__).parent / "renders"
-        renders_dir.mkdir(exist_ok=True)
-        import shutil
-        dest = renders_dir / final.name
+        # Copy to user-visible location
+        dest = EXPORT_DIR / final.name
         shutil.copy2(str(final), str(dest))
 
     size_mb = dest.stat().st_size / (1024 * 1024)
@@ -606,9 +619,6 @@ async def export_video(export: ExportSettings):
     target_w, target_h = export.get_target_dimensions(source_w, source_h)
     output_fps = export.get_output_fps(info["fps"])
 
-    renders_dir = Path(__file__).parent / "renders"
-    renders_dir.mkdir(exist_ok=True)
-
     import tempfile as tf
 
     with tf.TemporaryDirectory() as tmpdir:
@@ -637,7 +647,7 @@ async def export_video(export: ExportSettings):
             # Apply effects with mix
             if export.effects:
                 original = frame.copy() if export.mix < 1.0 else None
-                frame = apply_chain(frame, export.effects)
+                frame = apply_chain(frame, export.effects, watermark=True)
                 if original is not None:
                     mix = max(0.0, min(1.0, export.mix))
                     frame = np.clip(
@@ -669,7 +679,7 @@ async def export_video(export: ExportSettings):
 
         if export.format == ExportFormat.PNG_SEQ:
             # Copy PNGs to renders dir
-            seq_dir = renders_dir / f"entropic_{timestamp}_seq"
+            seq_dir = EXPORT_DIR / f"entropic_{timestamp}_seq"
             seq_dir.mkdir()
             for f in sorted(processed_dir.glob("*.png")):
                 shutil.copy2(str(f), str(seq_dir / f.name))
@@ -682,7 +692,7 @@ async def export_video(export: ExportSettings):
             }
 
         elif export.format == ExportFormat.GIF:
-            output_path = renders_dir / output_name
+            output_path = EXPORT_DIR / output_name
             gif_fps = export.gif_fps or min(output_fps, 15)
             cmd = [
                 shutil.which("ffmpeg") or "ffmpeg", "-y",
@@ -696,7 +706,7 @@ async def export_video(export: ExportSettings):
             subprocess.run(cmd, capture_output=True, check=True, timeout=300)
 
         elif export.format == ExportFormat.WEBM:
-            output_path = renders_dir / output_name
+            output_path = EXPORT_DIR / output_name
             cmd = [
                 shutil.which("ffmpeg") or "ffmpeg", "-y",
                 "-framerate", str(output_fps),
@@ -713,7 +723,7 @@ async def export_video(export: ExportSettings):
             subprocess.run(cmd, capture_output=True, check=True, timeout=600)
 
         elif export.format == ExportFormat.MOV:
-            output_path = renders_dir / output_name
+            output_path = EXPORT_DIR / output_name
             profile_map = {
                 "proxy": "0", "lt": "1", "422": "2", "422hq": "3", "4444": "4",
             }
@@ -732,7 +742,7 @@ async def export_video(export: ExportSettings):
             subprocess.run(cmd, capture_output=True, check=True, timeout=600)
 
         else:  # MP4 (H.264)
-            output_path = renders_dir / output_name
+            output_path = EXPORT_DIR / output_name
             cmd = [
                 shutil.which("ffmpeg") or "ffmpeg", "-y",
                 "-framerate", str(output_fps),

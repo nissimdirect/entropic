@@ -4,6 +4,117 @@
 
 const API = '';
 
+// ============ TOAST / MODAL SYSTEM (replaces alert/prompt) ============
+
+function showToast(message, type = 'info', action = null, duration = 4000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    let html = `<span>${esc(message)}</span>`;
+    if (action) {
+        html += `<button class="toast-action" onclick="(${action.fn})()">${esc(action.label)}</button>`;
+    }
+    toast.innerHTML = html;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s';
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+function showErrorToast(message) {
+    showToast(message, 'error', null, 6000);
+}
+
+// Input modal state
+let _inputModalCallback = null;
+
+function showInputModal(title, placeholder, callback) {
+    _inputModalCallback = callback;
+    document.getElementById('input-modal-title').textContent = title;
+    const field = document.getElementById('input-modal-field');
+    field.value = '';
+    field.placeholder = placeholder || '';
+    document.getElementById('input-modal-overlay').style.display = 'flex';
+    setTimeout(() => field.focus(), 100);
+}
+
+function closeInputModal() {
+    document.getElementById('input-modal-overlay').style.display = 'none';
+    _inputModalCallback = null;
+}
+
+function submitInputModal() {
+    const value = document.getElementById('input-modal-field').value.trim();
+    const cb = _inputModalCallback;
+    closeInputModal();
+    if (cb && value) cb(value);
+}
+
+// Handle Enter key in input modal
+document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && document.getElementById('input-modal-overlay').style.display === 'flex') {
+        e.preventDefault();
+        submitInputModal();
+    }
+});
+
+// ============ SERVER HEARTBEAT ============
+
+let _heartbeatFailures = 0;
+let _heartbeatInterval = null;
+let _serverDown = false;
+
+function startHeartbeat() {
+    _heartbeatInterval = setInterval(async () => {
+        try {
+            const res = await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(4000) });
+            if (res.ok) {
+                if (_serverDown) {
+                    _serverDown = false;
+                    _heartbeatFailures = 0;
+                    document.getElementById('server-banner').style.display = 'none';
+                }
+            } else {
+                _heartbeatFailures++;
+            }
+        } catch {
+            _heartbeatFailures++;
+        }
+        if (_heartbeatFailures >= 3 && !_serverDown) {
+            _serverDown = true;
+            document.getElementById('server-banner').style.display = 'flex';
+        }
+    }, 5000);
+}
+
+function restartServer() {
+    // In desktop mode, the server thread is managed by desktop.py
+    // This just resets heartbeat and waits for recovery
+    _heartbeatFailures = 0;
+    showToast('Attempting to reconnect...', 'info');
+}
+
+// Shortcut reference
+function showShortcutRef() {
+    document.getElementById('shortcut-overlay').style.display = 'flex';
+}
+function closeShortcutRef() {
+    document.getElementById('shortcut-overlay').style.display = 'none';
+}
+
+// Reveal in Finder via pywebview bridge (or no-op in browser mode)
+function revealInFinder(path) {
+    if (window.pywebview && window.pywebview.api) {
+        window.pywebview.api.reveal_in_finder(path);
+    } else {
+        // Browser fallback — just log
+        console.log('Reveal in Finder:', path);
+    }
+}
+
 // HTML entity escaping to prevent XSS in innerHTML
 function esc(str) {
     if (str == null) return '';
@@ -101,6 +212,14 @@ async function init() {
     pushHistory('Open');
     renderLayers();
     renderHistory();
+    startHeartbeat();
+
+    // Dismiss boot screen
+    const boot = document.getElementById('boot-screen');
+    if (boot) {
+        boot.classList.add('fade-out');
+        setTimeout(() => boot.remove(), 500);
+    }
 }
 
 // ============ EFFECT BROWSER ============
@@ -271,7 +390,7 @@ const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
 async function uploadVideo(file) {
     // Client-side validation
     if (file.size > MAX_FILE_SIZE) {
-        alert(`File too large (${(file.size / 1024 / 1024).toFixed(0)}MB). Maximum: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
+        showErrorToast(`File too large (${(file.size / 1024 / 1024).toFixed(0)}MB). Maximum: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
         return;
     }
     const ext = file.name.split('.').pop().toLowerCase();
@@ -287,7 +406,7 @@ async function uploadVideo(file) {
         'wav', 'mp3', 'aiff', 'flac', 'psd', 'ai', 'svg',
     ];
     if (!allowed.includes(ext)) {
-        alert(`Unsupported file type: .${ext}\nAllowed: ${allowed.join(', ')}`);
+        showErrorToast(`Unsupported file type: .${ext}`);
         return;
     }
 
@@ -348,17 +467,71 @@ function setupPanelTabs() {
 // ============ KEYBOARD SHORTCUTS ============
 
 function setupKeyboard() {
+    const isTextInput = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+    const isMod = (e) => e.metaKey || e.ctrlKey;
+    const isModalOpen = () => {
+        return document.getElementById('export-overlay')?.style.display === 'flex'
+            || document.getElementById('input-modal-overlay')?.style.display === 'flex'
+            || document.getElementById('shortcut-overlay')?.style.display === 'flex';
+    };
+
     document.addEventListener('keydown', e => {
-        // Cmd/Ctrl+Z = Undo
-        if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
-            e.preventDefault();
-            undo();
+        // --- Escape: close any open modal ---
+        if (e.key === 'Escape') {
+            if (document.getElementById('shortcut-overlay')?.style.display === 'flex') {
+                closeShortcutRef(); e.preventDefault(); return;
+            }
+            if (document.getElementById('input-modal-overlay')?.style.display === 'flex') {
+                closeInputModal(); e.preventDefault(); return;
+            }
+            if (document.getElementById('export-overlay')?.style.display === 'flex') {
+                closeExportDialog(); e.preventDefault(); return;
+            }
+            // Deselect effect
+            if (selectedLayerId !== null) {
+                selectedLayerId = null;
+                renderLayers();
+            }
+            return;
         }
-        // Cmd/Ctrl+Shift+Z = Redo
-        if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
-            e.preventDefault();
-            redo();
+
+        // --- Modifier shortcuts (work even in text inputs for some) ---
+
+        // Cmd+Z = Undo
+        if (isMod(e) && e.key === 'z' && !e.shiftKey) {
+            e.preventDefault(); undo(); return;
         }
+        // Cmd+Shift+Z = Redo
+        if (isMod(e) && e.key === 'z' && e.shiftKey) {
+            e.preventDefault(); redo(); return;
+        }
+        // Cmd+D = Duplicate selected
+        if (isMod(e) && e.key === 'd') {
+            e.preventDefault(); duplicateSelected(); return;
+        }
+        // Cmd+O = Open file
+        if (isMod(e) && e.key === 'o') {
+            e.preventDefault();
+            document.getElementById('file-input').click();
+            return;
+        }
+        // Cmd+E = Export
+        if (isMod(e) && e.key === 'e') {
+            e.preventDefault(); renderVideo(); return;
+        }
+        // Cmd+S = Save preset
+        if (isMod(e) && e.key === 's') {
+            e.preventDefault(); saveCurrentAsPreset(); return;
+        }
+        // Cmd+W = Close (same as quit in single-window)
+        if (isMod(e) && e.key === 'w') {
+            // Let PyWebView handle this natively
+            return;
+        }
+
+        // --- Non-modifier shortcuts: skip if typing in text input or modal open ---
+        if (isTextInput() || isModalOpen()) return;
+
         // Space = A/B compare
         if (e.code === 'Space' && videoLoaded && !isShowingOriginal) {
             e.preventDefault();
@@ -367,21 +540,85 @@ function setupKeyboard() {
             originalPreviewSrc = img.src;
             fetch(`${API}/api/frame/${currentFrame}`)
                 .then(r => r.json())
-                .then(data => {
-                    if (isShowingOriginal) img.src = data.preview;
-                });
+                .then(data => { if (isShowingOriginal) img.src = data.preview; });
+            return;
         }
-        // Cmd/Ctrl+D = Duplicate selected
-        if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
-            e.preventDefault();
-            duplicateSelected();
-        }
-        // Delete/Backspace = remove selected layer
+
+        // Delete/Backspace = remove selected
         if ((e.key === 'Delete' || e.key === 'Backspace') && selectedLayerId !== null) {
-            // Don't delete if focused on an input
-            if (document.activeElement.tagName === 'INPUT') return;
+            e.preventDefault(); removeFromChain(selectedLayerId); return;
+        }
+
+        // --- Single-key shortcuts (chain editing) ---
+
+        // [ = Move selected effect UP in chain
+        if (e.key === '[' && selectedLayerId !== null) {
+            e.preventDefault(); moveDevice(selectedLayerId, -1); return;
+        }
+        // ] = Move selected effect DOWN in chain
+        if (e.key === ']' && selectedLayerId !== null) {
+            e.preventDefault(); moveDevice(selectedLayerId, 1); return;
+        }
+        // B = Toggle bypass on selected
+        if (e.key === 'b' && selectedLayerId !== null) {
+            e.preventDefault(); toggleBypass(selectedLayerId); return;
+        }
+        // R = Reset selected to defaults
+        if (e.key === 'r' && selectedLayerId !== null) {
+            e.preventDefault(); resetDeviceParams(selectedLayerId); return;
+        }
+        // Up/Down = Select prev/next effect in chain
+        if (e.key === 'ArrowUp' && chain.length > 0) {
             e.preventDefault();
-            removeFromChain(selectedLayerId);
+            const idx = chain.findIndex(d => d.id === selectedLayerId);
+            if (idx > 0) { selectedLayerId = chain[idx - 1].id; renderLayers(); }
+            else if (idx === -1) { selectedLayerId = chain[chain.length - 1].id; renderLayers(); }
+            return;
+        }
+        if (e.key === 'ArrowDown' && chain.length > 0) {
+            e.preventDefault();
+            const idx = chain.findIndex(d => d.id === selectedLayerId);
+            if (idx < chain.length - 1 && idx >= 0) { selectedLayerId = chain[idx + 1].id; renderLayers(); }
+            else if (idx === -1) { selectedLayerId = chain[0].id; renderLayers(); }
+            return;
+        }
+
+        // P = Refresh preview
+        if (e.key === 'p') {
+            e.preventDefault(); previewChain(); return;
+        }
+
+        // Left/Right = Prev/next frame
+        if (e.key === 'ArrowLeft' && videoLoaded) {
+            e.preventDefault();
+            const jump = e.shiftKey ? 10 : 1;
+            currentFrame = Math.max(0, currentFrame - jump);
+            document.getElementById('frame-slider').value = currentFrame;
+            schedulePreview();
+            return;
+        }
+        if (e.key === 'ArrowRight' && videoLoaded) {
+            e.preventDefault();
+            const jump = e.shiftKey ? 10 : 1;
+            currentFrame = Math.min(totalFrames - 1, currentFrame + jump);
+            document.getElementById('frame-slider').value = currentFrame;
+            schedulePreview();
+            return;
+        }
+
+        // Tab = Toggle sidebar
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const browser = document.getElementById('browser');
+            if (browser) {
+                browser.style.display = browser.style.display === 'none' ? '' : 'none';
+            }
+            return;
+        }
+
+        // ? = Show shortcut reference
+        if (e.key === '?') {
+            e.preventDefault(); showShortcutRef(); return;
         }
     });
 
@@ -1115,8 +1352,8 @@ function onMixChange(value) {
 // ============ RENDER / EXPORT ============
 
 function renderVideo() {
-    if (!videoLoaded) { alert('Load a file first.'); return; }
-    if (chain.length === 0) { alert('Add at least one effect.'); return; }
+    if (!videoLoaded) { showToast('Load a file first.', 'info'); return; }
+    if (chain.length === 0) { showToast('Add at least one effect.', 'info'); return; }
     openExportDialog();
 }
 
@@ -1206,14 +1443,17 @@ async function startExport() {
         if (data.status === 'ok') {
             closeExportDialog();
             const info = data.size_mb
-                ? `Size: ${data.size_mb}MB | ${data.dimensions} | ${data.format}`
-                : `Format: ${data.format} | ${data.dimensions} | ${data.frames} frames`;
-            alert(`Export complete!\nFile: ${data.path}\n${info}`);
+                ? `${data.size_mb}MB | ${data.format}`
+                : `${data.format} | ${data.frames} frames`;
+            showToast(`Exported: ${info}`, 'success', {
+                label: 'Reveal in Finder',
+                fn: `function(){revealInFinder('${(data.path || '').replace(/'/g, "\\'")}')}`
+            }, 8000);
         } else {
-            alert(`Export failed: ${data.detail || 'Unknown error'}`);
+            showErrorToast(`Export failed: ${data.detail || 'Unknown error'}`);
         }
     } catch (err) {
-        alert(`Export error: ${err.message}`);
+        showErrorToast(`Export error: ${err.message}`);
     } finally {
         btn.textContent = origText;
         btn.disabled = false;
@@ -1303,11 +1543,13 @@ function loadPreset(effectsJson) {
 }
 
 async function saveCurrentAsPreset() {
-    if (chain.length === 0) { alert('Add effects to the chain first.'); return; }
-    const name = prompt('Preset name:');
-    if (!name) return;
-    const desc = prompt('Description (optional):') || '';
+    if (chain.length === 0) { showToast('Add effects to the chain first.', 'info'); return; }
+    showInputModal('Save Preset', 'Preset name', async (name) => {
+        await _doSavePreset(name, '');
+    });
+}
 
+async function _doSavePreset(name, desc) {
     const effects = chain.filter(d => !d.bypassed).map(d => ({
         name: d.name,
         params: { ...d.params },
@@ -1322,10 +1564,10 @@ async function saveCurrentAsPreset() {
         const data = await res.json();
         if (data.status === 'ok') {
             await loadPresets();
-            alert(`Preset "${name}" saved.`);
+            showToast(`Preset "${name}" saved.`, 'success');
         }
     } catch (err) {
-        alert(`Failed to save preset: ${err.message}`);
+        showErrorToast(`Failed to save preset: ${err.message}`);
     }
 }
 

@@ -1,0 +1,20 @@
+# Entropic Desktop App — Build Requirements
+# Use: pip install -r build-requirements.txt
+# Then: pyinstaller entropic.spec
+
+# Core dependencies (same as requirements.txt but with headless opencv)
+numpy>=2.0,<3.0
+Pillow>=10.0,<12.0
+opencv-python-headless>=4.8,<5.0
+
+# Server
+fastapi>=0.104,<1.0
+uvicorn[standard]>=0.24,<1.0
+python-multipart>=0.0.6,<1.0
+
+# Desktop window
+pywebview>=5.0,<6.0
+pyobjc-framework-WebKit>=10.0
+
+# Build tools
+pyinstaller>=6.0,<7.0

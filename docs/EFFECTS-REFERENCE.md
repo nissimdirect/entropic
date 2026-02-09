@@ -1,12 +1,13 @@
-# Entropic v0.4.2 — Effects & Packages Reference
+# Entropic v0.5.1 — Effects & Packages Reference
 
-> **Date:** 2026-02-08
-> **Version:** 0.4.2
-> **Stats:** 65 effects, 8 categories, 12 packages, 76 recipes (16 NUCLEAR), region selection (13 presets), 520 tests
+> **Date:** 2026-02-09
+> **Version:** 0.5.1
+> **Stats:** 109 effects, 10 categories, 12 packages, 76 recipes (16 NUCLEAR), region selection (13 presets), 652+ tests
+> **New in v0.5.1:** Pixel Physics (6), Impossible Physics (10), Oracle-Inspired Physics (3), Print Degradation (3), Sidechain (6), DSP Filters (12), ADSR envelope system, boundary modes
 
 ---
 
-## Effects Summary (65 total)
+## Effects Summary (109 total)
 
 ### GLITCH (4)
 | Effect | Description | Key Params |
@@ -104,6 +105,86 @@
 | `pixelannihilate` | Kill pixels (dissolve/threshold/edge/channel) | threshold, mode, replacement | dissolve @ 0.8 |
 | `framesmash` | One-stop apocalypse (6 techniques stacked) | aggression (0.0-1.0) | 1.0 |
 | `channeldestroy` | Rip channels apart (5 modes) | mode, intensity | separate @ 1.0 |
+
+### SIDECHAIN (6) — NEW in v0.5
+| Effect | Description | Key Params |
+|--------|-------------|------------|
+| `sidechainduck` | Key signal ducks brightness/saturation/blur/invert/displace | source, threshold, ratio, attack, release, mode |
+| `sidechainpump` | 4-on-the-floor rhythmic ducking at fixed BPM | rate, depth, curve, mode |
+| `sidechaingate` | Video only passes when signal exceeds threshold | source, threshold, mode, hold_frames |
+| `sidechaincross` | Cross-video sidechain — one video busts through another with ADSR | source, threshold, blend mode, attack/decay/sustain/release |
+| `sidechaincrossfeed` | Cross-video channel feed — mix color channels between two videos | channel_map, strength |
+| `sidechaininterference` | Two videos as waves — phase/amplitude interference | mode (phase/amplitude), strength |
+
+### DSP FILTERS (12) — NEW in v0.5
+| Effect | Description | Key Params |
+|--------|-------------|------------|
+| `videoflanger` | Temporal flanger — blend with oscillating-delay past frame | rate, depth, feedback, wet |
+| `videophaser` | FFT phase sweep creates sweeping notch interference | rate, stages, depth, feedback |
+| `spatialflanger` | Per-row horizontal shift with LFO — diagonal sweep | rate, depth, feedback |
+| `channelphaser` | Per-channel FFT phase sweep at different rates | r_rate, g_rate, b_rate, stages |
+| `brightnessphaser` | Sweeping brightness inversion bands | rate, bands, depth, strength |
+| `hueflanger` | Blend with hue-rotated copy, rotation oscillates | rate, depth, sat_depth |
+| `resonantfilter` | High-Q bandpass sweep through spatial frequencies | rate, q, gain, wet |
+| `combfilter` | Multi-tooth spatial comb filter — interference patterns | teeth, spacing, rate, depth |
+| `feedbackphaser` | Self-feeding 2D FFT phaser that escalates to self-oscillation | rate, stages, feedback, escalation |
+| `spectralfreeze` | Freeze frequency magnitude at intervals, impose on later frames | interval, blend_peak, envelope_frames |
+| `visualreverb` | Convolve frame with past frame as impulse response | rate, depth, ir_interval |
+| `freqflanger` | 2D FFT magnitude+phase blend with delayed frame | rate, depth, mag_blend, phase_blend |
+
+### PIXEL PHYSICS (6) — NEW in v0.5
+Displacement-field engine: 2D velocity/displacement fields accumulate over time, remap pixels through them. All support 4 boundary modes (clamp/black/wrap/mirror).
+
+| Effect | Description | Key Params | Default Boundary |
+|--------|-------------|------------|-----------------|
+| `pixelliquify` | Pixels become fluid, wash in turbulent flow | viscosity, turbulence, flow_scale, speed | wrap |
+| `pixelgravity` | Pixels pulled toward random wandering attractors | num_attractors, gravity_strength, attractor_radius | black |
+| `pixelvortex` | Swirling whirlpools pull pixels into spirals | num_vortices, spin_strength, pull_strength, radius | wrap |
+| `pixelexplode` | Pixels blast outward from a point with optional gravity | origin, force, gravity, scatter | black |
+| `pixelelastic` | Pixels on springs that stretch, bounce, and snap back | stiffness, mass, force_type, force_strength | mirror |
+| `pixelmelt` | Pixels drip and flow downward like melting wax | heat, gravity, viscosity, melt_source | black |
+
+### IMPOSSIBLE PHYSICS (10) — NEW in v0.5
+Beyond reality. Same displacement engine, impossible forces.
+
+| Effect | Description | Key Params | Default Boundary |
+|--------|-------------|------------|-----------------|
+| `pixelblackhole` | Singularity with event horizon, spaghettification, accretion glow | mass, spin, event_horizon, spaghettify, accretion_glow, hawking | black |
+| `pixelantigravity` | Repulsion zones push pixels outward with oscillating direction | repulsion, num_zones, zone_radius, oscillate | wrap |
+| `pixelmagnetic` | Pixels curve along dipole/quadrupole/toroidal field lines | field_type, strength, poles, rotation_speed | wrap |
+| `pixeltimewarp` | Displacement reverses with ghosting echoes | warp_speed, echo_count, echo_decay, reverse_probability | wrap |
+| `pixeldimensionfold` | Space folds over itself along rotating axes | num_folds, fold_depth, fold_width, rotation_speed, mirror_folds | wrap |
+| `pixelwormhole` | Paired portals teleport pixels between two connected points | portal_radius, tunnel_strength, spin, distortion_ring, wander | black |
+| `pixelquantum` | Pixels tunnel through barriers and split into superposition ghosts | tunnel_prob, barrier_count, uncertainty, superposition, decoherence | wrap |
+| `pixeldarkenergy` | Accelerating Hubble expansion tears pixels apart, reveals void | expansion_rate, acceleration, void_color, structure, hubble_zones | black |
+| `pixelsuperfluid` | Zero-friction flow with quantized vortices that climb edges | flow_speed, quantized_vortices, vortex_strength, climb_force, viscosity | wrap |
+| `pixelbubbles` | Multiple portals of random size with negative space void inside | num_portals, min_radius, max_radius, void_mode (black/white/invert), wander | black |
+
+### ORACLE-INSPIRED PHYSICS (2) — NEW in v0.5.1
+Cross-pollinated from the Expanded Oblique Strategies deck (405 cards, 14 art traditions).
+
+| Effect | Description | Key Params | Inspiration |
+|--------|-------------|------------|-------------|
+| `pixelinkdrop` | Paint in water — diffusion, surface tension, Marangoni tendrils | num_drops, diffusion_rate, surface_tension, marangoni, tendrils, color_shift | "Water music — what happens when the medium dissolves?" |
+| `pixelhaunt` | Ghostly afterimages linger where pixels used to be, with crackle | force_type, ghost_persistence, ghost_opacity, crackle | "The haunt is the presence of an absence" / Hauntology |
+
+### PRINT DEGRADATION (3) — NEW in v0.5.1
+Physical media simulation: photocopiers, fax machines, risograph printers.
+
+| Effect | Description | Key Params |
+|--------|-------------|------------|
+| `pixelxerox` | Generational copy loss — progressive contrast crush, noise, halftone, toner skip | generations (1-30), contrast_gain, noise_amount, halftone_size, toner_skip |
+| `pixelfax` | Thermal fax printing — monochrome dither, scan noise, toner bleed, paper texture | scan_noise, toner_bleed, paper_texture, compression_bands, thermal_fade, dither |
+| `pixelrisograph` | Drum printer ink bleed — limited color palette, misregistration, paper grain | ink_bleed, registration_offset, paper_grain, ink_coverage, num_colors, color_a, color_b |
+
+### Boundary Modes (All Physics Effects)
+
+| Mode | Behavior | Best For |
+|------|----------|----------|
+| `clamp` | Edge pixels stretch (default old behavior) | Static compositions |
+| `black` | Out-of-bounds reveals black void | Explosive/dramatic effects |
+| `wrap` | Tiles: bottom bleeds into top, right into left | Fluid/infinite effects |
+| `mirror` | Reflects at edges | Elastic/bouncy effects |
 
 ---
 
@@ -267,18 +348,19 @@ ascii-image-converter (3K stars), video-to-ascii (1.8K stars).
 
 ---
 
-## Test Results (2026-02-08)
+## Test Results (2026-02-09)
 
 | Metric | Value |
 |--------|-------|
-| Total effects | 65 |
+| Total effects | 109 |
 | Total packages | 12 |
 | Total recipes | 76 |
 | Nuclear recipes | 16 |
-| Tests passing | 455 |
+| Tests passing | 652+ |
 | Recipes rated NUCLEAR (diff>50) | 40/57 original (70%) + new modes TBD |
 | Highest destruction | nuclear-databend (diff=130.6, 100% pixels changed) |
 | Zero errors in full matrix | YES |
+| New categories since v0.4.2 | Sidechain (6), DSP Filters (12), Physics (6), Impossible Physics (10), Oracle (2), Print (3) |
 
 ---
 
@@ -381,19 +463,23 @@ python3 entropic.py apply <project> framesmash aggression=1.0 mix=0.5
 
 ```
 effects/
-├── __init__.py          # Master registry (65 effects)
+├── __init__.py          # Master registry (109 effects)
 ├── pixelsort.py         # Pixel sorting
 ├── channelshift.py      # Channel offset
 ├── scanlines.py         # CRT scanlines
 ├── bitcrush.py          # Bit depth reduction
 ├── color.py             # 9 color effects
-├── distortion.py        # 5 distortion effects
+├── distortion.py        # 6 distortion effects (pencilsketch, smear)
 ├── texture.py           # 9 texture effects
-├── temporal.py          # 9 temporal effects
+├── temporal.py          # 13 temporal effects (granulator, beat_repeat, strobe, lfo)
 ├── modulation.py        # 4 modulation effects
 ├── enhance.py           # 9 enhancement effects
 ├── destruction.py       # 14 destruction effects (NUCLEAR)
-└── ascii.py             # 2 ASCII/braille art effects
+├── ascii.py             # 2 ASCII/braille art effects
+├── sidechain.py         # 6 cross-video sidechain effects (duck, pump, gate, cross, crossfeed, interference)
+├── dsp_filters.py       # 12 DSP-inspired video filters (flanger, phaser, comb, reverb, spectral freeze)
+├── adsr.py              # Universal ADSR envelope engine (wraps any effect)
+└── physics.py           # 24 pixel physics effects (6 real + 10 impossible + 3 oracle + 2 print + 3 degradation)
 
 core/
 ├── safety.py            # Input validation, timeouts, path traversal protection

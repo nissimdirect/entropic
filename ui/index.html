@@ -2,11 +2,75 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Entropic</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ENTROPIC</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<!-- Boot Screen: visible immediately, dismissed when app.js init() completes -->
+<div id="boot-screen">
+    <div class="boot-logo">
+        <pre class="boot-ascii">
+ ███████╗███╗   ██╗████████╗██████╗  ██████╗ ██████╗ ██╗ ██████╗
+ ██╔════╝████╗  ██║╚══██╔══╝██╔══██╗██╔═══██╗██╔══██╗██║██╔════╝
+ █████╗  ██╔██╗ ██║   ██║   ██████╔╝██║   ██║██████╔╝██║██║
+ ██╔══╝  ██║╚██╗██║   ██║   ██╔══██╗██║   ██║██╔═══╝ ██║██║
+ ███████╗██║ ╚████║   ██║   ██║  ██║╚██████╔╝██║     ██║╚██████╗
+ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝ ╚═════╝
+        </pre>
+        <div class="boot-tagline">data is fragile</div>
+        <div class="boot-cursor">loading<span class="blink">_</span></div>
+    </div>
+    <style>
+        #boot-screen {
+            position: fixed;
+            inset: 0;
+            background: #050506;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.4s ease;
+        }
+        #boot-screen.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .boot-logo {
+            text-align: center;
+        }
+        .boot-ascii {
+            color: #ff2d2d;
+            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+            font-size: 10px;
+            line-height: 1.2;
+            letter-spacing: 0;
+            white-space: pre;
+            margin: 0;
+        }
+        .boot-tagline {
+            color: #666;
+            font-family: 'Menlo', monospace;
+            font-size: 12px;
+            margin-top: 16px;
+            letter-spacing: 4px;
+            text-transform: lowercase;
+        }
+        .boot-cursor {
+            color: #ff2d2d;
+            font-family: 'Menlo', monospace;
+            font-size: 13px;
+            margin-top: 24px;
+        }
+        .blink {
+            animation: blink-anim 0.8s step-end infinite;
+        }
+        @keyframes blink-anim {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+    </style>
+</div>
 <div id="app">
     <!-- TOP BAR -->
     <div id="topbar">
@@ -213,6 +277,72 @@
         <div class="modal-footer">
             <button onclick="closeExportDialog()">Cancel</button>
             <button onclick="startExport()" class="primary" id="export-go-btn">Export</button>
+        </div>
+    </div>
+</div>
+
+<!-- Server-Down Banner -->
+<div id="server-banner" class="server-banner" style="display:none">
+    <span>Engine disconnected</span>
+    <button onclick="restartServer()">Restart</button>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<!-- Generic Input Modal -->
+<div id="input-modal-overlay" class="modal-overlay" style="display:none">
+    <div class="modal-dialog input-modal-dialog">
+        <div class="modal-header">
+            <h2 id="input-modal-title">Input</h2>
+            <button onclick="closeInputModal()" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="text" id="input-modal-field" class="modal-input" placeholder="">
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeInputModal()">Cancel</button>
+            <button onclick="submitInputModal()" class="primary">OK</button>
+        </div>
+    </div>
+</div>
+
+<!-- Shortcut Reference Card (? key) -->
+<div id="shortcut-overlay" class="modal-overlay" style="display:none">
+    <div class="modal-dialog shortcut-dialog">
+        <div class="modal-header">
+            <h2>Keyboard Shortcuts</h2>
+            <button onclick="closeShortcutRef()" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body shortcut-body">
+            <div class="shortcut-col">
+                <h3>Chain Editing</h3>
+                <div class="sc-row"><kbd>Cmd+D</kbd> Duplicate effect</div>
+                <div class="sc-row"><kbd>Del</kbd> Remove effect</div>
+                <div class="sc-row"><kbd>[</kbd> <kbd>]</kbd> Move up/down</div>
+                <div class="sc-row"><kbd>B</kbd> Bypass toggle</div>
+                <div class="sc-row"><kbd>R</kbd> Reset to defaults</div>
+                <div class="sc-row"><kbd>&uarr;</kbd> <kbd>&darr;</kbd> Select prev/next</div>
+                <h3>Parameters</h3>
+                <div class="sc-row"><kbd>Drag</kbd> Adjust knob</div>
+                <div class="sc-row"><kbd>Shift+Drag</kbd> Fine adjust</div>
+                <div class="sc-row"><kbd>Dbl-click</kbd> Reset to default</div>
+            </div>
+            <div class="shortcut-col">
+                <h3>Preview</h3>
+                <div class="sc-row"><kbd>Space</kbd> A/B compare</div>
+                <div class="sc-row"><kbd>P</kbd> Refresh preview</div>
+                <div class="sc-row"><kbd>&larr;</kbd> <kbd>&rarr;</kbd> Prev/next frame</div>
+                <div class="sc-row"><kbd>Shift+&larr;</kbd> <kbd>Shift+&rarr;</kbd> Jump 10</div>
+                <h3>File</h3>
+                <div class="sc-row"><kbd>Cmd+O</kbd> Open file</div>
+                <div class="sc-row"><kbd>Cmd+E</kbd> Export</div>
+                <div class="sc-row"><kbd>Cmd+S</kbd> Save preset</div>
+                <h3>UI</h3>
+                <div class="sc-row"><kbd>Tab</kbd> Toggle sidebar</div>
+                <div class="sc-row"><kbd>Esc</kbd> Close modal</div>
+                <div class="sc-row"><kbd>?</kbd> This reference</div>
+            </div>
         </div>
     </div>
 </div>
