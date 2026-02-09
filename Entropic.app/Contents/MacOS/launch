@@ -21,23 +21,13 @@ if lsof -i :$PORT -sTCP:LISTEN >/dev/null 2>&1; then
     exit 0
 fi
 
-# Write a launcher script that Terminal can run
-TMPSCRIPT="/tmp/entropic_start.sh"
-cat > "$TMPSCRIPT" << 'INNEREOF'
-#!/bin/bash
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-cd /Users/nissimagent/Development/entropic
-echo ""
-echo "▓▓▓ ENTROPIC v0.4.3 ▓▓▓"
-echo "Server: http://localhost:7860"
-echo "Press Ctrl+C to stop"
-echo ""
-/opt/homebrew/bin/python3 /Users/nissimagent/Development/entropic/server.py
-INNEREOF
-chmod 755 "$TMPSCRIPT"
-
-# Open Terminal running the script
-open -a Terminal "$TMPSCRIPT"
+# Open a new Terminal window running the server with visible output
+osascript -e '
+tell application "Terminal"
+    activate
+    do script "export PATH=\"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH\" && cd /Users/nissimagent/Development/entropic && clear && echo \"\" && echo \"▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\" && echo \"▓▓▓  ENTROPIC v0.5          ▓▓▓\" && echo \"▓▓▓  Video Glitch Engine    ▓▓▓\" && echo \"▓▓▓  PopChaos Labs LLC      ▓▓▓\" && echo \"▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\" && echo \"\" && echo \"Server: http://localhost:7860\" && echo \"Press Ctrl+C to stop\" && echo \"\" && /opt/homebrew/bin/python3 /Users/nissimagent/Development/entropic/server.py"
+end tell
+'
 
 # Wait for server to start, then open browser
 for i in $(seq 1 20); do
@@ -48,5 +38,5 @@ for i in $(seq 1 20); do
     sleep 0.5
 done
 
-# Fallback
+# Fallback: open browser anyway (server may be slow to bind)
 open "http://localhost:$PORT"
