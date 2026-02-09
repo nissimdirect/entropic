@@ -1,10 +1,10 @@
-# Entropic v0.5.1 — User Acceptance Testing Plan
+# Entropic Alpha v2 — User Acceptance Testing Plan
 
 > **Date:** 2026-02-09
-> **Version:** 0.5.1 (109 effects, 10 categories, 76 recipes, 12 packages)
+> **Version:** Alpha v2 (109 effects, desktop app, timeline editor, spatial masks)
 > **Tester:** nissimdirect
 > **Prepared by:** CTO, Red Team, Mad Scientist, Lenny
-> **Updated:** Added Sections 13-17 for Sidechain, DSP Filters, Pixel Physics, Impossible Physics, and Print Degradation
+> **Updated:** Added Sections 18-21 for Desktop App, UI Core, Timeline Editor, Timeline Export/Projects
 
 ---
 
@@ -486,9 +486,267 @@ Test that "light" recipes are visibly less intense than "heavy" recipes:
 
 ---
 
-## SCORING SUMMARY
+## PRIORITY ORDER
 
-Fill this in after testing:
+If you're short on time, test in this order:
+
+1. **Section 1** (Smoke) — if this fails, stop here
+2. **Section 18** (Desktop App) — app must boot
+3. **Section 9** (Safety) — security issues are blockers
+4. **Section 20A-20B** (Timeline renders) — new feature core
+5. **Section 19A-19C** (Video, Browser, Chain) — existing UI works
+6. **Section 7B** (One recipe per package) — validates packages work
+7. **Section 3** (Individual effects) — the core product
+8. Everything else
+
+---
+
+## KNOWN ISSUES / WATCH FOR
+
+- **Temporal effects on single frames:** stutter, feedback, delay, etc. need multi-frame video to show their effect. A single-frame preview will look unchanged. Test by playing the rendered VIDEO, not by looking at a preview PNG.
+- **Color tuple params in CLI:** Use quotes around tuples like `"r_offset=(20,0)"` — shells can interpret parentheses.
+- **macOS auto-open:** After `apply`, the rendered video auto-opens in your default player. If too many renders pile up, close them periodically.
+- **Disk usage:** Each rendered video takes 1-10MB at lo quality. The `matrix` command (7.19) will create ~31 renders. Check `status` afterward.
+
+---
+
+## SECTION 18: DESKTOP APP (Boot + PyWebView)
+
+> **Goal:** The .app bundle launches, PyWebView window renders, server starts cleanly.
+> **Time:** ~10 minutes
+> **Setup:** `cd ~/Development/entropic && python3 server.py` OR launch Entropic.app from DMG
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 18.1 | Server starts | Run `python3 server.py` | "Uvicorn running on http://0.0.0.0:7860" | [ ] | |
+| 18.2 | Web UI loads | Open http://localhost:7860 in browser | 4-panel DAW layout visible, topbar + browser + canvas + chain | [ ] | |
+| 18.3 | Boot screen | First load shows boot animation | Logo, "Loading effects...", then fades to main UI | [ ] | |
+| 18.4 | Effect count | Check browser panel | All 109 effects listed in 10 categories | [ ] | |
+| 18.5 | No console errors | Open browser DevTools → Console | Zero JS errors on load | [ ] | |
+| 18.6 | Responsive resize | Resize browser window from 1280px down to 900px | Layout adapts, no overlapping panels | [ ] | |
+| 18.7 | Dark theme | Visual check | Dark background, light text, accent color visible | [ ] | |
+
+---
+
+## SECTION 19: UI CORE (Browser, Canvas, Chain, Layers)
+
+> **Goal:** All 4 panels of the DAW layout function correctly in Quick mode.
+> **Time:** ~20 minutes
+> **Prereq:** Server running, browser open
+
+### 19A. Video Loading
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 19.1 | Upload video | Click upload area or drag .mp4 file onto canvas | Video loads, first frame shown on canvas | [ ] | |
+| 19.2 | File name shows | After upload | Filename appears in topbar | [ ] | |
+| 19.3 | Frame slider works | Drag the frame scrubber slider | Canvas updates to different frames | [ ] | |
+| 19.4 | Frame counter | Move slider | Frame number updates in real time | [ ] | |
+
+### 19B. Effect Browser
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 19.5 | Category collapse | Click category header in browser | Category toggles open/closed | [ ] | |
+| 19.6 | Search effects | Type in search field | Effects filter in real-time | [ ] | |
+| 19.7 | Add effect (click) | Click an effect name in browser | Effect appears in chain rack | [ ] | |
+| 19.8 | Add effect (drag) | Drag effect from browser to chain | Effect added at drop position | [ ] | |
+
+### 19C. Chain Rack
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 19.9 | Effect shows params | Click effect in chain | Knobs/sliders appear for parameters | [ ] | |
+| 19.10 | Adjust parameter | Turn a knob or move slider | Value changes, preview updates | [ ] | |
+| 19.11 | Bypass effect | Click bypass button on effect | Effect grayed out, preview updates (effect removed) | [ ] | |
+| 19.12 | Remove effect | Click X or right-click → Remove | Effect removed from chain | [ ] | |
+| 19.13 | Reorder effects | Drag effect to new position in chain | Order changes, preview updates | [ ] | |
+| 19.14 | Clear all | Right-click → Clear All | All effects removed | [ ] | |
+| 19.15 | Duplicate effect | Right-click → Duplicate | Copy of effect added after original | [ ] | |
+
+### 19D. Preview & Canvas
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 19.16 | Live preview | Add effect with video loaded | Canvas shows processed frame | [ ] | |
+| 19.17 | A/B compare | Press Space (in Quick mode) | Toggles between original and processed | [ ] | |
+| 19.18 | Mix slider | Adjust dry/wet mix | Blend between original and processed | [ ] | |
+| 19.19 | Preview debounce | Rapidly adjust a knob | Preview updates after brief pause (not on every pixel) | [ ] | |
+
+### 19E. Layers / History
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 19.20 | History tracks changes | Add/remove/reorder effects | History panel shows each action | [ ] | |
+| 19.21 | Undo (Cmd+Z) | After adding effect | Effect removed, history updated | [ ] | |
+| 19.22 | Redo (Cmd+Shift+Z) | After undo | Effect restored | [ ] | |
+| 19.23 | Layers list | Add 3+ effects | All visible in layers panel | [ ] | |
+
+### 19F. Export (Quick Mode)
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 19.24 | Export button | Click Export with video + effects | Export dialog appears | [ ] | |
+| 19.25 | Format selection | Choose MP4, MOV, GIF, WebM | Format accepted | [ ] | |
+| 19.26 | Export completes | Start export | Progress bar → "Export complete" toast | [ ] | |
+| 19.27 | Output plays | Open exported file | Correct effects applied, video plays | [ ] | |
+
+### 19G. Keyboard Shortcuts (Quick Mode)
+
+| # | Test | Key | Expected | Result | Notes |
+|---|------|-----|----------|--------|-------|
+| 19.28 | Undo | `Cmd+Z` | Undo last action | [ ] | |
+| 19.29 | Redo | `Cmd+Shift+Z` | Redo last undo | [ ] | |
+| 19.30 | A/B compare | `Space` | Toggle original/processed | [ ] | |
+| 19.31 | Shortcut overlay | `?` | Shows shortcut reference card | [ ] | |
+| 19.32 | Navigate frames | `Left/Right arrow` | Move frame by frame | [ ] | |
+| 19.33 | Jump 10 frames | `Shift+Left/Right` | Move 10 frames | [ ] | |
+
+---
+
+## SECTION 20: TIMELINE EDITOR
+
+> **Goal:** Timeline mode adds canvas-based timeline with tracks, regions, playhead, I/O markers, zoom, and spatial masks.
+> **Time:** ~30 minutes
+> **Prereq:** Video loaded, server running
+> **Branch:** `feature/timeline-editor` (must be checked out)
+
+### 20A. Mode Switching
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 20.1 | Default is Quick | Load app fresh | "Quick" button highlighted, no timeline visible | [ ] | |
+| 20.2 | Switch to Timeline | Click "Timeline" button in topbar | Timeline panel appears below canvas, grid becomes 4 rows | [ ] | |
+| 20.3 | Switch back to Quick | Click "Quick" button | Timeline hides, grid back to 3 rows | [ ] | |
+| 20.4 | Frame scrubber hidden | In Timeline mode | Range slider above canvas is hidden (playhead replaces it) | [ ] | |
+| 20.5 | Frame scrubber visible | In Quick mode | Range slider visible and functional | [ ] | |
+| 20.6 | Existing features intact | Switch back to Quick, test A/B, effects | Everything works as before | [ ] | |
+
+### 20B. Timeline Canvas Rendering
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 20.7 | Time ruler visible | Switch to Timeline with video loaded | Top of timeline shows frame/second markers | [ ] | |
+| 20.8 | Track visible | Default "Video 1" track | Track lane with header showing name | [ ] | |
+| 20.9 | Full-length region | Auto-created when video loads | Region spanning entire video on Video 1 | [ ] | |
+| 20.10 | Playhead renders | Red vertical line at frame 0 | Visible on timeline | [ ] | |
+| 20.11 | Click moves playhead | Click anywhere on timeline body | Playhead jumps to that frame | [ ] | |
+| 20.12 | Playhead syncs canvas | Move playhead by clicking | Canvas updates to show that frame | [ ] | |
+| 20.13 | Arrow keys sync | Press Left/Right in timeline mode | Both timeline playhead and canvas update | [ ] | |
+
+### 20C. Zoom & Scroll
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 20.14 | Zoom in (+) | Click + button or press `+` key | Ruler spreads out, more detail | [ ] | |
+| 20.15 | Zoom out (-) | Click - button or press `-` key | Ruler compresses, see more frames | [ ] | |
+| 20.16 | Fit to window | Click Fit button or `Cmd+0` | All frames visible in timeline width | [ ] | |
+| 20.17 | Mouse wheel zoom | Scroll wheel on timeline | Zooms in/out smoothly | [ ] | |
+| 20.18 | Horizontal scroll | Shift+scroll or scroll when zoomed in | Timeline pans left/right | [ ] | |
+| 20.19 | Playhead stays centered | Zoom in/out | View adjusts to keep playhead visible | [ ] | |
+
+### 20D. I/O Markers
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 20.20 | Set in-point | Move playhead to frame 30, press `I` | Green marker appears at frame 30, toast "In: 30" | [ ] | |
+| 20.21 | Set out-point | Move playhead to frame 90, press `O` | Red marker appears at frame 90, toast "Out: 90" | [ ] | |
+| 20.22 | Markers visible | After setting I and O | Both markers render on timeline ruler | [ ] | |
+| 20.23 | Range highlighted | Between I and O | Shaded region between the two markers | [ ] | |
+
+### 20E. Region Management
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 20.24 | Create region from I/O | Set I at 30, O at 90, press `Cmd+R` | Region [30-90] appears on Video 1, toast "Region created" | [ ] | |
+| 20.25 | Region renders | After creation | Colored rectangle on track between frame 30-90 | [ ] | |
+| 20.26 | Click selects region | Click on the region | Region highlights, chain rack updates | [ ] | |
+| 20.27 | New region = empty chain | Click newly created region | Chain rack is empty (no effects yet) | [ ] | |
+| 20.28 | Add effects to region | With region selected, add effects from browser | Effects appear in chain rack | [ ] | |
+| 20.29 | Region stores effects | Click away, click back on region | Same effects reload in chain rack | [ ] | |
+| 20.30 | Double-click renames | Double-click region on timeline | Prompt appears, type new name, label updates | [ ] | |
+| 20.31 | Drag to move region | Click and drag region body | Region moves to new time position | [ ] | |
+| 20.32 | Drag to resize (left) | Drag left edge of region | Start frame changes, region shrinks/grows | [ ] | |
+| 20.33 | Drag to resize (right) | Drag right edge of region | End frame changes | [ ] | |
+| 20.34 | Delete region | Select region, press `Delete` | Region removed, toast confirms | [ ] | |
+| 20.35 | Multiple regions | Create 3+ regions at different time ranges | All visible on timeline, independently selectable | [ ] | |
+
+### 20F. Per-Region Effects
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 20.36 | Region A effects | Select Region A, add pixelsort | Pixelsort in chain | [ ] | |
+| 20.37 | Region B effects | Select Region B, add vhs | VHS in chain (pixelsort gone) | [ ] | |
+| 20.38 | Switch back to A | Click Region A | Pixelsort reloads in chain | [ ] | |
+| 20.39 | Preview inside region | Move playhead to frame inside Region A | Canvas shows pixelsort-processed frame | [ ] | |
+| 20.40 | Preview outside region | Move playhead to frame outside any region | Canvas shows original unprocessed frame | [ ] | |
+| 20.41 | Bypass persists | Bypass an effect in Region A, switch away, switch back | Bypass state preserved | [ ] | |
+
+### 20G. Spatial Masks (Photoshop-style Selection)
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 20.42 | Draw mask | Alt+click-drag on canvas | Red dashed rectangle appears on canvas | [ ] | |
+| 20.43 | Mask overlay visible | After drawing | Semi-transparent overlay shows masked area | [ ] | |
+| 20.44 | Mask stored on region | Draw mask, click away, click region back | Mask overlay reappears at same position | [ ] | |
+| 20.45 | Masked preview | Add effect with mask set, move playhead to region | Only masked area shows effect, rest is original | [ ] | |
+| 20.46 | Clear mask | Press `Cmd+Shift+M` or clear mask button | Mask removed, full frame processes | [ ] | |
+| 20.47 | Mask persists on resize | Resize browser window | Mask scales proportionally (stored as 0-1 ratios) | [ ] | |
+| 20.48 | Different masks per region | Region A: top-left mask, Region B: bottom-right mask | Each region shows its own mask when selected | [ ] | |
+
+### 20H. Track Controls
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 20.49 | Mute track | Press `M` with track selected | Track header shows "M", regions dimmed | [ ] | |
+| 20.50 | Muted preview | Move playhead into muted track's region | Preview shows original (no effects) | [ ] | |
+| 20.51 | Solo track | Press `S` | Track header shows "S" | [ ] | |
+| 20.52 | Unmute all | Press `Shift+M` | All tracks unmuted | [ ] | |
+
+### 20I. Playback
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 20.53 | Play/pause | Press `Space` in Timeline mode | Playhead advances frame by frame, canvas updates | [ ] | |
+| 20.54 | Stop resets | Press `Space` again | Playback pauses at current frame | [ ] | |
+| 20.55 | Home key | Press `Home` | Playhead jumps to frame 0 | [ ] | |
+| 20.56 | End key | Press `End` | Playhead jumps to last frame | [ ] | |
+
+---
+
+## SECTION 21: TIMELINE EXPORT & PROJECTS
+
+> **Goal:** Timeline-aware export processes per-region effects. Projects save/load correctly.
+> **Time:** ~15 minutes
+
+### 21A. Timeline Export
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 21.1 | Export with regions | Create 2 regions with different effects, click Export | Export starts with timeline data | [ ] | |
+| 21.2 | Region A processed | Play exported video at Region A's time range | Region A's effects visible | [ ] | |
+| 21.3 | Region B processed | Play exported video at Region B's time range | Region B's (different) effects visible | [ ] | |
+| 21.4 | Gap = original | Play exported video between regions | Original unprocessed frames | [ ] | |
+| 21.5 | Muted region skipped | Mute one track, export | Muted region's effects not applied | [ ] | |
+| 21.6 | Spatial mask in export | Region with mask, export | Only masked area has effects in output | [ ] | |
+| 21.7 | Quick mode export | Switch to Quick mode, export | Flat chain applied to all frames (existing behavior) | [ ] | |
+
+### 21B. Project Save/Load
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 21.8 | Save project | Press `Cmd+S` in Timeline mode | Prompt for name, saves .entropic file, toast confirms | [ ] | |
+| 21.9 | File created | Check `~/Documents/Entropic Projects/` | `.entropic` JSON file present | [ ] | |
+| 21.10 | File contents valid | Open .entropic file in text editor | Valid JSON with tracks, regions, effects, playhead, zoom | [ ] | |
+| 21.11 | Load project | Press `Cmd+O` in Timeline mode | File picker or list of saved projects | [ ] | |
+| 21.12 | State restored | After loading | Timeline shows same tracks, regions, effects, playhead position | [ ] | |
+| 21.13 | Effects restored | Click a region after load | Same effects appear in chain rack | [ ] | |
+| 21.14 | Mask restored | Region with spatial mask after load | Mask overlay appears at correct position | [ ] | |
+| 21.15 | Cross-session | Close browser, reopen, load project | Everything matches original save | [ ] | |
+
+---
+
+## UPDATED SCORING SUMMARY
 
 | Section | Tests | Pass | Fail | Skip |
 |---------|-------|------|------|------|
@@ -509,28 +767,15 @@ Fill this in after testing:
 | 15. Oracle + Print | 10 | | | |
 | 16. DSP Filters | 12 | | | |
 | 17. Sidechain | 6 | | | |
-| **TOTAL** | **185** | | | |
+| 18. Desktop App | 7 | | | |
+| 19. UI Core | 33 | | | |
+| 20. Timeline Editor | 56 | | | |
+| 21. Timeline Export/Projects | 15 | | | |
+| **TOTAL** | **296** | | | |
 
-**Ship criteria:** 90%+ pass rate (167+ of 185), zero critical failures in Sections 1, 2, 9.
-
----
-
-## PRIORITY ORDER
-
-If you're short on time, test in this order:
-
-1. **Section 1** (Smoke) — if this fails, stop here
-2. **Section 9** (Safety) — security issues are blockers
-3. **Section 7B** (One recipe per package) — validates packages work
-4. **Section 3** (Individual effects) — the core product
-5. **Section 6** (Render tiers) — quality output matters
-6. Everything else
-
----
-
-## KNOWN ISSUES / WATCH FOR
-
-- **Temporal effects on single frames:** stutter, feedback, delay, etc. need multi-frame video to show their effect. A single-frame preview will look unchanged. Test by playing the rendered VIDEO, not by looking at a preview PNG.
-- **Color tuple params in CLI:** Use quotes around tuples like `"r_offset=(20,0)"` — shells can interpret parentheses.
-- **macOS auto-open:** After `apply`, the rendered video auto-opens in your default player. If too many renders pile up, close them periodically.
-- **Disk usage:** Each rendered video takes 1-10MB at lo quality. The `matrix` command (7.19) will create ~31 renders. Check `status` afterward.
+**Ship criteria:**
+- **CLI (Sections 1-17):** 90%+ pass rate (167+ of 185), zero critical failures in Sections 1, 2, 9
+- **Desktop App (Section 18):** 100% pass (7/7) — app must boot
+- **UI Core (Section 19):** 90%+ pass rate (30+ of 33)
+- **Timeline (Section 20):** 85%+ pass rate (48+ of 56) — new feature, some polish acceptable
+- **Timeline Export/Projects (Section 21):** 90%+ pass rate (14+ of 15)
