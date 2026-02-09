@@ -330,6 +330,74 @@ body {
 
 .effect-item.dragging { opacity: 0.5; }
 
+/* --- Browser View Toggle (Category / Package) --- */
+
+#browser-view-toggle {
+    display: flex;
+    padding: 4px 8px;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+.view-btn {
+    flex: 1;
+    padding: 4px 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+}
+
+.view-btn.active {
+    background: var(--bg-light);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.view-btn:hover {
+    color: var(--text-primary);
+}
+
+.pkg-desc {
+    padding: 4px 12px 8px;
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.3;
+}
+
+.recipe-item {
+    padding-left: 20px;
+}
+
+.recipe-item::before {
+    content: '';
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--accent-secondary);
+    transform: translateY(-50%);
+}
+
+h3 .count {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 400;
+}
+
+.loading {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
 /* --- CANVAS (Center) --- */
 #canvas-area {
     background: var(--bg-darkest);

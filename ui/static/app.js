@@ -105,31 +105,100 @@ async function init() {
 
 // ============ EFFECT BROWSER ============
 
+let browserView = 'category';  // 'category' or 'package'
+let packageDefs = null;        // Loaded on first package view
+
+function switchBrowserView(view) {
+    browserView = view;
+    document.querySelectorAll('.view-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.view === view);
+    });
+    renderBrowser();
+}
+
 function renderBrowser() {
+    if (browserView === 'package') {
+        renderBrowserPackages();
+    } else {
+        renderBrowserCategories();
+    }
+}
+
+function renderBrowserCategories() {
     const list = document.getElementById('effect-list');
 
-    const categories = {
-        'Glitch': ['pixelsort', 'channelshift', 'displacement', 'bitcrush'],
-        'Distortion': ['wave', 'mirror', 'chromatic'],
-        'Texture': ['scanlines', 'vhs', 'noise', 'blur', 'sharpen', 'edges', 'posterize'],
-        'Color': ['hueshift', 'contrast', 'saturation', 'exposure', 'invert', 'temperature'],
-    };
+    // Build categories dynamically from effectDefs
+    const groups = {};
+    for (const def of effectDefs) {
+        const cat = (def.category || 'other').toUpperCase();
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(def.name);
+    }
+
+    // Sort category names, but put common ones first
+    const order = ['GLITCH', 'DISTORTION', 'TEXTURE', 'COLOR', 'TEMPORAL', 'MODULATION', 'ENHANCE', 'DESTRUCTION'];
+    const sorted = order.filter(c => groups[c]);
+    for (const c of Object.keys(groups)) {
+        if (!sorted.includes(c)) sorted.push(c);
+    }
 
     let html = '';
-    for (const [cat, names] of Object.entries(categories)) {
-        html += `<h3>${cat}</h3>`;
-        for (const name of names) {
-            const def = effectDefs.find(e => e.name === name);
-            if (!def) continue;
+    for (const cat of sorted) {
+        const names = groups[cat];
+        if (!names || names.length === 0) continue;
+        html += `<h3>${esc(cat)} <span class="count">${names.length}</span></h3>`;
+        for (const name of names.sort()) {
             html += `
-                <div class="effect-item" draggable="true" data-effect="${name}"
-                     ondragstart="onBrowserDragStart(event, '${name}')">
+                <div class="effect-item" draggable="true" data-effect="${esc(name)}"
+                     ondragstart="onBrowserDragStart(event, '${esc(name)}')"
+                     title="${esc(effectDefs.find(e => e.name === name)?.description || '')}">
                     ${gripHTML()}
-                    <span class="name">${name}</span>
+                    <span class="name">${esc(name)}</span>
                 </div>`;
         }
     }
     list.innerHTML = html;
+}
+
+async function renderBrowserPackages() {
+    const list = document.getElementById('effect-list');
+
+    // Load packages on first use
+    if (!packageDefs) {
+        list.innerHTML = '<div class="loading">Loading packages...</div>';
+        try {
+            const res = await fetch(`${API}/api/packages`);
+            packageDefs = await res.json();
+        } catch (e) {
+            list.innerHTML = '<div class="loading">Failed to load packages</div>';
+            return;
+        }
+    }
+
+    let html = '';
+    for (const pkg of packageDefs) {
+        html += `<h3>${esc(pkg.name)} <span class="count">${pkg.recipes.length}</span></h3>`;
+        html += `<div class="pkg-desc">${esc(pkg.description)}</div>`;
+        for (const recipe of pkg.recipes) {
+            // Each recipe is a chain of effects — drag it to apply all at once
+            html += `
+                <div class="effect-item recipe-item" draggable="true"
+                     data-recipe='${JSON.stringify(recipe.effects).replace(/'/g, '&#39;')}'
+                     ondragstart="onRecipeDragStart(event, this)"
+                     title="${esc(recipe.description)}">
+                    ${gripHTML()}
+                    <span class="name">${esc(recipe.name)}</span>
+                </div>`;
+        }
+    }
+    list.innerHTML = html;
+}
+
+function onRecipeDragStart(e, el) {
+    const recipeData = el.getAttribute('data-recipe');
+    e.dataTransfer.setData('recipe-chain', recipeData);
+    el.classList.add('dragging');
+    setTimeout(() => el.classList.remove('dragging'), 0);
 }
 
 // ============ DRAG AND DROP ============
@@ -150,8 +219,19 @@ function setupDragDrop() {
     rack.addEventListener('drop', e => {
         e.preventDefault();
         rack.classList.remove('drag-over');
+        // Single effect drag
         const name = e.dataTransfer.getData('effect-name');
-        if (name) addToChain(name);
+        if (name) { addToChain(name); return; }
+        // Recipe chain drag (from Package view)
+        const recipeData = e.dataTransfer.getData('recipe-chain');
+        if (recipeData) {
+            try {
+                const effects = JSON.parse(recipeData);
+                for (const fx of effects) {
+                    addToChain(fx.name, fx.params || {});
+                }
+            } catch (err) { console.error('Bad recipe data:', err); }
+        }
     });
 
     // Canvas drop zone (for video files)
@@ -317,7 +397,7 @@ function setupKeyboard() {
 
 // ============ EFFECT CHAIN ============
 
-function addToChain(effectName) {
+function addToChain(effectName, overrideParams) {
     const def = effectDefs.find(e => e.name === effectName);
     if (!def) return;
 
@@ -328,9 +408,11 @@ function addToChain(effectName) {
         bypassed: false,
     };
 
-    // Copy defaults
+    // Copy defaults, then apply overrides (from recipe/package)
     for (const [k, v] of Object.entries(def.params)) {
-        if (v.type === 'xy') {
+        if (overrideParams && k in overrideParams) {
+            device.params[k] = overrideParams[k];
+        } else if (v.type === 'xy') {
             device.params[k] = [...v.default];
         } else {
             device.params[k] = v.default;

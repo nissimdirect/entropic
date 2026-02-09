@@ -37,6 +37,10 @@
             <button class="browser-tab" data-btab="presets" onclick="switchBrowserTab('presets')">Presets</button>
         </div>
         <div id="effects-panel" class="browser-panel active">
+            <div id="browser-view-toggle">
+                <button class="view-btn active" data-view="category" onclick="switchBrowserView('category')">Category</button>
+                <button class="view-btn" data-view="package" onclick="switchBrowserView('package')">Package</button>
+            </div>
             <div id="effect-list"></div>
         </div>
         <div id="presets-panel" class="browser-panel">

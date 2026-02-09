@@ -22,7 +22,8 @@ from pydantic import BaseModel
 import numpy as np
 from PIL import Image
 
-from effects import EFFECTS, apply_chain
+from effects import EFFECTS, CATEGORIES, apply_chain
+from packages import PACKAGES
 from core.video_io import probe_video, extract_single_frame
 from core.export_models import ExportSettings
 
@@ -55,6 +56,7 @@ class RenderRequest(BaseModel):
     effects: list[dict]
     quality: str = "mid"  # lo, mid, hi
     mix: float = 1.0
+    automation: dict | None = None  # Optional automation session data
 
 
 @app.get("/")
@@ -92,10 +94,40 @@ async def list_effects():
                 params[k] = {"type": "string", "default": v}
         result.append({
             "name": name,
+            "category": entry.get("category", "other"),
             "description": entry["description"],
             "params": params,
         })
     return result
+
+
+@app.get("/api/packages")
+async def list_packages():
+    """List all effect packages with their recipes."""
+    result = []
+    for pkg_id, pkg in PACKAGES.items():
+        recipes = []
+        for recipe_id, recipe in pkg["recipes"].items():
+            recipes.append({
+                "id": recipe_id,
+                "name": recipe["name"],
+                "description": recipe["description"],
+                "effects": recipe["effects"],
+            })
+        result.append({
+            "id": pkg_id,
+            "name": pkg["name"],
+            "description": pkg["description"],
+            "effects_used": pkg.get("effects_used", []),
+            "recipes": recipes,
+        })
+    return result
+
+
+@app.get("/api/categories")
+async def list_categories():
+    """List all effect categories."""
+    return CATEGORIES
 
 
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB limit
@@ -468,10 +500,16 @@ async def render_video(req: RenderRequest):
         raise HTTPException(status_code=400, detail="No video loaded")
 
     from core.video_io import extract_frames, reassemble_video, load_frame, save_frame
+    from core.automation import AutomationSession
     import tempfile as tf
 
     info = _state["video_info"]
     quality = req.quality if req.quality in ("lo", "mid", "hi") else "mid"
+
+    # Load automation if provided
+    auto_session = None
+    if req.automation:
+        auto_session = AutomationSession.from_dict(req.automation)
 
     with tf.TemporaryDirectory() as tmpdir:
         frames_dir = Path(tmpdir) / "frames"
@@ -487,8 +525,10 @@ async def render_video(req: RenderRequest):
         for i, fp in enumerate(frame_files):
             frame = load_frame(fp)
             if req.effects:
+                # Apply automation overrides
+                effects = auto_session.apply_to_chain(req.effects, i) if auto_session else req.effects
                 original = frame.copy() if req.mix < 1.0 else None
-                frame = apply_chain(frame, req.effects)
+                frame = apply_chain(frame, effects)
                 if original is not None:
                     mix = max(0.0, min(1.0, req.mix))
                     frame = np.clip(

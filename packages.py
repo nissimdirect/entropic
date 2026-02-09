@@ -875,6 +875,296 @@ PACKAGES = {
             },
         },
     },
+
+    # =========================================================================
+    # 13. DSP FILTERS — Audio DSP concepts applied to video
+    # =========================================================================
+    "dsp-filters": {
+        "name": "DSP Filters",
+        "description": "Audio DSP applied to video: phasers, flangers, comb filters, "
+                       "resonant sweeps, spectral freezing, visual reverb.",
+        "effects_used": ["videoflanger", "videophaser", "spatialflanger", "channelphaser",
+                         "brightnessphaser", "hueflanger", "resonantfilter", "combfilter",
+                         "feedbackphaser", "spectralfreeze", "visualreverb", "freqflanger"],
+        "recipes": {
+            # === Flanger family ===
+            "flanger-gentle": {
+                "name": "Gentle Flanger",
+                "description": "Slow temporal flanger — ghostly frame echoes.",
+                "effects": [
+                    {"name": "videoflanger", "params": {"rate": 0.3, "depth": 8, "feedback": 0.3, "wet": 0.5, "seed": 42}},
+                ],
+            },
+            "flanger-heavy": {
+                "name": "Heavy Flanger",
+                "description": "Fast flanger with high feedback — dense temporal comb.",
+                "effects": [
+                    {"name": "videoflanger", "params": {"rate": 1.5, "depth": 15, "feedback": 0.6, "wet": 0.7, "seed": 42}},
+                ],
+            },
+            "flanger-extreme": {
+                "name": "Extreme Flanger",
+                "description": "Max depth + feedback — heavy ghosting and self-reinforcement.",
+                "effects": [
+                    {"name": "videoflanger", "params": {"rate": 2.0, "depth": 25, "feedback": 0.85, "wet": 0.9, "seed": 42}},
+                ],
+            },
+            "freq-flanger-slow": {
+                "name": "Freq Flanger (Slow)",
+                "description": "2D FFT spectral blend with slow sweep — massive phase ghosting.",
+                "effects": [
+                    {"name": "freqflanger", "params": {"rate": 0.15, "depth": 20, "mag_blend": 0.6, "phase_blend": 0.5, "seed": 42}},
+                ],
+            },
+            "spatial-flanger": {
+                "name": "Spatial Flanger",
+                "description": "Per-row horizontal shift with diagonal sweep.",
+                "effects": [
+                    {"name": "spatialflanger", "params": {"rate": 0.8, "depth": 20, "feedback": 0.3, "seed": 42}},
+                ],
+            },
+            "spatial-flanger-extreme": {
+                "name": "Spatial Flanger (Extreme)",
+                "description": "Wide shift + high feedback — heavy horizontal interference.",
+                "effects": [
+                    {"name": "spatialflanger", "params": {"rate": 2.0, "depth": 50, "feedback": 0.7, "seed": 42}},
+                ],
+            },
+            # === Phaser family ===
+            "phaser-subtle": {
+                "name": "Subtle Phaser",
+                "description": "3-stage row phase sweep — gentle notch movement.",
+                "effects": [
+                    {"name": "videophaser", "params": {"rate": 0.2, "stages": 3, "depth": 0.5, "feedback": 0.2, "seed": 42}},
+                ],
+            },
+            "phaser-deep": {
+                "name": "Deep Phaser",
+                "description": "6-stage deep notch sweep with feedback.",
+                "effects": [
+                    {"name": "videophaser", "params": {"rate": 0.5, "stages": 6, "depth": 1.5, "feedback": 0.5, "seed": 42}},
+                ],
+            },
+            "channel-phaser": {
+                "name": "Channel Phaser",
+                "description": "R/G/B sweep at different rates — color tearing.",
+                "effects": [
+                    {"name": "channelphaser", "params": {"r_rate": 0.05, "g_rate": 0.3, "b_rate": 1.2, "stages": 5, "depth": 1.5, "wet": 0.8, "seed": 42}},
+                ],
+            },
+            "channel-phaser-torn": {
+                "name": "Channel Phaser (Torn)",
+                "description": "Extreme per-channel separation — 8 stages, 3x depth.",
+                "effects": [
+                    {"name": "channelphaser", "params": {"r_rate": 0.05, "g_rate": 0.3, "b_rate": 1.2, "stages": 8, "depth": 3.0, "wet": 0.8, "seed": 42}},
+                ],
+            },
+            "brightness-phaser": {
+                "name": "Brightness Phaser",
+                "description": "6-band brightness inversion sweep — solarization that moves.",
+                "effects": [
+                    {"name": "brightnessphaser", "params": {"rate": 0.25, "bands": 6, "depth": 0.3, "strength": 0.8, "seed": 42}},
+                ],
+            },
+            "brightness-phaser-extreme": {
+                "name": "Brightness Phaser (Extreme)",
+                "description": "12-band full inversion, slow sweep — maximum solarization.",
+                "effects": [
+                    {"name": "brightnessphaser", "params": {"rate": 0.12, "bands": 12, "depth": 0.5, "strength": 1.0, "seed": 42}},
+                ],
+            },
+            "feedback-phaser": {
+                "name": "Feedback Phaser",
+                "description": "Self-feeding 2D phaser that escalates over time.",
+                "effects": [
+                    {"name": "feedbackphaser", "params": {"rate": 0.3, "stages": 6, "feedback": 0.5, "escalation": 0.01, "seed": 42}},
+                ],
+            },
+            "feedback-phaser-runaway": {
+                "name": "Feedback Phaser (Runaway)",
+                "description": "80% feedback, fast escalation — self-oscillation territory.",
+                "effects": [
+                    {"name": "feedbackphaser", "params": {"rate": 0.2, "stages": 8, "feedback": 0.8, "escalation": 0.03, "seed": 42}},
+                ],
+            },
+            # === Filter family ===
+            "resonant-filter": {
+                "name": "Resonant Filter",
+                "description": "Sweeping bandpass — synth filter on video.",
+                "effects": [
+                    {"name": "resonantfilter", "params": {"rate": 0.2, "q": 50.0, "gain": 3.0, "wet": 0.7, "seed": 42}},
+                ],
+            },
+            "resonant-filter-extreme": {
+                "name": "Resonant Filter (Extreme)",
+                "description": "Q=200, gain=8x — razor-thin resonant peak, slow sweep.",
+                "effects": [
+                    {"name": "resonantfilter", "params": {"rate": 0.1, "q": 200.0, "gain": 8.0, "wet": 0.85, "seed": 42}},
+                ],
+            },
+            "comb-filter": {
+                "name": "Comb Filter",
+                "description": "7-tooth rotating spatial comb — interference patterns.",
+                "effects": [
+                    {"name": "combfilter", "params": {"teeth": 7, "spacing": 8, "rate": 0.3, "depth": 3.0, "wet": 0.7, "seed": 42}},
+                ],
+            },
+            "comb-filter-deep": {
+                "name": "Comb Filter (Deep)",
+                "description": "15 teeth, wide spacing, 80% wet — dense interference.",
+                "effects": [
+                    {"name": "combfilter", "params": {"teeth": 15, "spacing": 10, "rate": 0.15, "depth": 6.0, "wet": 0.8, "seed": 42}},
+                ],
+            },
+            # === Color domain ===
+            "hue-flanger": {
+                "name": "Hue Flanger",
+                "description": "Oscillating hue rotation blend — color interference.",
+                "effects": [
+                    {"name": "hueflanger", "params": {"rate": 0.3, "depth": 60.0, "sat_depth": 0.0, "seed": 42}},
+                ],
+            },
+            "hue-flanger-massive": {
+                "name": "Hue Flanger (Massive)",
+                "description": "±90 degree hue sweep + saturation modulation, very slow.",
+                "effects": [
+                    {"name": "hueflanger", "params": {"rate": 0.1, "depth": 90.0, "sat_depth": 80.0, "seed": 42}},
+                ],
+            },
+            # === Temporal spectral ===
+            "spectral-freeze": {
+                "name": "Spectral Freeze",
+                "description": "Capture spectrum at intervals, impose on later frames.",
+                "effects": [
+                    {"name": "spectralfreeze", "params": {"interval": 30, "blend_peak": 0.7, "envelope_frames": 25, "seed": 42}},
+                ],
+            },
+            "visual-reverb": {
+                "name": "Visual Reverb",
+                "description": "Convolve with past frame — spatial echo of previous content.",
+                "effects": [
+                    {"name": "visualreverb", "params": {"rate": 0.15, "depth": 0.5, "ir_interval": 30, "seed": 42}},
+                ],
+            },
+            # === Combos ===
+            "freq-brightness-smash": {
+                "name": "Freq + Brightness Smash",
+                "description": "2D freq flanger → 12-band brightness phaser. Spectral + solarization.",
+                "effects": [
+                    {"name": "freqflanger", "params": {"rate": 0.12, "depth": 20, "mag_blend": 0.6, "phase_blend": 0.5, "seed": 42}},
+                    {"name": "brightnessphaser", "params": {"rate": 0.1, "bands": 12, "depth": 0.5, "strength": 1.0, "seed": 42}},
+                ],
+            },
+            "total-dsp-smash": {
+                "name": "Total DSP Smash",
+                "description": "Freq flanger → brightness phaser → resonant boost → feedback. Everything.",
+                "effects": [
+                    {"name": "freqflanger", "params": {"rate": 0.12, "depth": 20, "mag_blend": 0.6, "phase_blend": 0.5, "seed": 42}},
+                    {"name": "brightnessphaser", "params": {"rate": 0.1, "bands": 12, "depth": 0.5, "strength": 1.0, "seed": 42}},
+                    {"name": "resonantfilter", "params": {"rate": 0.08, "q": 100.0, "gain": 5.0, "wet": 0.7, "seed": 42}},
+                ],
+            },
+            "nuclear-dsp": {
+                "name": "Nuclear DSP",
+                "description": "Feedback phaser (runaway) + resonant filter + freq flanger. Maximum DSP destruction.",
+                "effects": [
+                    {"name": "feedbackphaser", "params": {"rate": 0.2, "stages": 8, "feedback": 0.8, "escalation": 0.03, "seed": 42}},
+                    {"name": "resonantfilter", "params": {"rate": 0.1, "q": 200.0, "gain": 8.0, "wet": 0.85, "seed": 42}},
+                    {"name": "freqflanger", "params": {"rate": 0.15, "depth": 20, "mag_blend": 0.7, "phase_blend": 0.5, "seed": 42}},
+                ],
+            },
+        },
+    },
+
+    # =========================================================================
+    # 14. SIDECHAIN — Video ducking, pumping, gating
+    # =========================================================================
+    "sidechain": {
+        "name": "Sidechain",
+        "description": "Audio sidechain concepts on video: ducking, pumping, gating. "
+                       "One signal modulates another.",
+        "effects_used": ["sidechainduck", "sidechainpump", "sidechaingate"],
+        "recipes": {
+            "pump-120bpm": {
+                "name": "Pump 120 BPM",
+                "description": "Classic sidechain pump at 120 BPM — brightness ducks on the beat.",
+                "effects": [
+                    {"name": "sidechainpump", "params": {"rate": 2.0, "depth": 0.7, "curve": "exponential", "mode": "brightness", "seed": 42}},
+                ],
+            },
+            "pump-140bpm-sat": {
+                "name": "Pump 140 BPM (Saturation)",
+                "description": "Fast pump — saturation ducks on the beat.",
+                "effects": [
+                    {"name": "sidechainpump", "params": {"rate": 2.33, "depth": 0.8, "curve": "exponential", "mode": "saturation", "seed": 42}},
+                ],
+            },
+            "pump-blur": {
+                "name": "Pump Blur",
+                "description": "Focus pulses in and out at 90 BPM.",
+                "effects": [
+                    {"name": "sidechainpump", "params": {"rate": 1.5, "depth": 0.9, "curve": "linear", "mode": "blur", "seed": 42}},
+                ],
+            },
+            "pump-scale": {
+                "name": "Pump Scale",
+                "description": "Video zooms in/out with the beat — breathing effect.",
+                "effects": [
+                    {"name": "sidechainpump", "params": {"rate": 2.0, "depth": 0.6, "curve": "exponential", "mode": "scale", "seed": 42}},
+                ],
+            },
+            "pump-displace": {
+                "name": "Pump Displace",
+                "description": "Pixels scatter on the beat, reform between hits.",
+                "effects": [
+                    {"name": "sidechainpump", "params": {"rate": 2.0, "depth": 0.8, "curve": "exponential", "mode": "displace", "seed": 42}},
+                ],
+            },
+            "duck-brightness": {
+                "name": "Duck Brightness",
+                "description": "Bright areas duck dark — self-sidechain compression.",
+                "effects": [
+                    {"name": "sidechainduck", "params": {"source": "brightness", "threshold": 0.5, "ratio": 6.0, "attack": 0.2, "release": 0.6, "mode": "brightness", "seed": 42}},
+                ],
+            },
+            "duck-edges-invert": {
+                "name": "Duck Edges → Invert",
+                "description": "High-edge areas get inverted — detail triggers corruption.",
+                "effects": [
+                    {"name": "sidechainduck", "params": {"source": "edges", "threshold": 0.3, "ratio": 8.0, "attack": 0.1, "release": 0.5, "mode": "invert", "seed": 42}},
+                ],
+            },
+            "duck-motion-displace": {
+                "name": "Duck Motion → Displace",
+                "description": "Moving areas get displaced — motion triggers pixel scatter.",
+                "effects": [
+                    {"name": "sidechainduck", "params": {"source": "motion", "threshold": 0.3, "ratio": 10.0, "attack": 0.1, "release": 0.4, "mode": "displace", "seed": 42}},
+                ],
+            },
+            "gate-brightness-freeze": {
+                "name": "Gate: Brightness → Freeze",
+                "description": "Video freezes when dark, plays when bright.",
+                "effects": [
+                    {"name": "sidechaingate", "params": {"source": "brightness", "threshold": 0.4, "mode": "freeze", "hold_frames": 5, "seed": 42}},
+                ],
+            },
+            "gate-motion-black": {
+                "name": "Gate: Motion → Black",
+                "description": "Video drops to black when still, shows when moving.",
+                "effects": [
+                    {"name": "sidechaingate", "params": {"source": "motion", "threshold": 0.3, "mode": "black", "hold_frames": 8, "seed": 42}},
+                ],
+            },
+            "nuclear-sidechain": {
+                "name": "Nuclear Sidechain",
+                "description": "Fast pump + edge duck + brightness gate. Maximum rhythmic destruction.",
+                "effects": [
+                    {"name": "sidechainpump", "params": {"rate": 3.0, "depth": 0.9, "curve": "exponential", "mode": "displace", "seed": 42}},
+                    {"name": "sidechainduck", "params": {"source": "edges", "threshold": 0.2, "ratio": 12.0, "attack": 0.05, "release": 0.3, "mode": "invert", "seed": 42}},
+                ],
+            },
+        },
+    },
 }
 
 

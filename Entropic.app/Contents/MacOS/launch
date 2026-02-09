@@ -1,0 +1,52 @@
+#!/bin/bash
+# Entropic — Video Glitch Engine
+# PopChaos Labs LLC
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export HOME="${HOME:-/Users/nissimagent}"
+
+PROJECT_DIR="/Users/nissimagent/Development/entropic"
+PYTHON="/opt/homebrew/bin/python3"
+PORT=7860
+
+# Check if project exists
+if [ ! -d "$PROJECT_DIR" ]; then
+    osascript -e 'display alert "Entropic" message "Project not found at ~/Development/entropic/" as critical'
+    exit 1
+fi
+
+# Check if already running
+if lsof -i :$PORT -sTCP:LISTEN >/dev/null 2>&1; then
+    open "http://localhost:$PORT"
+    exit 0
+fi
+
+# Write a launcher script that Terminal can run
+TMPSCRIPT="/tmp/entropic_start.sh"
+cat > "$TMPSCRIPT" << 'INNEREOF'
+#!/bin/bash
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+cd /Users/nissimagent/Development/entropic
+echo ""
+echo "▓▓▓ ENTROPIC v0.4.3 ▓▓▓"
+echo "Server: http://localhost:7860"
+echo "Press Ctrl+C to stop"
+echo ""
+/opt/homebrew/bin/python3 /Users/nissimagent/Development/entropic/server.py
+INNEREOF
+chmod 755 "$TMPSCRIPT"
+
+# Open Terminal running the script
+open -a Terminal "$TMPSCRIPT"
+
+# Wait for server to start, then open browser
+for i in $(seq 1 20); do
+    if lsof -i :$PORT -sTCP:LISTEN >/dev/null 2>&1; then
+        open "http://localhost:$PORT"
+        exit 0
+    fi
+    sleep 0.5
+done
+
+# Fallback
+open "http://localhost:$PORT"

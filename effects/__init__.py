@@ -49,6 +49,16 @@ from effects.destruction import (
     pixel_annihilate, frame_smash, channel_destroy,
 )
 from effects.ascii import ascii_art, braille_art
+from effects.sidechain import (
+    sidechain_duck, sidechain_pump, sidechain_gate,
+    sidechain_cross, sidechain_crossfeed, sidechain_interference,
+)
+from effects.dsp_filters import (
+    video_flanger, video_phaser, spatial_flanger, channel_phaser,
+    brightness_phaser, hue_flanger, resonant_filter, comb_filter,
+    feedback_phaser, spectral_freeze, visual_reverb, freq_flanger,
+)
+from effects.adsr import adsr_wrap, ADSREnvelope
 
 # Real datamosh is video-level (not per-frame), but we register a marker
 # so it appears in effect listings and can be referenced by recipes.
@@ -503,6 +513,121 @@ EFFECTS = {
         "description": "Rip color channels apart — separate, swap, crush, eliminate, XOR",
     },
 
+    # === SIDECHAIN ===
+    "sidechainduck": {
+        "fn": sidechain_duck,
+        "category": "modulation",
+        "params": {"source": "brightness", "threshold": 0.5, "ratio": 4.0, "attack": 0.3, "release": 0.7, "mode": "brightness", "invert": False, "seed": 42},
+        "description": "Sidechain duck — key signal ducks brightness/saturation/blur/invert/displace",
+    },
+    "sidechainpump": {
+        "fn": sidechain_pump,
+        "category": "modulation",
+        "params": {"rate": 2.0, "depth": 0.7, "curve": "exponential", "mode": "brightness", "seed": 42},
+        "description": "Rhythmic sidechain pump — 4-on-the-floor ducking at fixed BPM",
+    },
+    "sidechaingate": {
+        "fn": sidechain_gate,
+        "category": "modulation",
+        "params": {"source": "brightness", "threshold": 0.4, "mode": "freeze", "hold_frames": 5, "seed": 42},
+        "description": "Sidechain gate — video only passes when signal exceeds threshold",
+    },
+    "sidechaincross": {
+        "fn": sidechain_cross,
+        "category": "modulation",
+        "params": {"source": "brightness", "threshold": 0.3, "softness": 0.3, "mode": "blend",
+                   "strength": 0.8, "invert": False, "pre_a": "none", "pre_b": "none",
+                   "attack": 0.0, "decay": 0.0, "sustain": 1.0, "release": 0.0,
+                   "lookahead": 0, "seed": 42},
+        "description": "Cross-video sidechain — one video busts through another with ADSR envelope and pre-processing",
+    },
+    "sidechaincrossfeed": {
+        "fn": sidechain_crossfeed,
+        "category": "color",
+        "params": {"channel_map": "rgb_shift", "strength": 0.7, "seed": 42},
+        "description": "Cross-video channel feed — mix color channels between two videos",
+    },
+    "sidechaininterference": {
+        "fn": sidechain_interference,
+        "category": "modulation",
+        "params": {"mode": "phase", "strength": 0.7, "seed": 42},
+        "description": "Cross-video interference — treat two videos as waves, create phase/amplitude interference",
+    },
+
+    # === DSP FILTERS ===
+    "videoflanger": {
+        "fn": video_flanger,
+        "category": "modulation",
+        "params": {"rate": 0.5, "depth": 10, "feedback": 0.4, "wet": 0.5, "seed": 42},
+        "description": "Temporal flanger — blend with oscillating-delay past frame (comb-filter interference)",
+    },
+    "videophaser": {
+        "fn": video_phaser,
+        "category": "modulation",
+        "params": {"rate": 0.3, "stages": 4, "depth": 1.0, "feedback": 0.3, "seed": 42},
+        "description": "Spatial phaser — FFT phase sweep creates sweeping notch interference",
+    },
+    "spatialflanger": {
+        "fn": spatial_flanger,
+        "category": "modulation",
+        "params": {"rate": 0.8, "depth": 20, "feedback": 0.3, "seed": 42},
+        "description": "Per-row horizontal shift with LFO — diagonal sweep flanging",
+    },
+    "channelphaser": {
+        "fn": channel_phaser,
+        "category": "modulation",
+        "params": {"r_rate": 0.05, "g_rate": 0.3, "b_rate": 1.2, "stages": 5, "depth": 1.5, "wet": 0.8, "seed": 42},
+        "description": "Per-channel FFT phase sweep at different rates — color fringing and tearing",
+    },
+    "brightnessphaser": {
+        "fn": brightness_phaser,
+        "category": "modulation",
+        "params": {"rate": 0.25, "bands": 6, "depth": 0.3, "strength": 0.8, "seed": 42},
+        "description": "Sweeping brightness inversion bands — psychedelic solarization sweep",
+    },
+    "hueflanger": {
+        "fn": hue_flanger,
+        "category": "color",
+        "params": {"rate": 0.3, "depth": 60.0, "sat_depth": 0.0, "seed": 42},
+        "description": "Blend with hue-rotated copy, rotation oscillates — color interference",
+    },
+    "resonantfilter": {
+        "fn": resonant_filter,
+        "category": "modulation",
+        "params": {"rate": 0.2, "q": 50.0, "gain": 3.0, "wet": 0.7, "seed": 42},
+        "description": "High-Q bandpass sweep through spatial frequencies — synth filter on video",
+    },
+    "combfilter": {
+        "fn": comb_filter,
+        "category": "modulation",
+        "params": {"teeth": 7, "spacing": 8, "rate": 0.3, "depth": 3.0, "wet": 0.7, "seed": 42},
+        "description": "Multi-tooth spatial comb filter — offset copies create interference patterns",
+    },
+    "feedbackphaser": {
+        "fn": feedback_phaser,
+        "category": "modulation",
+        "params": {"rate": 0.3, "stages": 6, "feedback": 0.5, "escalation": 0.01, "seed": 42},
+        "description": "Self-feeding 2D FFT phaser that escalates over time — builds to self-oscillation",
+    },
+    "spectralfreeze": {
+        "fn": spectral_freeze,
+        "category": "temporal",
+        "params": {"interval": 30, "blend_peak": 0.7, "envelope_frames": 25, "seed": 42},
+        "description": "Freeze frequency magnitude at intervals, impose on later frames — spectral imprint",
+    },
+    "visualreverb": {
+        "fn": visual_reverb,
+        "category": "temporal",
+        "params": {"rate": 0.15, "depth": 0.5, "ir_interval": 30, "seed": 42},
+        "description": "Convolve frame with past frame as impulse response — visual echo/room",
+    },
+    "freqflanger": {
+        "fn": freq_flanger,
+        "category": "modulation",
+        "params": {"rate": 0.5, "depth": 10, "mag_blend": 0.4, "phase_blend": 0.15, "seed": 42},
+        "description": "2D FFT magnitude+phase blend with delayed frame — spectral ghosting",
+    },
+
     # === REAL DATAMOSH (video-level, not per-frame) ===
     "realdatamosh": {
         "fn": None,  # Video-level effect — use entropic_datamosh.py or gradio_datamosh.py
@@ -657,6 +782,22 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
     """Apply a chain of effects sequentially.
 
     effects_list: [{"name": "pixelsort", "params": {"threshold": 0.6}}, ...]
+
+    Any effect can include an optional "envelope" key for ADSR modulation:
+        {"name": "vhs", "params": {...}, "envelope": {
+            "attack": 3, "decay": 0, "sustain": 1.0, "release": 8,
+            "trigger": "lfo", "rate": 1.0
+        }}
+
+    Envelope params:
+        attack: Frames to ramp to full effect (0=instant).
+        decay: Frames from peak to sustain level (0=instant).
+        sustain: Steady-state level (0-1). 1.0 = full effect when on.
+        release: Frames to fade out when trigger drops (0=instant).
+        trigger: What drives the envelope ("lfo", "time", "brightness",
+                 "edges", "motion", "contrast", "saturation").
+        rate: For LFO trigger, frequency in Hz. For time trigger,
+              pulses per second. For content triggers, threshold (0-1).
     """
     from core.safety import validate_chain_depth
     validate_chain_depth(effects_list)
@@ -664,5 +805,24 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
     for effect in effects_list:
         name = effect["name"]
         params = effect.get("params", {})
-        frame = apply_effect(frame, name, frame_index=frame_index, total_frames=total_frames, **params)
+        envelope = effect.get("envelope")
+
+        if envelope is not None:
+            # Wrap effect with ADSR envelope
+            fn, defaults = get_effect(name)
+            merged_params = {**defaults, **params}
+            frame = adsr_wrap(
+                frame, fn, merged_params,
+                attack=envelope.get("attack", 0),
+                decay=envelope.get("decay", 0),
+                sustain=envelope.get("sustain", 1.0),
+                release=envelope.get("release", 0),
+                trigger_source=envelope.get("trigger", "lfo"),
+                trigger_threshold=envelope.get("rate", 1.0),
+                seed=merged_params.get("seed", 42),
+                frame_index=frame_index,
+                total_frames=total_frames,
+            )
+        else:
+            frame = apply_effect(frame, name, frame_index=frame_index, total_frames=total_frames, **params)
     return frame
