@@ -147,3 +147,55 @@ def chromatic_aberration(frame: np.ndarray, offset: int = 5,
         result[:, :, 2] = np.roll(frame[:, :, 2], -offset, axis=axis)  # B
 
     return result
+
+
+def pencil_sketch(frame: np.ndarray, sigma_s: float = 60.0,
+                  sigma_r: float = 0.07, shade: float = 0.05) -> np.ndarray:
+    """Pencil sketch effect using OpenCV's built-in pencilSketch.
+
+    Instant drawing/illustration effect. Chain with color effects
+    for "animated comic" look.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        sigma_s: Spatial sigma for edge-preserving filter (1-200).
+        sigma_r: Range sigma for edge-preserving filter (0.0-1.0).
+        shade: Shading factor for pencil texture (0.0-0.1).
+
+    Returns:
+        Pencil-sketched frame.
+    """
+    import cv2
+
+    sigma_s = max(1.0, min(200.0, float(sigma_s)))
+    sigma_r = max(0.0, min(1.0, float(sigma_r)))
+    shade = max(0.0, min(0.1, float(shade)))
+    bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    _, color_sketch = cv2.pencilSketch(bgr, sigma_s=sigma_s, sigma_r=sigma_r, shade_factor=shade)
+    return cv2.cvtColor(color_sketch, cv2.COLOR_BGR2RGB)
+
+
+def cumulative_smear(frame: np.ndarray, direction: str = "horizontal",
+                     decay: float = 0.95) -> np.ndarray:
+    """Cumulative smear — paint-smear / light-trail effect.
+
+    Each pixel takes the max of itself or the decayed previous pixel,
+    creating directional streaks like a smeared painting.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        direction: 'horizontal' or 'vertical'.
+        decay: Smear decay rate (0.5-0.999). Higher = longer trails.
+
+    Returns:
+        Smeared frame.
+    """
+    decay = max(0.5, min(0.999, float(decay)))
+    f = frame.astype(np.float32) / 255.0
+    if direction == "vertical":
+        for y in range(1, f.shape[0]):
+            f[y] = np.maximum(f[y], f[y - 1] * decay)
+    else:
+        for x in range(1, f.shape[1]):
+            f[:, x] = np.maximum(f[:, x], f[:, x - 1] * decay)
+    return np.clip(f * 255, 0, 255).astype(np.uint8)

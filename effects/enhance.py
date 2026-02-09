@@ -183,3 +183,77 @@ def false_color(
     colored = cv2.applyColorMap(gray, cmap)
     # Convert BGR to RGB
     return cv2.cvtColor(colored, cv2.COLOR_BGR2RGB)
+
+
+def histogram_eq(
+    frame: np.ndarray,
+) -> np.ndarray:
+    """Equalize histogram per channel — reveals hidden detail in over/underexposed footage.
+
+    Args:
+        frame: Input frame (H, W, 3) uint8.
+
+    Returns:
+        Histogram-equalized frame.
+    """
+    import cv2
+
+    result = np.zeros_like(frame)
+    for i in range(3):
+        result[:, :, i] = cv2.equalizeHist(frame[:, :, i])
+    return result
+
+
+def clahe(
+    frame: np.ndarray,
+    clip_limit: float = 2.0,
+    grid_size: int = 8,
+) -> np.ndarray:
+    """Contrast Limited Adaptive Histogram Equalization — local contrast enhancement.
+
+    Night-vision / detail-reveal quality. Better than global histogram eq
+    because it adapts to local regions.
+
+    Args:
+        frame: Input frame (H, W, 3) uint8.
+        clip_limit: Contrast limit (1.0-10.0). Higher = more contrast.
+        grid_size: Tile grid size (2-16). Smaller = more local adaptation.
+
+    Returns:
+        CLAHE-enhanced frame.
+    """
+    import cv2
+
+    clip_limit = max(1.0, min(10.0, float(clip_limit)))
+    grid_size = max(2, min(16, int(grid_size)))
+    cl = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(grid_size, grid_size))
+    result = np.zeros_like(frame)
+    for i in range(3):
+        result[:, :, i] = cl.apply(frame[:, :, i])
+    return result
+
+
+def parallel_compression(
+    frame: np.ndarray,
+    crush: float = 0.5,
+    blend: float = 0.5,
+) -> np.ndarray:
+    """Blend original with heavily compressed version (New York compression for video).
+
+    Audio technique: mix dry signal with a heavily compressed copy for
+    punch without losing dynamics.
+
+    Args:
+        frame: Input frame (H, W, 3) uint8.
+        crush: Gamma compression amount (0.1-1.0). Lower = more crushed.
+        blend: Mix between original and crushed (0.0-1.0).
+
+    Returns:
+        Parallel-compressed frame.
+    """
+    crush = max(0.1, min(1.0, float(crush)))
+    blend = max(0.0, min(1.0, float(blend)))
+    f = frame.astype(np.float32) / 255.0
+    crushed = np.power(f, crush)
+    result = f * (1.0 - blend) + crushed * blend
+    return np.clip(result * 255, 0, 255).astype(np.uint8)

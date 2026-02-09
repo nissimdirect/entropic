@@ -67,6 +67,10 @@ def _parse_param_value(val: str):
             parsed.append(f)
         return tuple(parsed)
 
+    # Reject NaN/Inf as standalone strings
+    if val.lower().strip() in ('nan', 'inf', '-inf', '+inf', 'infinity', '-infinity'):
+        raise ValueError(f"NaN/Inf not allowed: {val}")
+
     # Float
     if '.' in val or 'e' in val.lower():
         f = float(val)
@@ -121,6 +125,12 @@ def cmd_apply(args):
                 print(f"Invalid param {key}: {e}", file=sys.stderr)
                 return
             params[key] = val
+
+    # Region support
+    if args.region:
+        params["region"] = args.region
+    if args.feather:
+        params["feather"] = args.feather
 
     if args.name:
         args.name = _sanitize_name(args.name)
@@ -307,6 +317,12 @@ def cmd_ui(args):
     start()
 
 
+def cmd_datamosh_ui(args):
+    """Launch the Real Datamosh browser interface."""
+    from gradio_datamosh import launch_datamosh_ui
+    launch_datamosh_ui()
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="entropic",
@@ -326,6 +342,8 @@ def main():
     p.add_argument("--effect", required=True, help="Effect name")
     p.add_argument("--name", help="Recipe name (auto-generated if omitted)")
     p.add_argument("--params", nargs="*", help="Effect params as key=value pairs")
+    p.add_argument("--region", help="Apply effect to region only: 'x,y,w,h' (pixels or 0-1 percent) or preset name (center, top-half, etc.)")
+    p.add_argument("--feather", type=int, default=0, help="Region edge feather radius in pixels (0 = hard edge)")
 
     # preview
     p = sub.add_parser("preview", help="Preview a single frame")
@@ -378,6 +396,9 @@ def main():
     # ui
     sub.add_parser("ui", help="Launch Gradio visual interface")
 
+    # datamosh-ui
+    sub.add_parser("datamosh", help="Launch Real Datamosh browser interface")
+
     args = parser.parse_args()
 
     commands = {
@@ -394,6 +415,7 @@ def main():
         "search": cmd_search,
         "projects": cmd_list_projects,
         "ui": cmd_ui,
+        "datamosh": cmd_datamosh_ui,
     }
 
     if args.command in commands:

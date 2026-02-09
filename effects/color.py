@@ -167,3 +167,72 @@ def color_temperature(frame: np.ndarray, temp: float = 30) -> np.ndarray:
     result[:, :, 1] = np.clip(result[:, :, 1] + shift * 0.1, 0, 255)  # Green
 
     return result.astype(np.uint8)
+
+
+def tape_saturation(frame: np.ndarray, drive: float = 1.5,
+                    warmth: float = 0.3) -> np.ndarray:
+    """Audio tape saturation curve applied to pixel brightness.
+
+    Warm, compressed highlights with soft roll-off — exactly like
+    analog tape soft-clips audio signals.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        drive: Input gain before saturation (0.5-5.0). Higher = more squash.
+        warmth: Warm color tint amount (0.0-1.0).
+
+    Returns:
+        Tape-saturated frame.
+    """
+    drive = max(0.5, min(5.0, float(drive)))
+    warmth = max(0.0, min(1.0, float(warmth)))
+    f = frame.astype(np.float32) / 255.0
+    f = np.tanh(f * drive) / np.tanh(drive)
+    if warmth > 0:
+        f[:, :, 0] = np.clip(f[:, :, 0] + warmth * 0.05, 0, 1)
+        f[:, :, 2] = np.clip(f[:, :, 2] - warmth * 0.03, 0, 1)
+    return np.clip(f * 255, 0, 255).astype(np.uint8)
+
+
+def cyanotype(frame: np.ndarray, intensity: float = 1.0) -> np.ndarray:
+    """Cyanotype photographic print simulation (Prussian blue tones).
+
+    Maps luminance to blue-and-white palette like 19th century
+    cyanotype prints (blueprints, Anna Atkins botanical prints).
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        intensity: Effect strength (0.0 = original, 1.0 = full cyanotype).
+
+    Returns:
+        Cyanotype-tinted frame.
+    """
+    intensity = max(0.0, min(1.0, float(intensity)))
+    gray = np.mean(frame.astype(np.float32), axis=2)
+    r = np.clip(gray * 0.3, 0, 255)
+    g = np.clip(gray * 0.5, 0, 255)
+    b = np.clip(gray * 0.9 + 30, 0, 255)
+    cyan = np.stack([r, g, b], axis=2)
+    result = frame.astype(np.float32) * (1 - intensity) + cyan * intensity
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def infrared(frame: np.ndarray, vegetation_glow: float = 1.0) -> np.ndarray:
+    """Simulate infrared film photography.
+
+    Vegetation glows white (greens become bright), sky darkens (blues reduce),
+    reds shift to green channel. Classic Kodak Aerochrome / IR film look.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        vegetation_glow: How bright greens become (0.0-2.0).
+
+    Returns:
+        Infrared-simulated frame.
+    """
+    vegetation_glow = max(0.0, min(2.0, float(vegetation_glow)))
+    f = frame.astype(np.float32)
+    r = np.clip(f[:, :, 1] * vegetation_glow + f[:, :, 0] * 0.3, 0, 255)
+    g = np.clip(f[:, :, 0] * 0.8, 0, 255)
+    b = np.clip(f[:, :, 2] * 0.3, 0, 255)
+    return np.stack([r, g, b], axis=2).astype(np.uint8)

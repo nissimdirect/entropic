@@ -79,7 +79,9 @@ class TestDryWetMix:
         assert result.min() >= 0
         assert result.max() <= 255
 
-    @pytest.mark.parametrize("effect_name", list(EFFECTS.keys()))
+    @pytest.mark.parametrize("effect_name", [
+        name for name, entry in EFFECTS.items() if entry["fn"] is not None
+    ])
     def test_mix_zero_identity_all_effects(self, effect_name, frame):
         """mix=0.0 should return original for every single effect."""
         result = apply_effect(frame, effect_name, mix=0.0)

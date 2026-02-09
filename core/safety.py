@@ -101,6 +101,62 @@ def validate_chain_depth(effects_list: list) -> None:
         )
 
 
+def validate_region(region_spec, frame_width: int = None, frame_height: int = None) -> None:
+    """Validate a region specification without applying it.
+
+    Raises:
+        SafetyError: If the spec is malformed or clearly invalid.
+    """
+    if region_spec is None:
+        return
+
+    from core.region import RegionError
+
+    # String validation
+    if isinstance(region_spec, str):
+        # Check length
+        if len(region_spec) > 200:
+            raise SafetyError(f"Region string too long ({len(region_spec)} chars, max 200)")
+        # Preset names are always valid
+        from core.region import REGION_PRESETS
+        if region_spec in REGION_PRESETS:
+            return
+        # Must be x,y,w,h format
+        parts = region_spec.replace(" ", "").split(",")
+        if len(parts) != 4:
+            raise SafetyError(
+                f"Region must be 'x,y,w,h' or a preset. Got: '{region_spec}'. "
+                f"Presets: {', '.join(sorted(REGION_PRESETS.keys()))}"
+            )
+        for p in parts:
+            try:
+                v = float(p)
+                if v != v or v == float('inf') or v == float('-inf'):
+                    raise SafetyError(f"NaN/Inf not allowed in region: {region_spec}")
+            except ValueError:
+                raise SafetyError(f"Non-numeric value in region: '{p}'")
+
+    elif isinstance(region_spec, dict):
+        for key in ("x", "y", "w", "h"):
+            if key in region_spec:
+                try:
+                    float(region_spec[key])
+                except (TypeError, ValueError):
+                    raise SafetyError(f"Invalid region value for '{key}': {region_spec[key]}")
+
+    elif isinstance(region_spec, (tuple, list)):
+        if len(region_spec) != 4:
+            raise SafetyError(f"Region must have 4 values (x,y,w,h). Got {len(region_spec)}")
+
+    # If we have frame dimensions, do a full parse test
+    if frame_width and frame_height:
+        try:
+            from core.region import parse_region
+            parse_region(region_spec, frame_height, frame_width)
+        except RegionError as e:
+            raise SafetyError(str(e))
+
+
 def set_processing_timeout(seconds: int = TIMEOUT_SEC) -> None:
     """Set an alarm-based timeout for processing. Unix only.
 

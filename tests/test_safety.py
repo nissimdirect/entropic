@@ -501,7 +501,9 @@ class TestTempFileCleanup:
 class TestEffectOutputContract:
     """Every effect must return (H, W, 3) uint8 arrays with values in 0-255."""
 
-    @pytest.fixture(params=list(EFFECTS.keys()))
+    @pytest.fixture(params=[
+        name for name, entry in EFFECTS.items() if entry["fn"] is not None
+    ])
     def effect_name(self, request):
         return request.param
 

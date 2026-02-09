@@ -164,7 +164,17 @@ def blur(frame: np.ndarray, radius: int = 3, blur_type: str = "box") -> np.ndarr
 
     if blur_type == "motion":
         # Horizontal motion blur using a 1D kernel
+        # Pillow Kernel supports max 5x5, so use numpy for larger radii
         kernel_size = radius * 2 + 1
+        if kernel_size > 5:
+            kernel = np.zeros((kernel_size, kernel_size), dtype=np.float32)
+            kernel[kernel_size // 2, :] = 1.0 / kernel_size
+            from scipy.ndimage import convolve
+            result = np.stack([
+                convolve(frame[:, :, c].astype(np.float32), kernel)
+                for c in range(3)
+            ], axis=-1)
+            return np.clip(result, 0, 255).astype(np.uint8)
         kernel = [1.0 / kernel_size] * kernel_size
         # Pad to square kernel
         full_kernel = [0.0] * (kernel_size * kernel_size)
@@ -201,3 +211,62 @@ def sharpen(frame: np.ndarray, amount: float = 1.0) -> np.ndarray:
         img = img.filter(ImageFilter.SHARPEN)
 
     return np.array(img)
+
+
+def tv_static(frame: np.ndarray, intensity: float = 0.8,
+              sync_drift: float = 0.3, seed: int = 42) -> np.ndarray:
+    """Full-screen TV static with horizontal sync drift.
+
+    Channel-between-stations aesthetic. Random noise overlay +
+    horizontal line displacement simulating lost sync signal.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        intensity: Static overlay amount (0.0-1.0).
+        sync_drift: Horizontal sync error amount (0.0-1.0).
+        seed: Random seed.
+
+    Returns:
+        Static-overlaid frame.
+    """
+    h, w, c = frame.shape
+    rng = np.random.RandomState(seed)
+    intensity = max(0.0, min(1.0, float(intensity)))
+    sync_drift = max(0.0, min(1.0, float(sync_drift)))
+    static = rng.randint(0, 256, (h, w), dtype=np.uint8)
+    static_rgb = np.stack([static] * 3, axis=2)
+    result = frame.copy()
+    if sync_drift > 0:
+        num_rows = int(h * sync_drift * 0.2)
+        for _ in range(num_rows):
+            row = rng.randint(0, h)
+            shift = rng.randint(-w // 4, w // 4 + 1)
+            result[row] = np.roll(result[row], shift, axis=0)
+    blended = result.astype(np.float32) * (1 - intensity) + static_rgb.astype(np.float32) * intensity
+    return np.clip(blended, 0, 255).astype(np.uint8)
+
+
+def contour_lines(frame: np.ndarray, levels: int = 8) -> np.ndarray:
+    """Extract contour lines like a topographic map of luminance.
+
+    Quantizes brightness into bands, then highlights the boundaries
+    between bands as bright lines on a darkened frame.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        levels: Number of luminance bands (2-16).
+
+    Returns:
+        Contour-lined frame.
+    """
+    levels = max(2, min(16, int(levels)))
+    gray = np.mean(frame.astype(np.float32), axis=2)
+    step = 256.0 / levels
+    quantized = (gray // step) * step
+    dx = np.abs(np.diff(quantized, axis=1, prepend=quantized[:, :1]))
+    dy = np.abs(np.diff(quantized, axis=0, prepend=quantized[:1, :]))
+    edges = ((dx > 0) | (dy > 0)).astype(np.float32)
+    dark = frame.astype(np.float32) * 0.3
+    lines = edges[:, :, np.newaxis] * 255
+    result = dark + lines
+    return np.clip(result, 0, 255).astype(np.uint8)

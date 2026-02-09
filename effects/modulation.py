@@ -92,3 +92,65 @@ def gate(
     result = frame.copy()
     result[~mask] = 0
     return result
+
+
+def wavefold(
+    frame: np.ndarray,
+    threshold: float = 0.7,
+    folds: int = 3,
+) -> np.ndarray:
+    """Audio wavefolding applied to pixel brightness.
+
+    Values exceeding the threshold fold back down, creating
+    psychedelic contrast and banding. Classic synth distortion technique.
+
+    Args:
+        frame: Input frame (H, W, 3) uint8.
+        threshold: Fold-back point (0.1-0.95).
+        folds: Number of folding passes (1-8).
+
+    Returns:
+        Wavefolded frame.
+    """
+    threshold = max(0.1, min(0.95, float(threshold)))
+    folds = max(1, min(8, int(folds)))
+    f = frame.astype(np.float32) / 255.0
+    for _ in range(folds):
+        f = np.where(f > threshold, 2.0 * threshold - f, f)
+        f = np.abs(f)
+    return np.clip(f * 255, 0, 255).astype(np.uint8)
+
+
+def am_radio(
+    frame: np.ndarray,
+    carrier_freq: float = 10.0,
+    depth: float = 0.8,
+    frame_index: int = 0,
+    total_frames: int = 1,
+) -> np.ndarray:
+    """AM radio interference — sine carrier modulation on pixel rows.
+
+    Alternating bright/dark horizontal bands like AM radio interference
+    patterns on a CRT. Animates over time.
+
+    Args:
+        frame: Input frame (H, W, 3) uint8.
+        carrier_freq: Number of bands across frame height (1-100).
+        depth: Modulation depth (0.0-1.0).
+        frame_index: Current frame (for animation).
+        total_frames: Total frames.
+
+    Returns:
+        AM-modulated frame.
+    """
+    carrier_freq = max(1.0, min(100.0, float(carrier_freq)))
+    depth = max(0.0, min(1.0, float(depth)))
+    h = frame.shape[0]
+    phase = frame_index * 0.15
+    rows = np.arange(h, dtype=np.float32)
+    carrier = 1.0 - depth + depth * (0.5 + 0.5 * np.sin(
+        2.0 * np.pi * carrier_freq * rows / h + phase
+    ))
+    carrier = carrier.reshape(-1, 1, 1)
+    result = frame.astype(np.float32) * carrier
+    return np.clip(result, 0, 255).astype(np.uint8)

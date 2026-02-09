@@ -17,12 +17,17 @@ from effects.color import (
     brightness_exposure,
     color_invert,
     color_temperature,
+    tape_saturation,
+    cyanotype,
+    infrared,
 )
 from effects.distortion import (
     wave_distort,
     displacement,
     mirror,
     chromatic_aberration,
+    pencil_sketch,
+    cumulative_smear,
 )
 from effects.texture import (
     vhs,
@@ -31,10 +36,24 @@ from effects.texture import (
     edge_detect,
     blur,
     sharpen,
+    tv_static,
+    contour_lines,
 )
 from effects.temporal import stutter, frame_drop, time_stretch, feedback, tape_stop, tremolo, delay, decimator, sample_and_hold
-from effects.modulation import ring_mod, gate
-from effects.enhance import solarize, duotone, emboss, auto_levels, median_filter, false_color
+from effects.modulation import ring_mod, gate, wavefold, am_radio
+from effects.enhance import solarize, duotone, emboss, auto_levels, median_filter, false_color, histogram_eq, clahe, parallel_compression
+from effects.destruction import (
+    datamosh, byte_corrupt, block_corrupt, row_shift,
+    jpeg_artifacts, invert_bands, data_bend, flow_distort,
+    film_grain, glitch_repeat, xor_glitch,
+    pixel_annihilate, frame_smash, channel_destroy,
+)
+from effects.ascii import ascii_art, braille_art
+
+# Real datamosh is video-level (not per-frame), but we register a marker
+# so it appears in effect listings and can be referenced by recipes.
+# Actual execution goes through entropic_datamosh.py or gradio_datamosh.py.
+_REAL_DATAMOSH_REGISTERED = True
 
 # Master registry: name -> (function, default_params, description)
 EFFECTS = {
@@ -65,6 +84,18 @@ EFFECTS = {
     },
 
     # === DISTORTION ===
+    "pencilsketch": {
+        "fn": pencil_sketch,
+        "category": "distortion",
+        "params": {"sigma_s": 60.0, "sigma_r": 0.07, "shade": 0.05},
+        "description": "Pencil sketch drawing effect (OpenCV pencilSketch)",
+    },
+    "smear": {
+        "fn": cumulative_smear,
+        "category": "distortion",
+        "params": {"direction": "horizontal", "decay": 0.95},
+        "description": "Cumulative paint-smear / light-trail streaks",
+    },
     "wave": {
         "fn": wave_distort,
         "category": "distortion",
@@ -85,6 +116,18 @@ EFFECTS = {
     },
 
     # === TEXTURE ===
+    "tvstatic": {
+        "fn": tv_static,
+        "category": "texture",
+        "params": {"intensity": 0.8, "sync_drift": 0.3, "seed": 42},
+        "description": "TV static with horizontal sync drift (between-channels)",
+    },
+    "contours": {
+        "fn": contour_lines,
+        "category": "texture",
+        "params": {"levels": 8},
+        "description": "Topographic contour lines from luminance bands",
+    },
     "scanlines": {
         "fn": scanlines,
         "category": "texture",
@@ -127,8 +170,38 @@ EFFECTS = {
         "params": {"levels": 4},
         "description": "Reduce to N color levels per channel",
     },
+    "asciiart": {
+        "fn": ascii_art,
+        "category": "texture",
+        "params": {"charset": "basic", "width": 80, "invert": False, "color_mode": "mono", "edge_mix": 0.0, "seed": 42},
+        "description": "Convert frame to ASCII art (basic/dense/block charset, mono/green/amber/original color)",
+    },
+    "brailleart": {
+        "fn": braille_art,
+        "category": "texture",
+        "params": {"width": 80, "threshold": 128, "invert": False, "dither": True, "color_mode": "mono", "seed": 42},
+        "description": "Convert frame to braille unicode art (2×4 dot grid, 4× resolution, Floyd-Steinberg dither)",
+    },
 
     # === COLOR ===
+    "tapesaturation": {
+        "fn": tape_saturation,
+        "category": "color",
+        "params": {"drive": 1.5, "warmth": 0.3},
+        "description": "Analog tape saturation curve (tanh soft-clip + warmth)",
+    },
+    "cyanotype": {
+        "fn": cyanotype,
+        "category": "color",
+        "params": {"intensity": 1.0},
+        "description": "Prussian blue cyanotype photographic print simulation",
+    },
+    "infrared": {
+        "fn": infrared,
+        "category": "color",
+        "params": {"vegetation_glow": 1.0},
+        "description": "Infrared film simulation (vegetation glows, sky darkens)",
+    },
     "hueshift": {
         "fn": hue_shift,
         "category": "color",
@@ -223,6 +296,18 @@ EFFECTS = {
     },
 
     # === MODULATION ===
+    "wavefold": {
+        "fn": wavefold,
+        "category": "modulation",
+        "params": {"threshold": 0.7, "folds": 3},
+        "description": "Audio wavefolding — pixel brightness folds at threshold",
+    },
+    "amradio": {
+        "fn": am_radio,
+        "category": "modulation",
+        "params": {"carrier_freq": 10.0, "depth": 0.8},
+        "description": "AM radio interference bands (sine carrier on rows)",
+    },
     "ringmod": {
         "fn": ring_mod,
         "category": "modulation",
@@ -237,6 +322,24 @@ EFFECTS = {
     },
 
     # === ENHANCE ===
+    "histogrameq": {
+        "fn": histogram_eq,
+        "category": "enhance",
+        "params": {},
+        "description": "Per-channel histogram equalization (reveal hidden detail)",
+    },
+    "clahe": {
+        "fn": clahe,
+        "category": "enhance",
+        "params": {"clip_limit": 2.0, "grid_size": 8},
+        "description": "CLAHE — adaptive local contrast enhancement (night vision)",
+    },
+    "parallelcompress": {
+        "fn": parallel_compression,
+        "category": "enhance",
+        "params": {"crush": 0.5, "blend": 0.5},
+        "description": "Parallel compression (NY compression for video)",
+    },
     "solarize": {
         "fn": solarize,
         "category": "enhance",
@@ -273,6 +376,113 @@ EFFECTS = {
         "params": {"colormap": "jet"},
         "description": "Map luminance to false-color palette (thermal vision)",
     },
+
+    # === DESTRUCTION ===
+    "xorglitch": {
+        "fn": xor_glitch,
+        "category": "destruction",
+        "params": {"pattern": 128, "mode": "fixed", "seed": 42},
+        "description": "Bitwise XOR corruption (fixed, random, or gradient pattern)",
+    },
+    "datamosh": {
+        "fn": datamosh,
+        "category": "destruction",
+        "params": {
+            "intensity": 1.0, "accumulate": True, "decay": 0.95,
+            "mode": "melt", "seed": 42, "motion_threshold": 0.0,
+            "macroblock_size": 16, "donor_offset": 10, "blend_mode": "normal",
+        },
+        "description": "Datamosh (optical flow) — 8 modes: melt, bloom, rip, replace, annihilate, freeze_through (authentic I-frame removal), pframe_extend (P-frame duplication/bloom-glide), donor (cross-clip pixel feeding). Blend modes: normal, multiply, average, swap.",
+    },
+    "bytecorrupt": {
+        "fn": byte_corrupt,
+        "category": "destruction",
+        "params": {"amount": 20, "jpeg_quality": 75, "seed": 42},
+        "description": "JPEG data bending — corrupt compressed bytes for authentic glitch",
+    },
+    "blockcorrupt": {
+        "fn": block_corrupt,
+        "category": "destruction",
+        "params": {"num_blocks": 15, "block_size": 32, "mode": "random", "seed": 42},
+        "description": "Corrupt random macroblocks (shift, noise, repeat, invert, zero)",
+    },
+    "rowshift": {
+        "fn": row_shift,
+        "category": "destruction",
+        "params": {"max_shift": 30, "density": 0.3, "seed": 42},
+        "description": "Horizontal scanline tearing — rows displaced randomly",
+    },
+    "jpegdamage": {
+        "fn": jpeg_artifacts,
+        "category": "destruction",
+        "params": {"quality": 5, "block_damage": 20, "seed": 42},
+        "description": "Extreme JPEG compression + block corruption artifacts",
+    },
+    "invertbands": {
+        "fn": invert_bands,
+        "category": "destruction",
+        "params": {"band_height": 10, "offset": 0},
+        "description": "Alternating inverted horizontal bands (CRT damage)",
+    },
+    "databend": {
+        "fn": data_bend,
+        "category": "destruction",
+        "params": {"effect": "echo", "intensity": 0.5, "seed": 42},
+        "description": "Audio DSP on pixel data — echo, distort, bitcrush, reverse",
+    },
+    "flowdistort": {
+        "fn": flow_distort,
+        "category": "destruction",
+        "params": {"strength": 3.0, "direction": "forward"},
+        "description": "Warp frame using optical flow as displacement map",
+    },
+    "filmgrain": {
+        "fn": film_grain,
+        "category": "destruction",
+        "params": {"intensity": 0.4, "grain_size": 2, "seed": 42},
+        "description": "Realistic film grain (brightness-responsive, chunky texture)",
+    },
+    "glitchrepeat": {
+        "fn": glitch_repeat,
+        "category": "destruction",
+        "params": {"num_slices": 8, "max_height": 20, "shift": True, "seed": 42},
+        "description": "Repeat and shift random horizontal slices (buffer overflow)",
+    },
+    "pixelannihilate": {
+        "fn": pixel_annihilate,
+        "category": "destruction",
+        "params": {"threshold": 0.5, "mode": "dissolve", "replacement": "black", "seed": 42},
+        "description": "Kill pixels by dissolve, threshold, edge-kill, or channel-rip",
+    },
+    "framesmash": {
+        "fn": frame_smash,
+        "category": "destruction",
+        "params": {"aggression": 0.5, "seed": 42},
+        "description": "One-stop apocalypse — rows, blocks, channels, XOR, dissolve combined",
+    },
+    "channeldestroy": {
+        "fn": channel_destroy,
+        "category": "destruction",
+        "params": {"mode": "separate", "intensity": 0.5, "seed": 42},
+        "description": "Rip color channels apart — separate, swap, crush, eliminate, XOR",
+    },
+
+    # === REAL DATAMOSH (video-level, not per-frame) ===
+    "realdatamosh": {
+        "fn": None,  # Video-level effect — use entropic_datamosh.py or gradio_datamosh.py
+        "category": "destruction",
+        "params": {
+            "mode": "splice",
+            "switch_frame": 30,
+            "interval": 15,
+            "rotation": 0.0,
+            "x_offset": 0,
+            "y_offset": 0,
+            "motion_pattern": "static",
+        },
+        "description": "REAL H.264 P-frame datamosh (not simulation). Modes: splice, interleave, replace, multi, strategic. Requires two input videos. Use 'entropic_datamosh.py' CLI or 'python gradio_datamosh.py' for browser UI.",
+        "video_level": True,  # Flag: this effect operates on full video, not single frames
+    },
 }
 
 # Category display order and labels
@@ -284,16 +494,31 @@ CATEGORIES = {
     "temporal": "TEMPORAL",
     "modulation": "MODULATION",
     "enhance": "ENHANCE",
+    "destruction": "DESTRUCTION",
 }
 
 
 def get_effect(name: str):
-    """Get an effect by name. Returns (fn, default_params)."""
+    """Get an effect by name. Returns (fn, default_params).
+
+    Raises ValueError if effect doesn't exist or is video-level only
+    (video-level effects like realdatamosh operate on full videos, not single frames).
+    """
     if name not in EFFECTS:
         available = ", ".join(sorted(EFFECTS.keys()))
         raise ValueError(f"Unknown effect: {name}. Available: {available}")
     entry = EFFECTS[name]
+    if entry["fn"] is None:
+        raise ValueError(
+            f"'{name}' is a video-level effect (operates on full videos, not single frames). "
+            f"Use entropic_datamosh.py CLI or 'python entropic.py datamosh' instead."
+        )
     return entry["fn"], entry["params"].copy()
+
+
+def is_video_level(name: str) -> bool:
+    """Check if an effect is video-level (not per-frame)."""
+    return EFFECTS.get(name, {}).get("video_level", False)
 
 
 def list_effects(category: str = None) -> list[dict]:
@@ -340,13 +565,16 @@ def search_effects(query: str, max_query_len: int = 200) -> list[dict]:
 def apply_effect(frame, effect_name: str, frame_index: int = 0, total_frames: int = 1, **params):
     """Apply a named effect to a frame with given params.
 
-    Special param `mix` (0.0-1.0): Dry/wet blend. 1.0 = fully processed (default),
-    0.0 = original signal. Works like parallel processing in a DAW — the dry
-    (original) and wet (processed) signals are blended together.
+    Special params:
+        mix (0.0-1.0): Dry/wet blend. 1.0 = fully processed (default).
+        region: Region spec — "x,y,w,h", preset name, or dict. None = full frame.
+        feather (int): Edge feather radius for region blending (0 = hard edge).
     """
-    # Extract mix param before passing to effect function
+    # Extract special params before passing to effect function
     mix = float(params.pop("mix", 1.0))
     mix = max(0.0, min(1.0, mix))
+    region = params.pop("region", None)
+    feather = int(params.pop("feather", 0))
 
     fn, defaults = get_effect(effect_name)
     merged = {**defaults, **params}
@@ -359,7 +587,12 @@ def apply_effect(frame, effect_name: str, frame_index: int = 0, total_frames: in
     if "total_frames" in sig.parameters:
         merged["total_frames"] = total_frames
 
-    wet = fn(frame, **merged)
+    # Apply with region masking if specified
+    if region is not None:
+        from core.region import apply_to_region
+        wet = apply_to_region(frame, fn, region, feather=feather, **merged)
+    else:
+        wet = fn(frame, **merged)
 
     # Dry/wet blend (parallel processing)
     if mix >= 1.0:
