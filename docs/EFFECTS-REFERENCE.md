@@ -1,8 +1,8 @@
-# Entropic v0.4.1 — Effects & Packages Reference
+# Entropic v0.4.2 — Effects & Packages Reference
 
 > **Date:** 2026-02-08
-> **Version:** 0.4.1
-> **Stats:** 65 effects, 8 categories, 12 packages, 76 recipes (16 NUCLEAR)
+> **Version:** 0.4.2
+> **Stats:** 65 effects, 8 categories, 12 packages, 76 recipes (16 NUCLEAR), region selection (13 presets), 520 tests
 
 ---
 
@@ -279,6 +279,74 @@ ascii-image-converter (3K stars), video-to-ascii (1.8K stars).
 | Recipes rated NUCLEAR (diff>50) | 40/57 original (70%) + new modes TBD |
 | Highest destruction | nuclear-databend (diff=130.6, 100% pixels changed) |
 | Zero errors in full matrix | YES |
+
+---
+
+## Region Selection (NEW in v0.4.2)
+
+Apply any effect to a rectangular sub-region of the frame. Works with all 65 effects.
+
+### Usage
+
+```bash
+# Apply to a preset region
+python3 entropic.py apply <project> invert --region center
+python3 entropic.py apply <project> pixelsort --region top-half threshold=0.5
+
+# Apply to pixel coordinates (x, y, width, height)
+python3 entropic.py apply <project> noise amount=0.8 --region "100,50,200,150"
+
+# Apply to percentage coordinates (0.0–1.0)
+python3 entropic.py apply <project> hueshift degrees=90 --region "0.25,0.1,0.5,0.8"
+
+# Feathered edges (smooth blend at region boundary)
+python3 entropic.py apply <project> invert --region center --feather 20
+```
+
+### Region Presets (13)
+
+| Preset | Area |
+|--------|------|
+| `center` | Center 50% |
+| `top-half` / `bottom-half` | Top/bottom 50% |
+| `left-half` / `right-half` | Left/right 50% |
+| `top-left` / `top-right` / `bottom-left` / `bottom-right` | Corner quadrants (50×50%) |
+| `center-strip` | Horizontal strip (center 50% height) |
+| `thirds-left` / `thirds-center` / `thirds-right` | Rule of thirds columns |
+
+### Region Params
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `--region` | string | None (full frame) | Preset name, "x,y,w,h" pixels, or "0.x,0.y,0.w,0.h" percent |
+| `--feather` | int | 0 | Edge blend radius in pixels (0 = hard edge) |
+
+### Composing Regions
+
+Apply different effects to different regions in sequence:
+```bash
+# Invert top, posterize bottom
+python3 entropic.py apply <project> invert --region top-half
+python3 entropic.py apply <project> posterize levels=2 --region bottom-half
+```
+
+### Programmatic API
+
+```python
+from effects import apply_effect
+import numpy as np
+
+frame = np.random.randint(0, 256, (480, 640, 3), dtype=np.uint8)
+
+# With preset
+result = apply_effect(frame, "pixelsort", region="center", feather=10)
+
+# With coordinates
+result = apply_effect(frame, "noise", amount=0.5, region="100,50,200,150")
+
+# With percent
+result = apply_effect(frame, "hueshift", degrees=90, region="0.25,0.0,0.5,1.0")
+```
 
 ---
 

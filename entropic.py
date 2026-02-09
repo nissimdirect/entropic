@@ -6,6 +6,7 @@ CLI entry point. Also importable as a library.
 Usage:
     python entropic.py new myproject --source video.mp4
     python entropic.py apply myproject --effect pixelsort --threshold 0.6
+    python entropic.py apply myproject --effect invert --region center --feather 10
     python entropic.py preview myproject 001
     python entropic.py render myproject 001 --quality hi
     python entropic.py history myproject
@@ -218,6 +219,20 @@ def cmd_branch(args):
     print(f"Branched: {recipe['id']} from {args.recipe_id}")
 
 
+def cmd_list_presets(args):
+    """List all available region presets."""
+    from core.region import list_presets, REGION_PRESETS
+    presets = list_presets()
+    print(f"\n  Region Presets ({len(presets)} available)")
+    print(f"  {'—' * 50}")
+    for name in sorted(presets):
+        x, y, w, h = REGION_PRESETS[name]
+        print(f"    {name:20s}  x={x}, y={y}, w={w}, h={h}")
+    print(f"\n  Usage: --region <preset_name>")
+    print(f"  Custom: --region 'x,y,w,h' (pixels or 0-1 percent)")
+    print(f"  Feather: --feather <px> (smooth edge blend)\n")
+
+
 def cmd_list_effects(args):
     """List all available effects, grouped by category."""
     category_filter = getattr(args, "category", None)
@@ -318,9 +333,9 @@ def cmd_ui(args):
 
 
 def cmd_datamosh_ui(args):
-    """Launch the Real Datamosh browser interface."""
-    from gradio_datamosh import launch_datamosh_ui
-    launch_datamosh_ui()
+    """Launch the Real Datamosh native desktop app."""
+    from datamosh_gui import main as launch_datamosh
+    launch_datamosh()
 
 
 def main():
@@ -390,6 +405,9 @@ def main():
     p = sub.add_parser("search", help="Search effects by name or description")
     p.add_argument("query", help="Search term")
 
+    # list-presets
+    sub.add_parser("list-presets", help="List all region presets")
+
     # projects
     sub.add_parser("projects", help="List all projects")
 
@@ -397,7 +415,7 @@ def main():
     sub.add_parser("ui", help="Launch Gradio visual interface")
 
     # datamosh-ui
-    sub.add_parser("datamosh", help="Launch Real Datamosh browser interface")
+    sub.add_parser("datamosh", help="Launch Real Datamosh native desktop app")
 
     args = parser.parse_args()
 
@@ -411,6 +429,7 @@ def main():
         "favorite": cmd_favorite,
         "branch": cmd_branch,
         "list-effects": cmd_list_effects,
+        "list-presets": cmd_list_presets,
         "info": cmd_info,
         "search": cmd_search,
         "projects": cmd_list_projects,

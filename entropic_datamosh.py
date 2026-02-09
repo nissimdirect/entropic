@@ -169,25 +169,33 @@ def cmd_strategic(args):
 
     t0 = time.time()
 
-    # First, create strategic-keyframe version of video A
     import tempfile
     with tempfile.TemporaryDirectory(prefix="entropic_strategic_") as tmpdir:
         tmpdir = Path(tmpdir)
-        prep_a = tmpdir / "strategic_a.mp4"
 
+        # A gets strategic keyframes (periodic resets)
+        prep_a = tmpdir / "strategic_a.mp4"
         strategic_keyframes(
             args.video_a, str(prep_a),
             keyframe_interval=args.keyframe_interval,
             width=args.width, height=args.height,
         )
 
-        # Now do the datamosh splice using the strategic version
+        # B gets normal all-P-frame preprocessing
+        prep_b = tmpdir / "prep_b.mp4"
+        preprocess_for_datamosh(
+            args.video_b, str(prep_b),
+            width=args.width, height=args.height,
+        )
+
+        # Datamosh with skip_preprocess=True to preserve A's strategic keyframes
         output = real_datamosh(
-            str(prep_a), args.video_b, args.output,
-            switch_frame=1,  # Switch immediately after first keyframe
+            str(prep_a), str(prep_b), args.output,
+            switch_frame=1,
             width=args.width, height=args.height, fps=args.fps,
             mode="splice",
             audio_source=args.audio,
+            skip_preprocess=True,
         )
 
     elapsed = time.time() - t0

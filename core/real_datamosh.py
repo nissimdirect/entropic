@@ -140,6 +140,7 @@ def real_datamosh(
     fps: float = 30.0,
     mode: str = "splice",
     audio_source: str | None = None,
+    skip_preprocess: bool = False,
 ) -> Path:
     """Create a REAL datamosh by splicing P-frames between two videos.
 
@@ -164,6 +165,8 @@ def real_datamosh(
         fps: Output framerate.
         mode: 'splice', 'interleave', or 'replace'.
         audio_source: Optional video to copy audio from.
+        skip_preprocess: If True, skip the preprocess step (use when inputs
+                         are already preprocessed, e.g. from strategic_keyframes).
 
     Returns:
         Path to datamoshed output video.
@@ -175,10 +178,15 @@ def real_datamosh(
         tmpdir = Path(tmpdir)
 
         # Step 1: Preprocess both videos with the all-P-frame trick
+        # (skip if already preprocessed, e.g. strategic_keyframes output)
         prep_a = tmpdir / "prep_a.mp4"
         prep_b = tmpdir / "prep_b.mp4"
-        preprocess_for_datamosh(video_a, str(prep_a), width, height)
-        preprocess_for_datamosh(video_b, str(prep_b), width, height)
+        if skip_preprocess:
+            shutil.copy2(str(video_a), str(prep_a))
+            shutil.copy2(str(video_b), str(prep_b))
+        else:
+            preprocess_for_datamosh(video_a, str(prep_a), width, height)
+            preprocess_for_datamosh(video_b, str(prep_b), width, height)
 
         # Step 2: Extract raw H.264 bitstreams
         raw_a = tmpdir / "raw_a.h264"
@@ -244,14 +252,13 @@ def real_datamosh(
                 else:
                     if use_a:
                         offset, length, nal_type = frame_nals_a[i]
-                        # Skip any additional keyframes from A
                         if nal_type == 5 and i > 0:
-                            nal_type = 1  # Treat as P-frame (hack — skip it)
+                            # Skip extra keyframes from A (shouldn't exist after preprocess, but guard)
                             continue
                         output_stream.extend(data_a[offset:offset + length])
                     else:
                         offset, length, nal_type = frame_nals_b[i]
-                        if nal_type == 5:  # Skip B's keyframes
+                        if nal_type == 5:
                             continue
                         output_stream.extend(data_b[offset:offset + length])
 
@@ -358,9 +365,10 @@ def multi_datamosh(
     with tempfile.TemporaryDirectory(prefix="entropic_multimosh_") as tmpdir:
         tmpdir = Path(tmpdir)
 
-        # Preprocess all videos
-        all_frame_nals = []
-        header_nals = None
+        # Preprocess all videos — store raw data in a list indexed by source
+        raw_data_by_source = []  # bytes objects (shared, not duplicated per NAL)
+        all_frame_nals = []      # list of [(offset, length, nal_type), ...]
+        header_nals = None       # [(offset, length, nal_type)] from source 0
 
         for i, video in enumerate(videos):
             prep = tmpdir / f"prep_{i}.mp4"
@@ -378,24 +386,26 @@ def multi_datamosh(
             subprocess.run(cmd, capture_output=True, check=True, timeout=120)
 
             data = raw.read_bytes()
+            raw_data_by_source.append(data)
             nals = _find_nal_units(data)
 
             if i == 0:
-                header_nals = [(o, l, t, data) for o, l, t in nals if t in (6, 7, 8)]
+                header_nals = [(o, l, t) for o, l, t in nals if t in (6, 7, 8)]
 
-            frame_nals = [(o, l, t, data) for o, l, t in nals if t in (1, 5)]
+            frame_nals = [(o, l, t) for o, l, t in nals if t in (1, 5)]
             all_frame_nals.append(frame_nals)
 
         # Build output stream
         output_stream = bytearray()
+        data_0 = raw_data_by_source[0]
 
         # Header from first video
-        for offset, length, _, data in header_nals:
-            output_stream.extend(data[offset:offset + length])
+        for offset, length, _ in header_nals:
+            output_stream.extend(data_0[offset:offset + length])
 
         # Keyframe from first video
         first_frame = all_frame_nals[0][0]
-        output_stream.extend(first_frame[3][first_frame[0]:first_frame[0] + first_frame[1]])
+        output_stream.extend(data_0[first_frame[0]:first_frame[0] + first_frame[1]])
 
         # Round-robin P-frames from all sources
         source_idx = 0
@@ -405,16 +415,17 @@ def multi_datamosh(
         max_total = sum(len(nals) for nals in all_frame_nals)
 
         while total_output_frames < max_total:
-            source = all_frame_nals[source_idx]
+            source_nals = all_frame_nals[source_idx]
+            source_data = raw_data_by_source[source_idx]
             cursor = frame_cursors[source_idx]
 
             frames_taken = 0
-            while cursor < len(source) and frames_taken < frames_per_source:
-                offset, length, nal_type, data = source[cursor]
+            while cursor < len(source_nals) and frames_taken < frames_per_source:
+                offset, length, nal_type = source_nals[cursor]
                 if nal_type == 5:  # Skip keyframes (except the very first)
                     cursor += 1
                     continue
-                output_stream.extend(data[offset:offset + length])
+                output_stream.extend(source_data[offset:offset + length])
                 cursor += 1
                 frames_taken += 1
                 total_output_frames += 1
