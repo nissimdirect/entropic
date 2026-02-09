@@ -59,6 +59,10 @@ from effects.dsp_filters import (
     feedback_phaser, spectral_freeze, visual_reverb, freq_flanger,
 )
 from effects.adsr import adsr_wrap, ADSREnvelope
+from effects.physics import (
+    pixel_liquify, pixel_gravity, pixel_vortex,
+    pixel_explode, pixel_elastic, pixel_melt,
+)
 
 # Real datamosh is video-level (not per-frame), but we register a marker
 # so it appears in effect listings and can be referenced by recipes.
@@ -552,6 +556,44 @@ EFFECTS = {
         "category": "modulation",
         "params": {"mode": "phase", "strength": 0.7, "seed": 42},
         "description": "Cross-video interference — treat two videos as waves, create phase/amplitude interference",
+    },
+
+    # === PIXEL PHYSICS ===
+    "pixelliquify": {
+        "fn": pixel_liquify,
+        "category": "distortion",
+        "params": {"viscosity": 0.92, "turbulence": 3.0, "flow_scale": 40.0, "speed": 1.0, "seed": 42},
+        "description": "Liquify — pixels become fluid and wash around in turbulent flow",
+    },
+    "pixelgravity": {
+        "fn": pixel_gravity,
+        "category": "distortion",
+        "params": {"num_attractors": 5, "gravity_strength": 8.0, "damping": 0.95, "attractor_radius": 0.3, "wander": 0.5, "seed": 42},
+        "description": "Gravity attractors — pixels get pulled toward random wandering points",
+    },
+    "pixelvortex": {
+        "fn": pixel_vortex,
+        "category": "distortion",
+        "params": {"num_vortices": 3, "spin_strength": 5.0, "pull_strength": 2.0, "radius": 0.25, "damping": 0.93, "seed": 42},
+        "description": "Vortex — swirling whirlpools pull pixels into spirals",
+    },
+    "pixelexplode": {
+        "fn": pixel_explode,
+        "category": "distortion",
+        "params": {"origin": "center", "force": 10.0, "damping": 0.96, "gravity": 0.0, "scatter": 0.0, "seed": 42},
+        "description": "Explode — pixels blast outward from a point with optional gravity",
+    },
+    "pixelelastic": {
+        "fn": pixel_elastic,
+        "category": "distortion",
+        "params": {"stiffness": 0.3, "mass": 1.0, "force_type": "turbulence", "force_strength": 5.0, "damping": 0.9, "seed": 42},
+        "description": "Elastic — pixels on springs that stretch, bounce, and snap back",
+    },
+    "pixelmelt": {
+        "fn": pixel_melt,
+        "category": "distortion",
+        "params": {"heat": 3.0, "gravity": 2.0, "viscosity": 0.95, "melt_source": "top", "seed": 42},
+        "description": "Melt — pixels drip and flow downward like melting wax",
     },
 
     # === DSP FILTERS ===

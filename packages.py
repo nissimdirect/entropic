@@ -1165,6 +1165,159 @@ PACKAGES = {
             },
         },
     },
+
+    # =========================================================================
+    # 15. ENVELOPES — ADSR on any effect. LFO/time-triggered rhythmic modulation.
+    # =========================================================================
+    "envelopes": {
+        "name": "Envelopes",
+        "description": "ADSR envelopes on effects — pluck, pad, pulse, swell. "
+                       "LFO and time triggers make effects breathe rhythmically.",
+        "effects_used": ["vhs", "wave", "invert", "scanlines", "noise",
+                         "bitcrush", "posterize", "edges", "chromatic",
+                         "blur", "pixelsort", "freqflanger"],
+        "recipes": {
+            # --- Plucks (percussive: instant attack, no sustain, fast release) ---
+            "pluck-invert": {
+                "name": "Pluck: Invert",
+                "description": "Percussive negative flash at 3Hz.",
+                "effects": [
+                    {"name": "invert", "params": {"channel": "all", "amount": 1.0},
+                     "envelope": {"attack": 1, "decay": 1, "sustain": 1.0, "release": 3, "trigger": "lfo", "rate": 3.0}},
+                ],
+            },
+            "pluck-scanlines": {
+                "name": "Pluck: Scanlines",
+                "description": "Scanline strobe at 2Hz.",
+                "effects": [
+                    {"name": "scanlines", "params": {"line_width": 5, "opacity": 1.0, "flicker": True, "color": [0, 0, 0]},
+                     "envelope": {"attack": 1, "decay": 0, "sustain": 1.0, "release": 3, "trigger": "lfo", "rate": 2.0}},
+                ],
+            },
+            "pluck-noise": {
+                "name": "Pluck: Noise Burst",
+                "description": "Grain burst at 2Hz — film damage percussive.",
+                "effects": [
+                    {"name": "noise", "params": {"amount": 0.9, "noise_type": "gaussian", "seed": 42},
+                     "envelope": {"attack": 1, "decay": 1, "sustain": 1.0, "release": 4, "trigger": "lfo", "rate": 2.0}},
+                ],
+            },
+            "pluck-wave": {
+                "name": "Pluck: Wave Hit",
+                "description": "Warp pops in and vanishes at 1.5Hz.",
+                "effects": [
+                    {"name": "wave", "params": {"amplitude": 40.0, "frequency": 0.04, "direction": "both"},
+                     "envelope": {"attack": 1, "decay": 2, "sustain": 1.0, "release": 4, "trigger": "lfo", "rate": 1.5}},
+                ],
+            },
+            # --- Pads (slow bloom, long sustain, long release) ---
+            "pad-blur": {
+                "name": "Pad: Blur Bloom",
+                "description": "Focus slowly drifts out and back at 0.5Hz.",
+                "effects": [
+                    {"name": "blur", "params": {"radius": 25, "blur_type": "gaussian"},
+                     "envelope": {"attack": 12, "decay": 0, "sustain": 1.0, "release": 18, "trigger": "lfo", "rate": 0.5}},
+                ],
+            },
+            "pad-chromatic": {
+                "name": "Pad: Chromatic Bloom",
+                "description": "Color fringing slowly blooms at 0.4Hz.",
+                "effects": [
+                    {"name": "chromatic", "params": {"offset": 35, "direction": "horizontal"},
+                     "envelope": {"attack": 15, "decay": 0, "sustain": 1.0, "release": 20, "trigger": "lfo", "rate": 0.4}},
+                ],
+            },
+            "pad-bitcrush": {
+                "name": "Pad: Bitcrush Decay",
+                "description": "Quality slowly degrades and recovers at 0.3Hz.",
+                "effects": [
+                    {"name": "bitcrush", "params": {"color_depth": 1, "resolution_scale": 0.15},
+                     "envelope": {"attack": 15, "decay": 0, "sustain": 1.0, "release": 20, "trigger": "lfo", "rate": 0.3}},
+                ],
+            },
+            "pad-edges": {
+                "name": "Pad: Edge Reveal",
+                "description": "Line drawing slowly appears over image at 0.4Hz.",
+                "effects": [
+                    {"name": "edges", "params": {"threshold": 0.2, "mode": "overlay"},
+                     "envelope": {"attack": 18, "decay": 0, "sustain": 1.0, "release": 22, "trigger": "lfo", "rate": 0.4}},
+                ],
+            },
+            # --- Pulses (time-triggered rhythmic bursts) ---
+            "pulse-posterize": {
+                "name": "Pulse: Posterize",
+                "description": "Color reduction in timed bursts.",
+                "effects": [
+                    {"name": "posterize", "params": {"levels": 2},
+                     "envelope": {"attack": 2, "decay": 0, "sustain": 1.0, "release": 8, "trigger": "time", "rate": 0.5}},
+                ],
+            },
+            "pulse-vhs": {
+                "name": "Pulse: VHS Damage",
+                "description": "VHS tracking errors in timed bursts.",
+                "effects": [
+                    {"name": "vhs", "params": {"tracking": 1.0, "noise_amount": 0.8, "color_bleed": 10, "seed": 42},
+                     "envelope": {"attack": 2, "decay": 0, "sustain": 1.0, "release": 6, "trigger": "time", "rate": 0.5}},
+                ],
+            },
+            # --- Swells (slow rise, no plateau, slow fall) ---
+            "swell-freqflanger": {
+                "name": "Swell: Spectral Ghost",
+                "description": "Spectral smear swells and recedes at 0.5Hz.",
+                "effects": [
+                    {"name": "freqflanger", "params": {"rate": 0.15, "depth": 25, "mag_blend": 0.8, "phase_blend": 0.6, "seed": 42},
+                     "envelope": {"attack": 15, "decay": 15, "sustain": 0.0, "release": 0, "trigger": "lfo", "rate": 0.5}},
+                ],
+            },
+            "swell-wave": {
+                "name": "Swell: Wave Breathe",
+                "description": "Warp swells up and down at 0.6Hz — video breathes.",
+                "effects": [
+                    {"name": "wave", "params": {"amplitude": 50.0, "frequency": 0.03, "direction": "both"},
+                     "envelope": {"attack": 12, "decay": 12, "sustain": 0.0, "release": 0, "trigger": "lfo", "rate": 0.6}},
+                ],
+            },
+            # --- Multi-effect chains with mixed envelopes ---
+            "rhythmic-destruction": {
+                "name": "Rhythmic Destruction",
+                "description": "VHS + scanlines + noise all pulsing at different rates.",
+                "effects": [
+                    {"name": "vhs", "params": {"tracking": 1.0, "noise_amount": 0.7, "color_bleed": 8, "seed": 42},
+                     "envelope": {"attack": 2, "decay": 0, "sustain": 1.0, "release": 5, "trigger": "lfo", "rate": 1.0}},
+                    {"name": "scanlines", "params": {"line_width": 4, "opacity": 1.0, "flicker": True, "color": [0, 0, 0]},
+                     "envelope": {"attack": 1, "decay": 0, "sustain": 1.0, "release": 2, "trigger": "lfo", "rate": 2.0}},
+                    {"name": "noise", "params": {"amount": 0.8, "noise_type": "gaussian", "seed": 42},
+                     "envelope": {"attack": 1, "decay": 0, "sustain": 1.0, "release": 3, "trigger": "lfo", "rate": 1.5}},
+                ],
+            },
+            "breathing-glitch": {
+                "name": "Breathing Glitch",
+                "description": "Wave + chromatic + blur all slowly swelling at different rates.",
+                "effects": [
+                    {"name": "wave", "params": {"amplitude": 35.0, "frequency": 0.04, "direction": "both"},
+                     "envelope": {"attack": 10, "decay": 10, "sustain": 0.0, "release": 0, "trigger": "lfo", "rate": 0.5}},
+                    {"name": "chromatic", "params": {"offset": 30, "direction": "horizontal"},
+                     "envelope": {"attack": 15, "decay": 15, "sustain": 0.0, "release": 0, "trigger": "lfo", "rate": 0.3}},
+                    {"name": "blur", "params": {"radius": 20, "blur_type": "gaussian"},
+                     "envelope": {"attack": 8, "decay": 8, "sustain": 0.0, "release": 0, "trigger": "lfo", "rate": 0.7}},
+                ],
+            },
+            "nuclear-envelope": {
+                "name": "Nuclear Envelope",
+                "description": "Everything at once — invert plucks + VHS pulse + wave swell + noise burst.",
+                "effects": [
+                    {"name": "invert", "params": {"channel": "all", "amount": 1.0},
+                     "envelope": {"attack": 1, "decay": 0, "sustain": 1.0, "release": 2, "trigger": "lfo", "rate": 4.0}},
+                    {"name": "vhs", "params": {"tracking": 1.0, "noise_amount": 0.9, "color_bleed": 12, "seed": 42},
+                     "envelope": {"attack": 2, "decay": 0, "sustain": 1.0, "release": 5, "trigger": "lfo", "rate": 1.0}},
+                    {"name": "wave", "params": {"amplitude": 50.0, "frequency": 0.03, "direction": "both"},
+                     "envelope": {"attack": 8, "decay": 8, "sustain": 0.0, "release": 0, "trigger": "lfo", "rate": 0.6}},
+                    {"name": "noise", "params": {"amount": 1.0, "noise_type": "gaussian", "seed": 42},
+                     "envelope": {"attack": 1, "decay": 0, "sustain": 1.0, "release": 3, "trigger": "lfo", "rate": 2.0}},
+                ],
+            },
+        },
+    },
 }
 
 
