@@ -26,6 +26,14 @@ renders/
 # Sample videos (large binaries)
 samples/
 
+# Test artifacts
+test-output/
+test-videos/
+scripts/
+
+# Gradio (deprecated - no web UIs per Principle #29)
+gradio_datamosh.py
+
 # Temp
 *.tmp
 *.swp
