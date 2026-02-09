@@ -85,6 +85,10 @@
             <input type="range" id="mix-slider" min="0" max="100" value="100" oninput="onMixChange(this.value)">
             <span id="mix-value">100%</span>
         </div>
+        <div class="mode-toggle">
+            <button class="mode-btn active" data-mode="quick" onclick="setMode('quick')">Quick</button>
+            <button class="mode-btn" data-mode="timeline" onclick="setMode('timeline')">Timeline</button>
+        </div>
         <div class="transport">
             <button onclick="randomizeChain()" title="Random effects">Randomize</button>
             <button onclick="undo()" title="Undo (Cmd+Z)">Undo</button>
@@ -144,6 +148,21 @@
         <!-- History Tab -->
         <div id="history-tab" class="tab-content">
             <div id="history-list"></div>
+        </div>
+    </div>
+
+    <!-- TIMELINE: between canvas and chain -->
+    <div id="timeline-area">
+        <div id="timeline-header">
+            <span>Timeline</span>
+            <div class="timeline-controls">
+                <button onclick="timelineEditor.zoomIn()" title="Zoom In (+)">+</button>
+                <button onclick="timelineEditor.zoomOut()" title="Zoom Out (-)">-</button>
+                <button onclick="timelineEditor.fitToWindow()" title="Fit to Window (Cmd+0)">Fit</button>
+            </div>
+        </div>
+        <div id="timeline-canvas-wrapper">
+            <canvas id="timeline-canvas"></canvas>
         </div>
     </div>
 
@@ -342,6 +361,17 @@
                 <div class="sc-row"><kbd>Tab</kbd> Toggle sidebar</div>
                 <div class="sc-row"><kbd>Esc</kbd> Close modal</div>
                 <div class="sc-row"><kbd>?</kbd> This reference</div>
+                <h3>Timeline</h3>
+                <div class="sc-row"><kbd>I</kbd> Set in-point</div>
+                <div class="sc-row"><kbd>O</kbd> Set out-point</div>
+                <div class="sc-row"><kbd>Cmd+R</kbd> Create region</div>
+                <div class="sc-row"><kbd>Space</kbd> Play/Pause</div>
+                <div class="sc-row"><kbd>Home</kbd> Jump to start</div>
+                <div class="sc-row"><kbd>End</kbd> Jump to end</div>
+                <div class="sc-row"><kbd>+ / -</kbd> Zoom in/out</div>
+                <div class="sc-row"><kbd>Cmd+0</kbd> Fit to window</div>
+                <div class="sc-row"><kbd>M</kbd> Mute track</div>
+                <div class="sc-row"><kbd>S</kbd> Solo track</div>
             </div>
         </div>
     </div>
@@ -350,6 +380,7 @@
 <!-- Context Menu (shared, repositioned dynamically) -->
 <div id="ctx-menu" class="ctx-menu"></div>
 
+<script src="/static/timeline.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

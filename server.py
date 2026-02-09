@@ -387,6 +387,255 @@ async def preview_effect(chain: EffectChain):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class TimelinePreviewRequest(BaseModel):
+    frame_number: int
+    regions: list[dict]  # [{start, end, effects, muted, mask}]
+    mix: float = 1.0
+
+
+@app.post("/api/preview/timeline")
+async def preview_timeline(req: TimelinePreviewRequest):
+    """Preview a frame with timeline-aware region effects and optional spatial masks."""
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail="No video loaded")
+
+    try:
+        frame = extract_single_frame(_state["video_path"], req.frame_number)
+
+        # Cap resolution
+        MAX_PREVIEW_PIXELS = 1920 * 1080
+        h, w = frame.shape[:2]
+        if h * w > MAX_PREVIEW_PIXELS:
+            scale_factor = (MAX_PREVIEW_PIXELS / (h * w)) ** 0.5
+            new_h, new_w = int(h * scale_factor), int(w * scale_factor)
+            frame = np.array(Image.fromarray(frame).resize((new_w, new_h)))
+            h, w = new_h, new_w
+
+        original = frame.copy()
+        processed = frame.copy()
+
+        # Apply each region that contains this frame
+        for region in req.regions:
+            if region.get("muted"):
+                continue
+            start = region.get("start", 0)
+            end = region.get("end", 0)
+            if start <= req.frame_number <= end:
+                effects = region.get("effects", [])
+                if not effects:
+                    continue
+
+                mask = region.get("mask")
+                if mask and isinstance(mask, dict):
+                    # Spatial mask: apply effects only to the masked rectangle
+                    mx = max(0, int(mask.get("x", 0) * w))
+                    my = max(0, int(mask.get("y", 0) * h))
+                    mw = min(w - mx, int(mask.get("w", 1) * w))
+                    mh = min(h - my, int(mask.get("h", 1) * h))
+                    if mw > 0 and mh > 0:
+                        # Extract sub-region, apply effects, composite back
+                        sub_frame = processed[my:my+mh, mx:mx+mw].copy()
+                        sub_frame = apply_chain(sub_frame, effects, watermark=False)
+                        processed[my:my+mh, mx:mx+mw] = sub_frame
+                else:
+                    # Full frame
+                    processed = apply_chain(processed, effects, watermark=False)
+
+        # Wet/dry mix
+        if req.mix < 1.0:
+            mix = max(0.0, min(1.0, req.mix))
+            processed = np.clip(
+                original.astype(float) * (1 - mix) + processed.astype(float) * mix,
+                0, 255
+            ).astype(np.uint8)
+
+        return {"preview": _frame_to_data_url(processed)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class TimelineExportRequest(BaseModel):
+    timeline_regions: list[dict]
+    format: str = "mp4"
+    mix: float = 1.0
+    audio_mode: str = "copy"
+    scale_algorithm: str = "lanczos"
+    resolution_preset: str | None = None
+    width: int | None = None
+    height: int | None = None
+    scale_factor: float | None = None
+    fps_preset: str | None = None
+    h264_crf: int = 23
+    h264_preset: str = "medium"
+    prores_profile: str = "422"
+    gif_colors: int = 256
+    webm_crf: int = 30
+    effects: list[dict] = []  # Kept for compat but timeline uses region effects
+
+
+@app.post("/api/export/timeline")
+async def export_timeline(req: TimelineExportRequest):
+    """Export with timeline regions — each region applies its own effects with optional spatial masks."""
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail="No video loaded")
+
+    from core.video_io import extract_frames, load_frame, save_frame
+    import time as _time
+
+    info = _state["video_info"]
+    source_w, source_h = info["width"], info["height"]
+
+    # Determine target dimensions
+    target_w, target_h = source_w, source_h
+    if req.resolution_preset and req.resolution_preset != "source":
+        res_map = {
+            "480p": (854, 480), "720p": (1280, 720), "1080p": (1920, 1080),
+            "2k": (2560, 1440), "4k": (3840, 2160),
+            "instagram_square": (1080, 1080), "instagram_story": (1080, 1920), "tiktok": (1080, 1920),
+        }
+        if req.resolution_preset in res_map:
+            target_w, target_h = res_map[req.resolution_preset]
+    if req.width and req.height:
+        target_w, target_h = req.width, req.height
+    if req.scale_factor:
+        target_w = int(source_w * req.scale_factor)
+        target_h = int(source_h * req.scale_factor)
+    # Ensure even dimensions
+    target_w = target_w + (target_w % 2)
+    target_h = target_h + (target_h % 2)
+
+    output_fps = float(req.fps_preset) if req.fps_preset else info["fps"]
+
+    import tempfile as tf
+
+    with tf.TemporaryDirectory() as tmpdir:
+        frames_dir = Path(tmpdir) / "frames"
+        processed_dir = Path(tmpdir) / "processed"
+        frames_dir.mkdir()
+        processed_dir.mkdir()
+
+        extract_scale = min(1.0, target_w / source_w)
+        frame_files = extract_frames(_state["video_path"], str(frames_dir), scale=extract_scale)
+
+        for i, fp in enumerate(frame_files):
+            frame = load_frame(fp)
+            h, w = frame.shape[:2]
+            original = frame.copy()
+            processed = frame.copy()
+
+            # Apply timeline regions
+            for region in req.timeline_regions:
+                start = region.get("start", 0)
+                end = region.get("end", 0)
+                if start <= i <= end:
+                    effects = region.get("effects", [])
+                    if not effects:
+                        continue
+
+                    mask = region.get("mask")
+                    if mask and isinstance(mask, dict):
+                        mx = max(0, int(mask.get("x", 0) * w))
+                        my = max(0, int(mask.get("y", 0) * h))
+                        mw = min(w - mx, int(mask.get("w", 1) * w))
+                        mh = min(h - my, int(mask.get("h", 1) * h))
+                        if mw > 0 and mh > 0:
+                            sub_frame = processed[my:my+mh, mx:mx+mw].copy()
+                            sub_frame = apply_chain(sub_frame, effects, watermark=True)
+                            processed[my:my+mh, mx:mx+mw] = sub_frame
+                    else:
+                        processed = apply_chain(processed, effects, watermark=True)
+
+            # Wet/dry mix
+            if req.mix < 1.0:
+                mix_val = max(0.0, min(1.0, req.mix))
+                processed = np.clip(
+                    original.astype(float) * (1 - mix_val) + processed.astype(float) * mix_val,
+                    0, 255
+                ).astype(np.uint8)
+
+            # Resize if needed
+            ph, pw = processed.shape[:2]
+            if (pw, ph) != (target_w, target_h):
+                algo_map = {
+                    "lanczos": Image.LANCZOS, "bilinear": Image.BILINEAR,
+                    "bicubic": Image.BICUBIC, "nearest": Image.NEAREST,
+                }
+                algo = algo_map.get(req.scale_algorithm, Image.LANCZOS)
+                processed = np.array(Image.fromarray(processed).resize((target_w, target_h), algo))
+
+            save_frame(processed, str(processed_dir / f"frame_{i+1:06d}.png"))
+
+        # Build output
+        timestamp = int(_time.time())
+        ext_map = {"mp4": ".mp4", "mov": ".mov", "gif": ".gif", "png_seq": "", "webm": ".webm"}
+        ext = ext_map.get(req.format, ".mp4")
+        output_name = f"entropic_{timestamp}{ext}"
+        output_path = EXPORT_DIR / output_name
+
+        if req.format == "mp4":
+            cmd = [
+                shutil.which("ffmpeg") or "ffmpeg", "-y",
+                "-framerate", str(output_fps),
+                "-i", str(processed_dir / "frame_%06d.png"),
+                "-c:v", "libx264", "-crf", str(req.h264_crf),
+                "-preset", req.h264_preset, "-pix_fmt", "yuv420p",
+            ]
+            if req.audio_mode != "strip" and info.get("has_audio"):
+                if req.audio_mode == "copy":
+                    cmd += ["-i", _state["video_path"], "-map", "0:v", "-map", "1:a?", "-c:a", "copy", "-shortest"]
+                else:
+                    cmd += ["-i", _state["video_path"], "-map", "0:v", "-map", "1:a?", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+            cmd.append(str(output_path))
+            subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+        elif req.format == "mov":
+            profile_map = {"proxy": "0", "lt": "1", "422": "2", "422hq": "3", "4444": "4"}
+            profile_num = profile_map.get(req.prores_profile, "2")
+            cmd = [
+                shutil.which("ffmpeg") or "ffmpeg", "-y",
+                "-framerate", str(output_fps),
+                "-i", str(processed_dir / "frame_%06d.png"),
+                "-c:v", "prores_ks", "-profile:v", profile_num,
+                "-pix_fmt", "yuv422p10le" if profile_num != "4" else "yuva444p10le",
+                str(output_path),
+            ]
+            subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+        elif req.format == "gif":
+            cmd = [
+                shutil.which("ffmpeg") or "ffmpeg", "-y",
+                "-framerate", str(output_fps),
+                "-i", str(processed_dir / "frame_%06d.png"),
+                "-vf", f"fps=15,split[s0][s1];[s0]palettegen=max_colors={req.gif_colors}[p];[s1][p]paletteuse",
+                "-loop", "0", str(output_path),
+            ]
+            subprocess.run(cmd, capture_output=True, check=True, timeout=300)
+        elif req.format == "webm":
+            cmd = [
+                shutil.which("ffmpeg") or "ffmpeg", "-y",
+                "-framerate", str(output_fps),
+                "-i", str(processed_dir / "frame_%06d.png"),
+                "-c:v", "libvpx-vp9", "-crf", str(req.webm_crf),
+                "-b:v", "0", "-pix_fmt", "yuv420p", str(output_path),
+            ]
+            subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+        elif req.format == "png_seq":
+            seq_dir = EXPORT_DIR / f"entropic_{timestamp}_seq"
+            seq_dir.mkdir()
+            for f in sorted(processed_dir.glob("*.png")):
+                shutil.copy2(str(f), str(seq_dir / f.name))
+            return {
+                "status": "ok", "path": str(seq_dir),
+                "frames": len(list(seq_dir.glob("*.png"))),
+                "format": "png_seq", "dimensions": f"{target_w}x{target_h}",
+            }
+
+        size_mb = output_path.stat().st_size / (1024 * 1024)
+        return {
+            "status": "ok", "path": str(output_path),
+            "size_mb": round(size_mb, 1), "format": req.format,
+            "dimensions": f"{target_w}x{target_h}", "fps": output_fps,
+        }
+
+
 @app.get("/api/frame/{frame_number}")
 async def get_frame(frame_number: int):
     """Get a raw frame without effects."""
@@ -394,6 +643,59 @@ async def get_frame(frame_number: int):
         raise HTTPException(status_code=400, detail="No video loaded")
     frame = extract_single_frame(_state["video_path"], frame_number)
     return {"preview": _frame_to_data_url(frame)}
+
+
+# ============ PROJECT SAVE/LOAD ============
+
+PROJECTS_DIR = Path.home() / "Documents" / "Entropic Projects"
+
+
+@app.post("/api/project/save")
+async def save_project(project: dict):
+    """Save project (timeline state) as JSON."""
+    import json as _json
+    import re
+    import time as _time
+    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    name = project.get("name", f"project_{int(_time.time())}")
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', str(name).strip())
+    if not safe_name:
+        safe_name = f"project_{int(_time.time())}"
+    filepath = PROJECTS_DIR / f"{safe_name}.entropic"
+    filepath.write_text(_json.dumps(project, indent=2))
+    return {"status": "ok", "path": str(filepath), "name": safe_name}
+
+
+@app.post("/api/project/load")
+async def load_project(body: dict):
+    """Load project by path or list available projects."""
+    import json as _json
+    path = body.get("path")
+    if path:
+        filepath = Path(path)
+        # Validate path is inside projects dir
+        if not filepath.exists():
+            raise HTTPException(status_code=404, detail="Project not found")
+        try:
+            data = _json.loads(filepath.read_text())
+            return {"status": "ok", "project": data}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid project file: {e}")
+    else:
+        # List available projects
+        PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+        projects = []
+        for f in sorted(PROJECTS_DIR.glob("*.entropic"), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                data = _json.loads(f.read_text())
+                projects.append({
+                    "name": data.get("name", f.stem),
+                    "path": str(f),
+                    "modified": f.stat().st_mtime,
+                })
+            except Exception:
+                continue
+        return {"status": "ok", "projects": projects}
 
 
 @app.get("/api/randomize")

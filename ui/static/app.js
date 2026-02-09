@@ -130,6 +130,13 @@ let deviceIdCounter = 0;
 let previewDebounce = null;
 let selectedLayerId = null;
 let mixLevel = 1.0;              // Wet/dry mix: 0.0 = original, 1.0 = full effect
+let appMode = 'quick';           // 'quick' | 'timeline'
+
+// Spatial mask drawing state
+let maskDrawing = false;
+let maskStartX = 0;
+let maskStartY = 0;
+let maskRect = null;             // {x, y, w, h} in canvas pixels during draw
 
 // ============ HISTORY (Undo/Redo) ============
 
@@ -209,10 +216,17 @@ async function init() {
     setupFileInput();
     setupPanelTabs();
     setupKeyboard();
+    setupMaskDrawing();
     pushHistory('Open');
     renderLayers();
     renderHistory();
     startHeartbeat();
+
+    // Initialize timeline editor
+    window.timelineEditor = new TimelineEditor('timeline-canvas');
+
+    // Start in quick mode (hides timeline)
+    setMode('quick');
 
     // Dismiss boot screen
     const boot = document.getElementById('boot-screen');
@@ -422,14 +436,27 @@ async function uploadVideo(file) {
 
         videoLoaded = true;
         totalFrames = data.info.total_frames || 100;
+        currentFrame = 0;
 
         const slider = document.getElementById('frame-slider');
         slider.max = totalFrames - 1;
         slider.value = 0;
-        document.getElementById('frame-scrubber').style.display = 'block';
+        document.getElementById('frame-scrubber').style.display = appMode === 'quick' ? 'block' : 'none';
 
         showPreview(data.preview);
         updateFrameInfo(data.info);
+
+        // Sync timeline with loaded video
+        if (window.timelineEditor) {
+            timelineEditor.fps = data.info.fps || 30;
+            timelineEditor.totalFrames = totalFrames;
+            // Create a full-length region on Video 1
+            timelineEditor.tracks[0].regions = [
+                new Region(timelineEditor.nextRegionId++, 0, 0, totalFrames - 1)
+            ];
+            timelineEditor.playhead = 0;
+            timelineEditor.fitToWindow();
+        }
     } catch (err) {
         console.error('Upload failed:', err);
     }
@@ -519,9 +546,27 @@ function setupKeyboard() {
         if (isMod(e) && e.key === 'e') {
             e.preventDefault(); renderVideo(); return;
         }
-        // Cmd+S = Save preset
+        // Cmd+S = Save preset (quick) or save project (timeline)
         if (isMod(e) && e.key === 's') {
-            e.preventDefault(); saveCurrentAsPreset(); return;
+            e.preventDefault();
+            if (appMode === 'timeline') {
+                saveProject();
+            } else {
+                saveCurrentAsPreset();
+            }
+            return;
+        }
+        // Cmd+R = Create region from I/O (timeline mode)
+        if (isMod(e) && e.key === 'r' && appMode === 'timeline' && window.timelineEditor) {
+            e.preventDefault();
+            timelineEditor.createRegionFromIO();
+            return;
+        }
+        // Cmd+0 = Fit timeline to window
+        if (isMod(e) && (e.key === '0' || e.code === 'Digit0') && appMode === 'timeline' && window.timelineEditor) {
+            e.preventDefault();
+            timelineEditor.fitToWindow();
+            return;
         }
         // Cmd+W = Close (same as quit in single-window)
         if (isMod(e) && e.key === 'w') {
@@ -532,15 +577,19 @@ function setupKeyboard() {
         // --- Non-modifier shortcuts: skip if typing in text input or modal open ---
         if (isTextInput() || isModalOpen()) return;
 
-        // Space = A/B compare
-        if (e.code === 'Space' && videoLoaded && !isShowingOriginal) {
+        // Space = Play/pause (timeline) or A/B compare (quick)
+        if (e.code === 'Space' && videoLoaded) {
             e.preventDefault();
-            isShowingOriginal = true;
-            const img = document.getElementById('preview-img');
-            originalPreviewSrc = img.src;
-            fetch(`${API}/api/frame/${currentFrame}`)
-                .then(r => r.json())
-                .then(data => { if (isShowingOriginal) img.src = data.preview; });
+            if (appMode === 'timeline' && window.timelineEditor) {
+                timelineEditor.togglePlayback();
+            } else if (!isShowingOriginal) {
+                isShowingOriginal = true;
+                const img = document.getElementById('preview-img');
+                originalPreviewSrc = img.src;
+                fetch(`${API}/api/frame/${currentFrame}`)
+                    .then(r => r.json())
+                    .then(data => { if (isShowingOriginal) img.src = data.preview; });
+            }
             return;
         }
 
@@ -594,7 +643,11 @@ function setupKeyboard() {
             const jump = e.shiftKey ? 10 : 1;
             currentFrame = Math.max(0, currentFrame - jump);
             document.getElementById('frame-slider').value = currentFrame;
-            schedulePreview();
+            if (appMode === 'timeline' && window.timelineEditor) {
+                timelineEditor.setPlayhead(currentFrame);
+            } else {
+                schedulePreview();
+            }
             return;
         }
         if (e.key === 'ArrowRight' && videoLoaded) {
@@ -602,8 +655,56 @@ function setupKeyboard() {
             const jump = e.shiftKey ? 10 : 1;
             currentFrame = Math.min(totalFrames - 1, currentFrame + jump);
             document.getElementById('frame-slider').value = currentFrame;
-            schedulePreview();
+            if (appMode === 'timeline' && window.timelineEditor) {
+                timelineEditor.setPlayhead(currentFrame);
+            } else {
+                schedulePreview();
+            }
             return;
+        }
+
+        // --- Timeline-only shortcuts ---
+        if (appMode === 'timeline' && window.timelineEditor) {
+            // I = Set in-point
+            if (e.key === 'i') {
+                e.preventDefault(); timelineEditor.setInPoint(); return;
+            }
+            // O = Set out-point
+            if (e.key === 'o') {
+                e.preventDefault(); timelineEditor.setOutPoint(); return;
+            }
+            // Home = Jump to start
+            if (e.key === 'Home') {
+                e.preventDefault(); timelineEditor.setPlayhead(0); return;
+            }
+            // End = Jump to last frame
+            if (e.key === 'End') {
+                e.preventDefault(); timelineEditor.setPlayhead(totalFrames - 1); return;
+            }
+            // + or = = Zoom in
+            if (e.key === '+' || e.key === '=') {
+                e.preventDefault(); timelineEditor.zoomIn(); return;
+            }
+            // - = Zoom out
+            if (e.key === '-') {
+                e.preventDefault(); timelineEditor.zoomOut(); return;
+            }
+            // M = Mute selected track
+            if (e.key === 'm' && !e.shiftKey) {
+                e.preventDefault(); timelineEditor.toggleTrackMute(timelineEditor.selectedTrackId); return;
+            }
+            // Shift+M = Unmute all
+            if (e.key === 'M' && e.shiftKey) {
+                e.preventDefault(); timelineEditor.unmuteAll(); return;
+            }
+            // S = Solo selected track (only if no effect selected, else conflicts with existing)
+            if (e.key === 's' && selectedLayerId === null) {
+                e.preventDefault(); timelineEditor.toggleTrackSolo(timelineEditor.selectedTrackId); return;
+            }
+            // Delete = delete selected region (if no effect selected)
+            if ((e.key === 'Delete' || e.key === 'Backspace') && selectedLayerId === null && timelineEditor.selectedRegionId !== null) {
+                e.preventDefault(); timelineEditor.deleteSelectedRegion(); return;
+            }
         }
 
         // Tab = Toggle sidebar
@@ -659,6 +760,7 @@ function addToChain(effectName, overrideParams) {
     chain.push(device);
     selectedLayerId = device.id;
     pushHistory(`Add ${effectName}`);
+    syncChainToRegion();
     renderChain();
     renderLayers();
     schedulePreview();
@@ -671,6 +773,7 @@ function removeFromChain(deviceId) {
         selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
     }
     pushHistory(`Remove ${device?.name || 'effect'}`);
+    syncChainToRegion();
     renderChain();
     renderLayers();
     schedulePreview();
@@ -682,6 +785,7 @@ function toggleBypass(deviceId) {
         device.bypassed = !device.bypassed;
         const state = device.bypassed ? 'Off' : 'On';
         pushHistory(`${device.name} ${state}`);
+        syncChainToRegion();
         renderChain();
         renderLayers();
         schedulePreview();
@@ -703,6 +807,7 @@ function duplicateSelected() {
     chain.splice(idx + 1, 0, clone);
     selectedLayerId = clone.id;
     pushHistory(`Duplicate ${device.name}`);
+    syncChainToRegion();
     renderChain();
     renderLayers();
     schedulePreview();
@@ -714,6 +819,7 @@ function flattenChain() {
     if (removed === 0) return;
     chain = chain.filter(d => !d.bypassed);
     pushHistory(`Flatten (removed ${removed})`);
+    syncChainToRegion();
     renderChain();
     renderLayers();
     schedulePreview();
@@ -921,6 +1027,7 @@ function setupDropdownInteraction(selectEl) {
         if (device) {
             device.params[paramName] = selectEl.value;
             pushHistory(`${device.name}: ${paramName}`);
+            syncChainToRegion();
             schedulePreview();
         }
     });
@@ -938,6 +1045,7 @@ function setupToggleInteraction(btnEl) {
             btnEl.classList.toggle('on', newVal);
             btnEl.textContent = newVal ? 'ON' : 'OFF';
             pushHistory(`${device.name}: ${paramName}`);
+            syncChainToRegion();
             schedulePreview();
         }
     });
@@ -1035,6 +1143,7 @@ function setupKnobInteraction(knobEl) {
         const device = chain.find(d => d.id === deviceId);
         if (device) {
             pushHistory(`${device.name}: ${paramName}`);
+            syncChainToRegion();
         }
     };
 
@@ -1069,6 +1178,7 @@ function setupKnobInteraction(knobEl) {
             device.params[paramName] = defaultVal;
         }
         pushHistory(`Reset ${device.name}: ${paramName}`);
+        syncChainToRegion();
         schedulePreview();
     });
 }
@@ -1126,6 +1236,7 @@ function reorderChain(fromId, toId) {
     const [device] = chain.splice(fromIdx, 1);
     chain.splice(toIdx, 0, device);
     pushHistory(`Reorder ${device.name}`);
+    syncChainToRegion();
     renderChain();
     renderLayers();
     schedulePreview();
@@ -1142,18 +1253,36 @@ function schedulePreview() {
 async function previewChain() {
     if (!videoLoaded) return;
 
-    const activeEffects = chain
-        .filter(d => !d.bypassed)
-        .map(d => ({ name: d.name, params: d.params }));
-
     try {
-        const res = await fetch(`${API}/api/preview`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ effects: activeEffects, frame_number: currentFrame, mix: mixLevel }),
-        });
+        let res;
+        if (appMode === 'timeline' && window.timelineEditor) {
+            // Timeline mode: send all active regions to server
+            const regions = timelineEditor.getActiveRegions().map(r => ({
+                start: r.startFrame,
+                end: r.endFrame,
+                effects: (r.effects || []).filter(e => !e.bypassed),
+                muted: timelineEditor.isTrackMuted(r.trackId),
+                mask: r.mask || null,
+            }));
+            res = await fetch(`${API}/api/preview/timeline`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frame_number: currentFrame, regions, mix: mixLevel }),
+            });
+        } else {
+            // Quick mode: existing flat chain behavior
+            const activeEffects = chain
+                .filter(d => !d.bypassed)
+                .map(d => ({ name: d.name, params: d.params }));
+            res = await fetch(`${API}/api/preview`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ effects: activeEffects, frame_number: currentFrame, mix: mixLevel }),
+            });
+        }
         const data = await res.json();
         showPreview(data.preview);
+        updateMaskOverlay();
     } catch (err) {
         console.error('Preview failed:', err);
     }
@@ -1229,6 +1358,7 @@ function ctxAction(action) {
             chain = [];
             selectedLayerId = null;
             pushHistory('Clear all');
+            syncChainToRegion();
             renderChain();
             renderLayers();
             schedulePreview();
@@ -1290,6 +1420,7 @@ function soloDevice(deviceId) {
     chain.forEach(d => { d.bypassed = d.id !== deviceId; });
     const device = chain.find(d => d.id === deviceId);
     pushHistory(`Isolate ${device?.name}`);
+    syncChainToRegion();
     renderChain();
     renderLayers();
     schedulePreview();
@@ -1308,6 +1439,7 @@ function resetDeviceParams(deviceId) {
         }
     }
     pushHistory(`Reset ${device.name}`);
+    syncChainToRegion();
     renderChain();
     schedulePreview();
 }
@@ -1433,8 +1565,21 @@ async function startExport() {
         settings.webm_crf = parseInt(document.getElementById('export-crf').value);
     }
 
+    // In timeline mode, include regions data
+    if (appMode === 'timeline' && window.timelineEditor) {
+        settings.timeline_regions = timelineEditor.getActiveRegions().map(r => ({
+            start: r.startFrame,
+            end: r.endFrame,
+            effects: (r.effects || []).filter(e => !e.bypassed),
+            mask: r.mask || null,
+        }));
+    }
+
     try {
-        const res = await fetch(`${API}/api/export`, {
+        const endpoint = (appMode === 'timeline' && settings.timeline_regions)
+            ? `${API}/api/export/timeline`
+            : `${API}/api/export`;
+        const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings),
@@ -1464,6 +1609,337 @@ async function startExport() {
 
 let originalPreviewSrc = null;
 let isShowingOriginal = false;
+
+// ============ MODE SWITCHING (Quick / Timeline) ============
+
+function setMode(mode) {
+    appMode = mode;
+    const appEl = document.getElementById('app');
+
+    // Toggle CSS class
+    if (mode === 'quick') {
+        appEl.classList.add('quick-mode');
+    } else {
+        appEl.classList.remove('quick-mode');
+    }
+
+    // Update mode toggle buttons
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+
+    // Show/hide frame scrubber (quick mode uses slider, timeline mode uses playhead)
+    const scrubber = document.getElementById('frame-scrubber');
+    if (scrubber) {
+        scrubber.style.display = (mode === 'quick' && videoLoaded) ? 'block' : (mode === 'timeline' ? 'none' : '');
+    }
+
+    // When entering timeline mode, sync timeline with current state
+    if (mode === 'timeline' && window.timelineEditor) {
+        timelineEditor.setPlayhead(currentFrame);
+        timelineEditor.resize();
+    }
+
+    // Deselect region when switching to quick mode
+    if (mode === 'quick' && window.timelineEditor) {
+        timelineEditor.selectedRegionId = null;
+    }
+
+    schedulePreview();
+}
+
+// ============ TIMELINE ↔ APP SYNC ============
+
+function onTimelinePlayheadChange(frame) {
+    currentFrame = frame;
+    const slider = document.getElementById('frame-slider');
+    if (slider) slider.value = frame;
+    const el = document.getElementById('frame-info');
+    if (el && el.style.display === 'block') {
+        el.textContent = el.textContent.replace(/Frame \d+\/\d+/, `Frame ${currentFrame}/${totalFrames}`);
+    }
+    schedulePreview();
+}
+
+function onRegionSelect(region) {
+    if (!window.timelineEditor) return;
+    timelineEditor.selectedRegionId = region.id;
+
+    // Load region's effects into the chain rack
+    chain = region.effects.map(eff => ({
+        id: deviceIdCounter++,
+        name: eff.name,
+        params: JSON.parse(JSON.stringify(eff.params || {})),
+        bypassed: eff.bypassed || false,
+    }));
+    selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
+
+    renderChain();
+    renderLayers();
+    updateMaskOverlay();
+    timelineEditor.draw();
+}
+
+function onRegionDeselect() {
+    if (appMode !== 'timeline') return;
+    // When no region is selected, show empty chain
+    chain = [];
+    selectedLayerId = null;
+    renderChain();
+    renderLayers();
+    clearMaskOverlay();
+}
+
+function syncChainToRegion() {
+    if (appMode !== 'timeline') return;
+    if (!window.timelineEditor || !timelineEditor.selectedRegionId) return;
+    const region = timelineEditor.findRegion(timelineEditor.selectedRegionId);
+    if (!region) return;
+    region.effects = chain.map(d => ({
+        name: d.name,
+        params: JSON.parse(JSON.stringify(d.params)),
+        bypassed: d.bypassed,
+    }));
+}
+
+// ============ PROJECT SAVE/LOAD ============
+
+function getProjectState() {
+    return {
+        name: document.getElementById('file-name').textContent || 'Untitled',
+        mode: appMode,
+        timeline: window.timelineEditor ? timelineEditor.serialize() : null,
+        chain: chain.map(d => ({ name: d.name, params: d.params, bypassed: d.bypassed })),
+        mixLevel,
+        currentFrame,
+        totalFrames,
+    };
+}
+
+async function saveProject() {
+    if (!window.timelineEditor) {
+        showToast('Switch to Timeline mode first', 'info');
+        return;
+    }
+    const project = getProjectState();
+    showInputModal('Save Project', 'Project name', async (name) => {
+        project.name = name;
+        try {
+            const res = await fetch(`${API}/api/project/save`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(project),
+            });
+            const data = await res.json();
+            if (data.status === 'ok') {
+                showToast(`Project saved: ${name}`, 'success', {
+                    label: 'Reveal in Finder',
+                    fn: `function(){revealInFinder('${(data.path || '').replace(/'/g, "\\'")}')}`,
+                }, 6000);
+            }
+        } catch (err) {
+            showErrorToast(`Save failed: ${err.message}`);
+        }
+    });
+}
+
+async function loadProject() {
+    try {
+        // First list available projects
+        const listRes = await fetch(`${API}/api/project/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        const listData = await listRes.json();
+        const projects = listData.projects || [];
+
+        if (projects.length === 0) {
+            showToast('No saved projects found', 'info');
+            return;
+        }
+
+        // For now, load the most recent project (future: show a picker)
+        const latest = projects[0];
+        const loadRes = await fetch(`${API}/api/project/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: latest.path }),
+        });
+        const loadData = await loadRes.json();
+
+        if (loadData.status === 'ok' && loadData.project) {
+            const p = loadData.project;
+
+            // Restore mode
+            if (p.mode) setMode(p.mode);
+
+            // Restore timeline
+            if (p.timeline && window.timelineEditor) {
+                timelineEditor.deserialize(p.timeline);
+            }
+
+            // Restore chain
+            if (p.chain) {
+                chain = p.chain.map(d => ({
+                    id: deviceIdCounter++,
+                    name: d.name,
+                    params: JSON.parse(JSON.stringify(d.params || {})),
+                    bypassed: d.bypassed || false,
+                }));
+                selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
+                renderChain();
+                renderLayers();
+            }
+
+            // Restore mix
+            if (p.mixLevel !== undefined) {
+                mixLevel = p.mixLevel;
+                document.getElementById('mix-slider').value = mixLevel * 100;
+                document.getElementById('mix-value').textContent = Math.round(mixLevel * 100) + '%';
+            }
+
+            pushHistory('Load Project');
+            schedulePreview();
+            showToast(`Project loaded: ${p.name || latest.name}`, 'success');
+        }
+    } catch (err) {
+        showErrorToast(`Load failed: ${err.message}`);
+    }
+}
+
+// ============ SPATIAL MASK (Rectangle Selection on Canvas) ============
+
+function setupMaskDrawing() {
+    const canvasArea = document.getElementById('canvas-area');
+    const img = document.getElementById('preview-img');
+    if (!canvasArea || !img) return;
+
+    let maskOverlay = document.getElementById('mask-overlay');
+    if (!maskOverlay) {
+        maskOverlay = document.createElement('div');
+        maskOverlay.id = 'mask-overlay';
+        maskOverlay.style.cssText = 'position:absolute;border:2px dashed #4caf50;pointer-events:none;display:none;z-index:10;box-shadow:0 0 0 9999px rgba(0,0,0,0.3);';
+        canvasArea.appendChild(maskOverlay);
+    }
+
+    canvasArea.addEventListener('mousedown', e => {
+        if (appMode !== 'timeline') return;
+        if (!window.timelineEditor || !timelineEditor.selectedRegionId) return;
+        if (e.target !== img && e.target !== canvasArea) return;
+        if (e.button !== 0) return;
+
+        // Alt+click to start mask drawing
+        if (!e.altKey) return;
+
+        e.preventDefault();
+        maskDrawing = true;
+        const rect = img.getBoundingClientRect();
+        maskStartX = e.clientX - rect.left;
+        maskStartY = e.clientY - rect.top;
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!maskDrawing) return;
+        const img = document.getElementById('preview-img');
+        const rect = img.getBoundingClientRect();
+        const curX = e.clientX - rect.left;
+        const curY = e.clientY - rect.top;
+
+        const x = Math.min(maskStartX, curX);
+        const y = Math.min(maskStartY, curY);
+        const w = Math.abs(curX - maskStartX);
+        const h = Math.abs(curY - maskStartY);
+
+        maskOverlay.style.display = 'block';
+        maskOverlay.style.left = (img.offsetLeft + x) + 'px';
+        maskOverlay.style.top = (img.offsetTop + y) + 'px';
+        maskOverlay.style.width = w + 'px';
+        maskOverlay.style.height = h + 'px';
+
+        maskRect = { x, y, w, h, imgW: rect.width, imgH: rect.height };
+    });
+
+    document.addEventListener('mouseup', e => {
+        if (!maskDrawing) return;
+        maskDrawing = false;
+
+        if (!maskRect || maskRect.w < 5 || maskRect.h < 5) {
+            // Too small — clear mask
+            clearMaskForSelectedRegion();
+            return;
+        }
+
+        // Convert to 0-1 ratios
+        const mask = {
+            x: Math.max(0, maskRect.x / maskRect.imgW),
+            y: Math.max(0, maskRect.y / maskRect.imgH),
+            w: Math.min(1, maskRect.w / maskRect.imgW),
+            h: Math.min(1, maskRect.h / maskRect.imgH),
+        };
+
+        // Apply to selected region
+        if (window.timelineEditor && timelineEditor.selectedRegionId) {
+            const region = timelineEditor.findRegion(timelineEditor.selectedRegionId);
+            if (region) {
+                region.mask = mask;
+                showToast(`Mask set: ${Math.round(mask.w * 100)}% x ${Math.round(mask.h * 100)}%`, 'success');
+                schedulePreview();
+            }
+        }
+
+        maskRect = null;
+    });
+}
+
+function clearMaskForSelectedRegion() {
+    if (window.timelineEditor && timelineEditor.selectedRegionId) {
+        const region = timelineEditor.findRegion(timelineEditor.selectedRegionId);
+        if (region) {
+            region.mask = null;
+            showToast('Mask cleared (full frame)', 'info');
+            clearMaskOverlay();
+            schedulePreview();
+        }
+    }
+}
+
+function updateMaskOverlay() {
+    const overlay = document.getElementById('mask-overlay');
+    if (!overlay) return;
+
+    if (!window.timelineEditor || !timelineEditor.selectedRegionId) {
+        overlay.style.display = 'none';
+        return;
+    }
+
+    const region = timelineEditor.findRegion(timelineEditor.selectedRegionId);
+    if (!region || !region.mask) {
+        overlay.style.display = 'none';
+        return;
+    }
+
+    const img = document.getElementById('preview-img');
+    if (!img || img.style.display === 'none') {
+        overlay.style.display = 'none';
+        return;
+    }
+
+    const rect = img.getBoundingClientRect();
+    const canvasRect = img.parentElement.getBoundingClientRect();
+    const m = region.mask;
+
+    overlay.style.display = 'block';
+    overlay.style.left = (img.offsetLeft + m.x * rect.width) + 'px';
+    overlay.style.top = (img.offsetTop + m.y * rect.height) + 'px';
+    overlay.style.width = (m.w * rect.width) + 'px';
+    overlay.style.height = (m.h * rect.height) + 'px';
+}
+
+function clearMaskOverlay() {
+    const overlay = document.getElementById('mask-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
 
 // ============ PRESETS ============
 
