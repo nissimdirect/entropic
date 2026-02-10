@@ -13,16 +13,84 @@
 1. Work through each section top-to-bottom
 2. Mark each test: **PASS**, **FAIL**, or **SKIP** (with reason)
 3. For FAIL: write what happened in the Notes column
-4. You need a **test video** — a short clip (5-10 seconds) in the `test-videos/clips/` folder
+4. You need a **test video** — any MP4 file (5-60 seconds works best)
 5. All commands run from `~/Development/entropic/`
 
-**Quick setup:**
+---
+
+## Getting Started (Step-by-Step Setup)
+
+### 1. Open Terminal
+- Press **Cmd+Space** → type **Terminal** → press Enter
+- You should see a command prompt (looks like `nissimagent@Mac ~ %`)
+
+### 2. Navigate to Entropic
 ```bash
 cd ~/Development/entropic
-
-# If you haven't already created a test project:
-python3 entropic.py new uat-test --source test-videos/clips/YOURCLIP.mp4
 ```
+Type this and press Enter. This puts you in the Entropic project folder.
+
+### 3. Check everything is installed
+```bash
+# Check Python
+python3 --version
+# Should show: Python 3.x.x
+
+# Check FFmpeg
+ffmpeg -version
+# Should show version info (lots of text, that's fine)
+
+# Check Entropic effects load
+python3 -c "from effects import EFFECTS; print(f'{len(EFFECTS)} effects loaded')"
+# Should show: 109 effects loaded
+```
+
+### 4. Get a test video
+You need any MP4 video file. Options:
+- **Use one you already have** (a music video, screen recording, anything)
+- **Record a quick one** on your phone and AirDrop it to your Mac
+- **Check if test clips exist:** `ls test-videos/clips/` (may already have some)
+
+Put your video somewhere you can find it (Desktop is fine).
+
+### 5A. Testing CLI Effects (Sections 1-17)
+```bash
+# Create a test project with your video:
+python3 entropic.py new uat-test --source ~/Desktop/YOUR_VIDEO.mp4
+
+# Now run tests from the sections below
+```
+
+### 5B. Testing Live Performance Mode (Sections 22-27)
+```bash
+# Start performance mode with your video (no project needed):
+python3 entropic_perform.py --base ~/Desktop/YOUR_VIDEO.mp4
+
+# A pygame window will pop up. Use keyboard controls:
+#   1-4     = toggle video layers (each has different effects)
+#   Space   = play/pause
+#   R       = arm recording (captures your performance)
+#   Shift+P = panic (reset all layers)
+#   Shift+Q = quit cleanly
+#   Esc x2  = exit (press twice quickly)
+```
+
+### 5C. Testing Desktop App (Sections 18-21)
+```bash
+# Start the web server:
+python3 server.py
+
+# Open your browser to: http://localhost:7860
+# The DAW-style interface should load
+```
+
+### Tips
+- **If a command fails:** Copy the error message and tell Claude
+- **If pygame doesn't open:** You may need to install it: `pip3 install pygame`
+- **If MIDI tests (Section 25):** Plug in your Launchpad/MIDI Mix first, then add `--midi 0` to the command
+- **To stop any running process:** Press **Ctrl+C** in Terminal
+
+---
 
 ---
 
