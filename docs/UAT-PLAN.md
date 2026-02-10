@@ -20,75 +20,219 @@
 
 ## Getting Started (Step-by-Step Setup)
 
-### 1. Open Terminal
-- Press **Cmd+Space** → type **Terminal** → press Enter
-- You should see a command prompt (looks like `nissimagent@Mac ~ %`)
+> **Read this whole section before running anything.**
+> It walks you through opening Terminal, checking your setup, and running your first test.
+> If anything goes wrong, copy the error text and paste it to Claude.
 
-### 2. Navigate to Entropic
+---
+
+### Step 1: Open Terminal
+
+1. Press **Cmd + Space** on your keyboard (this opens Spotlight search)
+2. Type the word **Terminal**
+3. Press **Enter**
+4. A window will open with a dark/light background and text that looks something like:
+   ```
+   nissimagent@Nissimagents-MacBook-Pro ~ %
+   ```
+   This is your **command prompt**. You type commands here and press Enter to run them.
+
+**What is Terminal?** It's a text-based way to talk to your Mac. Instead of clicking icons, you type commands. Every command in this document goes here.
+
+---
+
+### Step 2: Navigate to the Entropic Project Folder
+
+Type this command and press **Enter**:
 ```bash
 cd ~/Development/entropic
 ```
-Type this and press Enter. This puts you in the Entropic project folder.
 
-### 3. Check everything is installed
+**What this does:** `cd` means "change directory" (like opening a folder in Finder). `~/Development/entropic` is the path to the Entropic project on your Mac. The `~` means your home folder.
+
+**How to know it worked:** Your prompt should now show `entropic` somewhere in it:
+```
+nissimagent@Nissimagents-MacBook-Pro entropic %
+```
+
+**If you see "No such file or directory":** The folder might not exist. Tell Claude.
+
+---
+
+### Step 3: Check That Everything Is Installed
+
+Run these three commands **one at a time** (type each one, press Enter, read the output, then do the next):
+
+**Command 1 — Check Python:**
 ```bash
-# Check Python
 python3 --version
-# Should show: Python 3.x.x
+```
+**You should see:** `Python 3.11.x` or `Python 3.12.x` or similar. Any `3.x` is fine.
+**If you see "command not found":** Python isn't installed. Tell Claude.
 
-# Check FFmpeg
+**Command 2 — Check FFmpeg:**
+```bash
 ffmpeg -version
-# Should show version info (lots of text, that's fine)
+```
+**You should see:** A wall of text starting with `ffmpeg version ...` — that's fine, it means FFmpeg is installed.
+**If you see "command not found":** FFmpeg isn't installed. Tell Claude.
 
-# Check Entropic effects load
+**Command 3 — Check Entropic loads:**
+```bash
 python3 -c "from effects import EFFECTS; print(f'{len(EFFECTS)} effects loaded')"
-# Should show: 109 effects loaded
+```
+**You should see:** `109 effects loaded`
+**If you see an error (ImportError, ModuleNotFoundError):** A dependency might be missing. Copy the full error and tell Claude.
+
+**Command 4 — Check pygame (needed for performance mode):**
+```bash
+python3 -c "import pygame; print('pygame OK')"
+```
+**You should see:** `pygame OK` (possibly with a version message above it)
+**If you see "ModuleNotFoundError":** Install it by running:
+```bash
+pip3 install pygame
+```
+Then try the check again.
+
+---
+
+### Step 4: Get a Test Video
+
+You need **any MP4 video file** to test with. Here's how to get one:
+
+**Option A — Use a video you already have:**
+- Check your Desktop, Downloads, or Movies folder for any `.mp4` file
+- To find MP4s on your Mac, run:
+  ```bash
+  find ~/Desktop ~/Downloads ~/Movies -name "*.mp4" -maxdepth 1 2>/dev/null
+  ```
+  This searches those three folders for MP4 files and lists them.
+
+**Option B — Record one on your phone:**
+- Record a 10-second video on your iPhone
+- AirDrop it to your Mac (it lands in Downloads)
+- The file will be at `~/Downloads/IMG_XXXX.mp4` or similar
+
+**Option C — Check if test clips already exist:**
+```bash
+ls test-videos/clips/
+```
+If files appear, you already have test clips.
+
+**Remember the path to your video.** For the rest of this document, replace `YOUR_VIDEO.mp4` with your actual filename. For example, if your video is on the Desktop and called `myvid.mp4`, the path is:
+```
+~/Desktop/myvid.mp4
 ```
 
-### 4. Get a test video
-You need any MP4 video file. Options:
-- **Use one you already have** (a music video, screen recording, anything)
-- **Record a quick one** on your phone and AirDrop it to your Mac
-- **Check if test clips exist:** `ls test-videos/clips/` (may already have some)
+---
 
-Put your video somewhere you can find it (Desktop is fine).
+### Step 5: Choose What to Test
 
-### 5A. Testing CLI Effects (Sections 1-17)
+Entropic has **three modes**. You don't need to test all three — pick the one that matters most right now:
+
+#### Mode A: Live Performance Mode (Sections 22-27) — TEST THIS FIRST FOR SATURDAY
+
+This is the new MIDI layer compositor you'll use for the live set.
+
+**To start it:**
 ```bash
-# Create a test project with your video:
-python3 entropic.py new uat-test --source ~/Desktop/YOUR_VIDEO.mp4
-
-# Now run tests from the sections below
-```
-
-### 5B. Testing Live Performance Mode (Sections 22-27)
-```bash
-# Start performance mode with your video (no project needed):
 python3 entropic_perform.py --base ~/Desktop/YOUR_VIDEO.mp4
-
-# A pygame window will pop up. Use keyboard controls:
-#   1-4     = toggle video layers (each has different effects)
-#   Space   = play/pause
-#   R       = arm recording (captures your performance)
-#   Shift+P = panic (reset all layers)
-#   Shift+Q = quit cleanly
-#   Esc x2  = exit (press twice quickly)
 ```
+Replace `YOUR_VIDEO.mp4` with your actual file path.
 
-### 5C. Testing Desktop App (Sections 18-21)
+**What happens next:**
+1. Terminal will print some setup info (layer names, MIDI mappings)
+2. A **pygame window** pops up showing your video at half resolution (~960x540)
+3. The video starts playing automatically
+4. You control it with your keyboard:
+
+| Key | What It Does |
+|-----|-------------|
+| **1** | Toggle Layer 1 (Clean — base video) |
+| **2** | Toggle Layer 2 (VHS + Glitch effect) |
+| **3** | Toggle Layer 3 (Pixel Sort effect) |
+| **4** | Toggle Layer 4 (Feedback/trails effect) |
+| **Space** | Pause / Resume playback |
+| **R** | Arm recording (captures your layer triggers for later render) |
+| **Shift + P** | Panic — reset all layers to OFF |
+| **Shift + Q** | Quit the app cleanly |
+| **Esc, Esc** | Exit (press Esc twice quickly, within half a second) |
+
+**When you're done:** Press **Shift+Q** to quit. If you triggered any layers, it will ask if you want to save the recording.
+
+**To test with MIDI (optional):**
+- Plug in your Launchpad or MIDI Mix **before** starting
+- Add `--midi 0` to the command:
+  ```bash
+  python3 entropic_perform.py --base ~/Desktop/YOUR_VIDEO.mp4 --midi 0
+  ```
+- Launchpad pads (notes 36-43) trigger layers 1-8
+- MIDI Mix faders (CC 16-23) control layer opacity
+
+**To render a recorded performance:**
+After quitting, if you saved a recording (e.g., `perf_20260210_143022.json`), render it at full quality:
 ```bash
-# Start the web server:
-python3 server.py
-
-# Open your browser to: http://localhost:7860
-# The DAW-style interface should load
+python3 entropic_perform.py --render --automation perf_20260210_143022.json --output my_render.mp4 --audio ~/Desktop/YOUR_VIDEO.mp4
 ```
+This creates a 1080p video with your performance baked in. Open `my_render.mp4` in VLC or QuickTime to check it.
 
-### Tips
-- **If a command fails:** Copy the error message and tell Claude
-- **If pygame doesn't open:** You may need to install it: `pip3 install pygame`
-- **If MIDI tests (Section 25):** Plug in your Launchpad/MIDI Mix first, then add `--midi 0` to the command
-- **To stop any running process:** Press **Ctrl+C** in Terminal
+---
+
+#### Mode B: CLI Effects (Sections 1-17) — The Original Entropic
+
+Apply glitch effects to videos via command line.
+
+**To start:**
+```bash
+python3 entropic.py new uat-test --source ~/Desktop/YOUR_VIDEO.mp4
+```
+This creates a "project" that holds your source video and all the renders.
+
+**Then apply effects like:**
+```bash
+python3 entropic.py apply uat-test --effect pixelsort
+python3 entropic.py apply uat-test --effect vhs
+python3 entropic.py apply uat-test --effect feedback
+```
+Each command processes your video and opens the result automatically.
+
+---
+
+#### Mode C: Desktop App (Sections 18-21) — Web-Based UI
+
+A browser-based DAW-style interface.
+
+**To start:**
+```bash
+python3 server.py
+```
+Then open your web browser (Safari or Chrome) and go to:
+```
+http://localhost:7860
+```
+The interface should load with 4 panels (browser, canvas, chain, layers).
+
+---
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| "command not found: python3" | Python not installed. Run: `brew install python3` |
+| "command not found: ffmpeg" | FFmpeg not installed. Run: `brew install ffmpeg` |
+| "command not found: brew" | Homebrew not installed. Go to https://brew.sh and follow the one-line install |
+| "ModuleNotFoundError: No module named 'pygame'" | Run: `pip3 install pygame` |
+| "ModuleNotFoundError: No module named 'numpy'" | Run: `pip3 install numpy` |
+| "ModuleNotFoundError: No module named 'PIL'" | Run: `pip3 install Pillow` |
+| "No such file or directory" on your video path | Double-check the path. Drag the file from Finder into Terminal — it auto-fills the path |
+| Pygame window doesn't appear | Make sure you're not in full-screen Terminal. Try resizing Terminal smaller first |
+| Video plays but looks frozen | Press **Space** — you might be paused |
+| "MIDI init failed" | Your MIDI device isn't connected, or the device ID is wrong. Try `--midi-list` to see available devices |
+| Terminal seems stuck / nothing happening | Press **Ctrl+C** to stop whatever is running, then try again |
+| Want to go back to your home folder | Run: `cd ~` |
+
+**Pro tip:** You can **drag any file from Finder into the Terminal window** and it will paste the full file path. This is the easiest way to get video file paths right.
 
 ---
 
