@@ -1,10 +1,10 @@
 # Entropic Alpha v2 — User Acceptance Testing Plan
 
 > **Date:** 2026-02-09
-> **Version:** Alpha v2 (109 effects, desktop app, timeline editor, spatial masks)
+> **Version:** Alpha v2 (109 effects, desktop app, timeline editor, spatial masks, **live performance mode**)
 > **Tester:** nissimdirect
-> **Prepared by:** CTO, Red Team, Mad Scientist, Lenny
-> **Updated:** Added Sections 18-21 for Desktop App, UI Core, Timeline Editor, Timeline Export/Projects
+> **Prepared by:** CTO, Red Team, Mad Scientist, Lenny, Don Norman
+> **Updated:** Added Sections 22-27 for Live Performance Mode (MIDI, layers, recording, render, safety, stability)
 
 ---
 
@@ -746,6 +746,155 @@ If you're short on time, test in this order:
 
 ---
 
+---
+
+## SECTION 22: PERFORMANCE MODE — LAUNCH & DISPLAY
+
+> **Goal:** Performance mode boots, pygame window renders, layers initialize.
+> **Time:** ~5 minutes
+> **Setup:** `cd ~/Development/entropic && python entropic_perform.py --base YOUR_VIDEO.mp4`
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 22.1 | Basic launch | `python entropic_perform.py --base video.mp4` | Pygame window opens (~960x540), 4 layers in console, HUD shows [BUF] | [ ] | |
+| 22.2 | No video file | `python entropic_perform.py --base nonexistent.mp4` | "ERROR: Video not found" per layer, no crash | [ ] | |
+| 22.3 | No args | `python entropic_perform.py` | "Error: --base or --config required", exits | [ ] | |
+| 22.4 | Custom layer count | `python entropic_perform.py --base video.mp4 --layers 2` | Only 2 layers in console + HUD | [ ] | |
+| 22.5 | Custom FPS | `python entropic_perform.py --base video.mp4 --fps 24` | Plays at ~24fps (check HUD counter speed) | [ ] | |
+| 22.6 | HUD elements | Look at pygame window | Bottom-left: frame counter + time. Top-left: [BUF]. Left: layer list | [ ] | |
+
+---
+
+## SECTION 23: PERFORMANCE MODE — KEYBOARD CONTROLS
+
+> **Goal:** All keyboard shortcuts work correctly, safety measures prevent accidents.
+> **Time:** ~10 minutes
+
+### 23A. Basic Controls
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 23.1 | Play/Pause | Press **Space** | [PAUSED] → video freezes. Again → [PLAYING] | [ ] | |
+| 23.2 | Layer 1 toggle | Press **1** | "Layer 0 (Clean): ON/OFF", HUD updates | [ ] | |
+| 23.3 | Layer 2 toggle | Press **2** | "Layer 1 (VHS+Glitch): ON", visual changes | [ ] | |
+| 23.4 | Layer 3 toggle | Press **3** | "Layer 2 (PixelSort): ON", visual changes | [ ] | |
+| 23.5 | Layer 4 toggle | Press **4** | "Layer 3 (Feedback): ON", visual changes | [ ] | |
+| 23.6 | Invalid layer (9) | Press **9** | Nothing happens (no crash) | [ ] | |
+| 23.7 | Multiple layers | Press **2**, **3**, **4** | All show ON in HUD, visuals compound | [ ] | |
+
+### 23B. Safety Controls (Don Norman)
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 23.8 | P alone = nothing | Press **P** (no modifier) | Nothing. No panic. No output | [ ] | |
+| 23.9 | Shift+P = Panic | Turn on layers, press **Shift+P** | "[PANIC] All layers reset", all OFF | [ ] | |
+| 23.10 | Q alone = nothing | Press **Q** (no modifier) | Nothing. App stays open | [ ] | |
+| 23.11 | Shift+Q = Quit | Press **Shift+Q** | Clean exit to terminal | [ ] | |
+| 23.12 | Esc single tap | Press **Esc** once | "[Press Esc again to exit]", stays open | [ ] | |
+| 23.13 | Esc double (fast) | **Esc** twice within 0.5s | App closes cleanly | [ ] | |
+| 23.14 | Esc double (slow) | **Esc**, wait 2s, **Esc** | Second shows warning again. App stays | [ ] | |
+
+---
+
+## SECTION 24: PERFORMANCE MODE — RECORDING & BUFFER
+
+> **Goal:** Buffer captures events, user controls save/discard, re-arm clears buffer.
+> **Time:** ~10 minutes
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 24.1 | Buffer indicator | Launch, check HUD | [BUF] in gray top-left | [ ] | |
+| 24.2 | Arm recording | Press **R** | "[REC ON] Buffer cleared... (gen 1)". HUD: [REC] red | [ ] | |
+| 24.3 | Disarm recording | Press **R** again | "[REC OFF] (buffer retained)". HUD: [BUF] gray | [ ] | |
+| 24.4 | Re-arm clears buffer | Trigger layers → R (arm) → trigger → R (off) → R (arm) | "gen 2" — buffer cleared, fresh | [ ] | |
+| 24.5 | Exit armed = auto-save | Arm R, trigger layers, **Shift+Q** | Auto-saves perf_TIMESTAMP.json + .layers.json | [ ] | |
+| 24.6 | Exit unarmed — keep | Don't press R, trigger layers, **Shift+Q** | "Save buffer? [y/N]:" → **y** saves | [ ] | |
+| 24.7 | Exit unarmed — discard | Don't press R, trigger layers, **Shift+Q** | "Save buffer? [y/N]:" → **n** → "Buffer discarded." | [ ] | |
+| 24.8 | No events = no prompt | Launch, immediately **Shift+Q** | "No events captured." No save prompt | [ ] | |
+
+---
+
+## SECTION 25: PERFORMANCE MODE — MIDI
+
+> **Goal:** MIDI controllers trigger layers and control opacity.
+> **Time:** ~10 minutes
+> **Skip if:** No MIDI controller available
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 25.1 | List devices | `python entropic_perform.py --midi-list` | Lists ports. No crash if none | [ ] | |
+| 25.2 | MIDI learn | `--base video.mp4 --midi-learn` | Prints all incoming MIDI messages | [ ] | |
+| 25.3 | Launchpad trigger | `--midi 0`, hit pad (note 36) | Layer 0 ON. Console confirms | [ ] | |
+| 25.4 | MIDI Mix fader | Move fader 1 (CC 16) | Opacity changes. HUD % updates | [ ] | |
+| 25.5 | Note off (gate) | Gate mode layer, hold pad, release | ON while held, OFF on release | [ ] | |
+| 25.6 | No MIDI fallback | `--base video.mp4 --midi 99` | "MIDI init failed", keyboard still works | [ ] | |
+
+---
+
+## SECTION 26: PERFORMANCE MODE — TRIGGER MODES & VISUALS
+
+> **Goal:** All 4 trigger modes work, effects visible, compositing correct.
+> **Time:** ~10 minutes
+
+### 26A. Trigger Modes
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 26.1 | Always On (L0) | Launch, check L0 | Clean layer always visible, can't toggle off | [ ] | |
+| 26.2 | Toggle (L1) | Press **2** | ON stays until pressed again → OFF | [ ] | |
+| 26.3 | ADSR Pluck (L2) | Press **3** | Quick attack, fast decay, 80% sustain | [ ] | |
+| 26.4 | ADSR Stab (L3) | Press **4** | Instant attack, zero sustain (auto-fades) | [ ] | |
+
+### 26B. Visual Quality
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 26.5 | Preview resolution | Check window size | ~960x540 | [ ] | |
+| 26.6 | Smooth playback | Watch 10 seconds | ~30fps, no stutter | [ ] | |
+| 26.7 | VHS visible | Toggle L2 ON | Noise + tracking artifacts | [ ] | |
+| 26.8 | PixelSort visible | Toggle L3 ON | Horizontal bands/streaks | [ ] | |
+| 26.9 | Feedback visible | Toggle L4 ON | Ghosting/trails | [ ] | |
+| 26.10 | Layer compositing | Turn on L2 + L3 | Both effects blended together | [ ] | |
+
+---
+
+## SECTION 27: PERFORMANCE MODE — RENDER & STABILITY
+
+> **Goal:** Offline render produces valid output, system stable for 30-min sets.
+> **Time:** ~20 minutes
+
+### 27A. Offline Render
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 27.1 | Render from automation | `--render --automation perf_TIMESTAMP.json -o test.mp4` | Progress → creates test.mp4 | [ ] | |
+| 27.2 | Render with audio | `--render --automation perf.json --audio video.mp4 -o test_audio.mp4` | Output has video + audio | [ ] | |
+| 27.3 | Render with duration | Add `--duration 10` | Only 10 seconds (300 frames) | [ ] | |
+| 27.4 | Companion config | .layers.json next to .json, no --config | "Using companion config" | [ ] | |
+| 27.5 | Missing automation | `--render --automation nonexistent.json` | Error, clean exit | [ ] | |
+| 27.6 | Output plays | Open in VLC/QuickTime | Effects match live preview | [ ] | |
+
+### 27B. Stability (30-Minute Stress)
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 27.7 | Long playback (5 min) | Play without interaction for 5+ min | No crash, stable memory, video loops | [ ] | |
+| 27.8 | Rapid triggering | Rapidly press 1-4 for 30 seconds | No crash, layers toggle correctly | [ ] | |
+| 27.9 | caffeinate running | Check Activity Monitor | caffeinate visible while running, gone after quit | [ ] | |
+| 27.10 | Clean exit | **Shift+Q** after any test | No zombie FFmpeg (`ps aux \| grep ffmpeg`) | [ ] | |
+| 27.11 | Ctrl+C interrupt | Press Ctrl+C during performance | "[INTERRUPTED]", clean exit | [ ] | |
+
+### 27C. Edge Cases
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 27.12 | Very short video (<2s) | Use 1-second MP4 | Video loops, no crash | [ ] | |
+| 27.13 | Large video (1080p+) | Use 1080p or 4K MP4 | Preview scales to 480p, acceptable FPS | [ ] | |
+| 27.14 | Pause + trigger | Pause, toggle layers, unpause | Layers take effect on unpause | [ ] | |
+| 27.15 | All layers off | Turn off all toggleable layers | Black screen, HUD visible, no crash | [ ] | |
+
+---
+
 ## UPDATED SCORING SUMMARY
 
 | Section | Tests | Pass | Fail | Skip |
@@ -771,7 +920,13 @@ If you're short on time, test in this order:
 | 19. UI Core | 33 | | | |
 | 20. Timeline Editor | 56 | | | |
 | 21. Timeline Export/Projects | 15 | | | |
-| **TOTAL** | **296** | | | |
+| **22. Perform: Launch** | **6** | | | |
+| **23. Perform: Keyboard** | **14** | | | |
+| **24. Perform: Recording** | **8** | | | |
+| **25. Perform: MIDI** | **6** | | | |
+| **26. Perform: Triggers/Visuals** | **10** | | | |
+| **27. Perform: Render/Stability** | **15** | | | |
+| **TOTAL** | **355** | | | |
 
 **Ship criteria:**
 - **CLI (Sections 1-17):** 90%+ pass rate (167+ of 185), zero critical failures in Sections 1, 2, 9
@@ -779,3 +934,4 @@ If you're short on time, test in this order:
 - **UI Core (Section 19):** 90%+ pass rate (30+ of 33)
 - **Timeline (Section 20):** 85%+ pass rate (48+ of 56) — new feature, some polish acceptable
 - **Timeline Export/Projects (Section 21):** 90%+ pass rate (14+ of 15)
+- **Performance Mode (Sections 22-27):** 90%+ pass rate (53+ of 59), zero failures in 23B (safety) and 27B (stability)

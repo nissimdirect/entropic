@@ -279,6 +279,132 @@ class AutomationRecorder:
         return session
 
 
+class MidiEventLane(AutomationLane):
+    """Step-function automation lane for MIDI events.
+
+    Unlike AutomationLane (which interpolates between keyframes),
+    MidiEventLane holds the last value until the next event — like
+    a sample-and-hold. Used for note on/off and CC fader recording.
+    """
+
+    def __init__(self, layer_id, param_name, keyframes=None):
+        # effect_idx is repurposed as layer_id for performance mode
+        super().__init__(
+            effect_idx=layer_id,
+            param_name=param_name,
+            keyframes=keyframes or [],
+            curve="step",
+        )
+        self.layer_id = layer_id
+
+    def get_value(self, frame):
+        """Step interpolation: hold last value until next keyframe."""
+        if not self.keyframes:
+            return None
+
+        # Before first keyframe: return None (no data yet)
+        if frame < self.keyframes[0][0]:
+            return None
+
+        # Find the last keyframe at or before this frame
+        value = self.keyframes[0][1]
+        for kf_frame, kf_value in self.keyframes:
+            if kf_frame <= frame:
+                value = kf_value
+            else:
+                break
+        return value
+
+    def to_dict(self):
+        d = super().to_dict()
+        d["type"] = "midi_event"
+        d["layer_id"] = self.layer_id
+        return d
+
+    @classmethod
+    def from_dict(cls, d):
+        lane = cls(
+            layer_id=d.get("layer_id", d.get("effect_idx", 0)),
+            param_name=d["param"],
+            keyframes=[tuple(kf) for kf in d["keyframes"]],
+        )
+        return lane
+
+
+class PerformanceSession(AutomationSession):
+    """Automation session extended for layer-based performance recording.
+
+    Adds MIDI event lanes and per-layer value lookup.
+    """
+
+    def record_midi_event(self, frame, layer_id, param, value):
+        """Record a MIDI event (note on/off or CC) at a frame.
+
+        Args:
+            frame: Frame index when event occurred.
+            layer_id: Layer this event targets.
+            param: Parameter name ("active", "opacity", "trigger_on", "trigger_off").
+            value: Value (1/0 for triggers, 0-1 for opacity).
+        """
+        # Find or create lane for this layer+param
+        lane = None
+        for l in self.lanes:
+            if (isinstance(l, MidiEventLane) and
+                    l.layer_id == layer_id and l.param_name == param):
+                lane = l
+                break
+
+        if lane is None:
+            lane = MidiEventLane(layer_id, param)
+            self.lanes.append(lane)
+
+        lane.add_keyframe(frame, value)
+
+    def get_layer_values(self, frame):
+        """Get all layer parameter values at a frame.
+
+        Returns: {layer_id: {param: value, ...}, ...}
+        """
+        result = {}
+        for lane in self.lanes:
+            lid = getattr(lane, 'layer_id', lane.effect_idx)
+            val = lane.get_value(frame)
+            if val is not None:
+                if lid not in result:
+                    result[lid] = {}
+                result[lid][lane.param_name] = val
+        return result
+
+    def to_dict(self):
+        return {
+            "type": "performance",
+            "lanes": [l.to_dict() for l in self.lanes],
+        }
+
+    @classmethod
+    def from_dict(cls, d):
+        session = cls()
+        for lane_data in d.get("lanes", []):
+            if lane_data.get("type") == "midi_event":
+                session.lanes.append(MidiEventLane.from_dict(lane_data))
+            else:
+                session.lanes.append(AutomationLane.from_dict(lane_data))
+        return session
+
+    def save(self, path):
+        """Save performance automation to JSON file."""
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2))
+
+    @classmethod
+    def load(cls, path):
+        """Load performance automation from JSON file."""
+        data = json.loads(Path(path).read_text())
+        if data.get("type") == "performance":
+            return cls.from_dict(data)
+        # Fall back to base class for non-performance files
+        return AutomationSession.from_dict(data)
+
+
 def _simplify_keyframes(keyframes, tolerance=0.01):
     """Remove redundant keyframes using Ramer-Douglas-Peucker simplification.
 

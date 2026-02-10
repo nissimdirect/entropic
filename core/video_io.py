@@ -182,6 +182,125 @@ def reassemble_video(
     return output_path
 
 
+def stream_frames(video_path, scale=1.0, start_frame=0):
+    """Yield numpy frames from FFmpeg pipe. No disk I/O, no frame limit.
+
+    Memory-efficient generator for long videos (30+ minutes).
+    Each frame is (H, W, 3) uint8 RGB numpy array.
+
+    Args:
+        video_path: Path to input video.
+        scale: Resolution scale (0.5 = half for preview, 1.0 = full for render).
+        start_frame: Frame to seek to before starting.
+
+    Yields:
+        numpy.ndarray: (H, W, 3) uint8 RGB frame.
+    """
+    video_path = str(video_path)
+    info = probe_video(video_path)
+    w = int(info["width"] * scale)
+    h = int(info["height"] * scale)
+    # Ensure even dimensions
+    w = w + (w % 2)
+    h = h + (h % 2)
+    fps = info["fps"]
+
+    cmd = [get_ffmpeg()]
+
+    # Seek if needed
+    if start_frame > 0:
+        seek_time = start_frame / fps
+        cmd += ["-ss", f"{seek_time:.4f}"]
+
+    cmd += ["-i", video_path]
+
+    if scale != 1.0:
+        cmd += ["-vf", f"scale={w}:{h}"]
+
+    cmd += [
+        "-f", "rawvideo",
+        "-pix_fmt", "rgb24",
+        "-v", "error",
+        "-"
+    ]
+
+    frame_size = w * h * 3
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            bufsize=frame_size * 2)
+
+    try:
+        while True:
+            raw = proc.stdout.read(frame_size)
+            if len(raw) < frame_size:
+                break
+            frame = np.frombuffer(raw, dtype=np.uint8).reshape((h, w, 3))
+            yield frame
+    finally:
+        proc.stdout.close()
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=2)
+
+
+def open_output_pipe(output_path, width, height, fps=30, codec="libx264", crf=18):
+    """Open an FFmpeg pipe for writing composited frames.
+
+    Returns a subprocess.Popen whose stdin accepts raw RGB24 bytes.
+
+    Args:
+        output_path: Output video file path.
+        width: Frame width.
+        height: Frame height.
+        fps: Output framerate.
+        codec: Video codec (libx264 for H.264).
+        crf: Quality (lower = better, 18 = visually lossless).
+
+    Returns:
+        subprocess.Popen with stdin pipe for writing raw RGB24 frames.
+    """
+    cmd = [
+        get_ffmpeg(),
+        "-y",
+        "-f", "rawvideo",
+        "-pix_fmt", "rgb24",
+        "-s", f"{width}x{height}",
+        "-r", str(fps),
+        "-i", "-",
+        "-c:v", codec,
+        "-crf", str(crf),
+        "-preset", "medium",
+        "-pix_fmt", "yuv420p",
+        "-v", "error",
+        str(output_path),
+    ]
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def mux_audio(video_no_audio, audio_source, output_path):
+    """Combine rendered video with audio from original. No re-encode.
+
+    Args:
+        video_no_audio: Rendered video (no audio).
+        audio_source: Original video to take audio from.
+        output_path: Final output with audio.
+    """
+    cmd = [
+        get_ffmpeg(),
+        "-y",
+        "-i", str(video_no_audio),
+        "-i", str(audio_source),
+        "-map", "0:v",
+        "-map", "1:a?",
+        "-c", "copy",
+        "-shortest",
+        str(output_path),
+    ]
+    subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+
+
 def clip_video(
     video_path: str,
     output_path: str,

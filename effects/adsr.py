@@ -110,6 +110,70 @@ class ADSREnvelope:
 
         return self.level
 
+    def trigger_on(self):
+        """Explicit MIDI note on — start attack phase.
+
+        Use this for external triggering (MIDI, keyboard) instead of
+        the signal-threshold approach in process().
+        """
+        self.phase = "attack"
+        self.was_triggered = True
+
+    def trigger_off(self):
+        """Explicit MIDI note off — start release from current level.
+
+        Only transitions to release if currently in attack/decay/sustain.
+        """
+        if self.phase in ("attack", "decay", "sustain"):
+            self.phase = "release"
+        self.was_triggered = False
+
+    def advance(self) -> float:
+        """Step envelope one frame. Returns level (0-1).
+
+        Use after trigger_on()/trigger_off() for external triggering.
+        Reuses the same phase machine as process() but without
+        signal/threshold comparison.
+
+        Returns:
+            Envelope level (0-1) for this frame.
+        """
+        if self.phase == "attack":
+            if self.attack > 0:
+                self.level = min(1.0, self.level + 1.0 / self.attack)
+            else:
+                self.level = 1.0
+            if self.level >= 1.0:
+                self.level = 1.0
+                self.phase = "decay"
+
+        elif self.phase == "decay":
+            if self.decay > 0:
+                self.level = max(self.sustain,
+                                 self.level - (1.0 - self.sustain) / self.decay)
+            else:
+                self.level = self.sustain
+            if self.level <= self.sustain:
+                self.level = self.sustain
+                self.phase = "sustain"
+
+        elif self.phase == "sustain":
+            self.level = self.sustain
+
+        elif self.phase == "release":
+            if self.release > 0:
+                self.level = max(0.0, self.level - self.sustain / max(self.release, 1))
+            else:
+                self.level = 0.0
+            if self.level <= 0:
+                self.level = 0.0
+                self.phase = "idle"
+
+        else:  # idle
+            self.level = 0.0
+
+        return self.level
+
     def reset(self):
         """Reset envelope to idle state."""
         self.level = 0.0
