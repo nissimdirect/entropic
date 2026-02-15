@@ -1095,6 +1095,272 @@ def _frame_to_data_url(frame: np.ndarray) -> str:
     return f"data:image/jpeg;base64,{b64}"
 
 
+# ============ PERFORM MODE API ============
+
+from core.layer import Layer, LayerStack, ADSR_PRESETS
+from core.automation import PerformanceSession
+
+
+class PerformInitRequest(BaseModel):
+    layers: list[dict] | None = None  # Custom layer configs
+    auto: bool = True                 # Auto-generate defaults
+
+
+class PerformFrameRequest(BaseModel):
+    frame_number: int
+    layer_states: list[dict]  # [{layer_id, active, opacity}]
+
+
+class PerformSaveRequest(BaseModel):
+    layers_config: list[dict]
+    events: dict              # PerformanceSession dict
+    duration_frames: int = 0
+
+
+class PerformRenderRequest(BaseModel):
+    layers_config: list[dict]
+    events: dict
+    duration_frames: int = 0
+    fps: int = 30
+    crf: int = 18
+
+
+# Default layer presets for web perform mode (all use uploaded video)
+_PERFORM_DEFAULTS = [
+    {
+        "name": "Clean",
+        "effects": [],
+        "trigger_mode": "always_on",
+        "adsr_preset": "sustain",
+        "opacity": 1.0,
+    },
+    {
+        "name": "VHS+Glitch",
+        "effects": [
+            {"name": "vhs", "params": {"tracking": 0.4, "noise": 0.3}},
+        ],
+        "trigger_mode": "toggle",
+        "adsr_preset": "sustain",
+        "opacity": 0.8,
+    },
+    {
+        "name": "PixelSort",
+        "effects": [
+            {"name": "pixelsort", "params": {"threshold": 0.5}},
+        ],
+        "trigger_mode": "adsr",
+        "adsr_preset": "pluck",
+        "opacity": 1.0,
+    },
+    {
+        "name": "Feedback",
+        "effects": [
+            {"name": "feedback", "params": {"decay": 0.85, "offset_x": 2}},
+        ],
+        "trigger_mode": "adsr",
+        "adsr_preset": "stab",
+        "opacity": 0.9,
+    },
+]
+
+
+@app.post("/api/perform/init")
+async def perform_init(req: PerformInitRequest):
+    """Initialize perform mode layers. Creates LayerStack from config or auto-defaults."""
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail="No video loaded. Upload a file first.")
+
+    video_path = _state["video_path"]
+
+    if req.layers:
+        layer_dicts = req.layers
+    else:
+        # Build default 4 layers using uploaded video
+        layer_dicts = []
+        for i, preset in enumerate(_PERFORM_DEFAULTS):
+            layer_dicts.append({
+                "layer_id": i,
+                "video_path": video_path,
+                "z_order": i,
+                "choke_group": None,
+                "midi_note": None,
+                "midi_cc_opacity": None,
+                **preset,
+            })
+
+    # Store layer configs in state (not Layer objects — those are per-request)
+    _state["perf_layers"] = layer_dicts
+
+    return {
+        "status": "ok",
+        "layers": layer_dicts,
+        "adsr_presets": list(ADSR_PRESETS.keys()),
+    }
+
+
+@app.post("/api/perform/frame")
+async def perform_frame(req: PerformFrameRequest):
+    """Composite a single perform-mode frame with layer states applied.
+
+    Receives which layers are active and at what opacity, returns composited preview.
+    """
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail="No video loaded")
+    if "perf_layers" not in _state or not _state["perf_layers"]:
+        raise HTTPException(status_code=400, detail="Perform mode not initialized. Call /api/perform/init first.")
+
+    try:
+        # Extract the base frame
+        frame = extract_single_frame(_state["video_path"], req.frame_number)
+
+        # Cap resolution for preview
+        MAX_PREVIEW_PIXELS = 1920 * 1080
+        h, w = frame.shape[:2]
+        if h * w > MAX_PREVIEW_PIXELS:
+            scale = (MAX_PREVIEW_PIXELS / (h * w)) ** 0.5
+            new_h, new_w = int(h * scale), int(w * scale)
+            frame = np.array(Image.fromarray(frame).resize((new_w, new_h)))
+
+        # Build a lookup of layer_id -> state from request
+        states = {s["layer_id"]: s for s in req.layer_states}
+
+        # Process each layer and composite
+        layer_frames = {}
+        for lc in _state["perf_layers"]:
+            lid = lc["layer_id"]
+            state = states.get(lid, {})
+            is_active = state.get("active", lc.get("trigger_mode") == "always_on")
+            opacity = state.get("opacity", lc.get("opacity", 1.0))
+
+            if not is_active and opacity <= 0:
+                continue
+
+            # Start with base frame copy for this layer
+            layer_frame = frame.copy()
+
+            # Apply layer's effects
+            effects = lc.get("effects", [])
+            if effects:
+                layer_frame = apply_chain(layer_frame, effects, watermark=False)
+
+            # Store with effective opacity
+            layer_frames[lid] = (layer_frame, opacity if is_active else 0.0)
+
+        # Manual composite (sorted by z_order)
+        sorted_layers = sorted(_state["perf_layers"], key=lambda l: l.get("z_order", 0))
+        result = None
+        for lc in sorted_layers:
+            lid = lc["layer_id"]
+            if lid not in layer_frames:
+                continue
+            layer_frame, alpha = layer_frames[lid]
+            if alpha <= 0:
+                continue
+
+            if result is None:
+                if alpha >= 1.0:
+                    result = layer_frame.copy()
+                else:
+                    result = (layer_frame.astype(np.float32) * alpha).astype(np.uint8)
+            else:
+                if alpha >= 1.0:
+                    result = layer_frame.copy()
+                elif alpha > 0:
+                    r = result.astype(np.float32)
+                    f = layer_frame.astype(np.float32)
+                    result = np.clip(r * (1.0 - alpha) + f * alpha, 0, 255).astype(np.uint8)
+
+        if result is None:
+            result = frame  # Fallback to raw frame
+
+        return {"preview": _frame_to_data_url(result)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/perform/save")
+async def perform_save(req: PerformSaveRequest):
+    """Save a performance session (layers + automation events) to JSON."""
+    import json as _json
+    import time as _time
+
+    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = int(_time.time())
+    filename = f"performance_{timestamp}.json"
+    filepath = PROJECTS_DIR / filename
+
+    data = {
+        "type": "performance",
+        "layers_config": req.layers_config,
+        "events": req.events,
+        "duration_frames": req.duration_frames,
+        "timestamp": timestamp,
+    }
+    filepath.write_text(_json.dumps(data, indent=2))
+
+    return {"status": "ok", "path": str(filepath), "name": filename}
+
+
+@app.post("/api/perform/render")
+async def perform_render(req: PerformRenderRequest):
+    """Render a recorded performance to full-quality video.
+
+    Uses core/render.py render_performance() pipeline.
+    """
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail="No video loaded")
+
+    import json as _json
+    import time as _time
+    import tempfile as tf
+
+    # Save automation to temp file (render_performance expects a file path)
+    with tf.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+        _json.dump(req.events, tmp)
+        automation_path = tmp.name
+
+    # Ensure all layers have video_path set to current video
+    layers_config = []
+    for lc in req.layers_config:
+        lc_copy = dict(lc)
+        if not lc_copy.get("video_path"):
+            lc_copy["video_path"] = _state["video_path"]
+        layers_config.append(lc_copy)
+
+    timestamp = int(_time.time())
+    output_path = EXPORT_DIR / f"entropic_perform_{timestamp}.mp4"
+
+    try:
+        from core.render import render_performance
+        info = _state["video_info"]
+        audio_source = _state["video_path"] if info.get("has_audio") else None
+
+        result_path = render_performance(
+            layers_config=layers_config,
+            automation_path=automation_path,
+            output_path=str(output_path),
+            fps=req.fps,
+            duration=req.duration_frames / req.fps if req.duration_frames > 0 else None,
+            audio_source=audio_source,
+            crf=req.crf,
+        )
+
+        size_mb = Path(result_path).stat().st_size / (1024 * 1024)
+        return {
+            "status": "ok",
+            "path": str(result_path),
+            "size_mb": round(size_mb, 1),
+            "format": "mp4",
+            "fps": req.fps,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Clean up temp automation file
+        if os.path.exists(automation_path):
+            os.unlink(automation_path)
+
+
 import atexit
 
 

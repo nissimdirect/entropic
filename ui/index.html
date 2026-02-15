@@ -88,6 +88,7 @@
         <div class="mode-toggle">
             <button class="mode-btn active" data-mode="quick" onclick="setMode('quick')">Quick</button>
             <button class="mode-btn" data-mode="timeline" onclick="setMode('timeline')">Timeline</button>
+            <button class="mode-btn" data-mode="perform" onclick="setMode('perform')">Perform</button>
         </div>
         <div class="transport">
             <button onclick="randomizeChain()" title="Random effects">Randomize</button>
@@ -127,6 +128,7 @@
             <p class="hint">Drop video, image, GIF — or anything else for creative interpretation</p>
         </div>
         <img id="preview-img" style="display:none">
+        <div id="mode-badge">QUICK</div>
         <div id="frame-info"></div>
         <div id="frame-scrubber">
             <input type="range" id="frame-slider" min="0" max="100" value="0">
@@ -164,6 +166,30 @@
         <div id="timeline-canvas-wrapper">
             <canvas id="timeline-canvas"></canvas>
         </div>
+    </div>
+
+    <!-- PERFORM: Transport Bar (between preview and mixer) -->
+    <div id="perform-transport">
+        <div class="transport-left">
+            <button id="perf-play-btn" onclick="perfTogglePlay()" title="Space">&#9654; Play</button>
+            <button id="perf-rec-btn" onclick="perfToggleRecord()" title="R">&#9679; Rec</button>
+            <button onclick="perfPanic()" title="Shift+P">&#8634; Panic</button>
+        </div>
+        <div class="transport-center">
+            <span id="perf-time">0:00:00</span> / <span id="perf-duration">--:--</span>
+            <span id="perf-frame">F:0</span>
+            <div id="perf-scrubber"><input type="range" min="0" max="100" value="0" oninput="perfScrub(this.value)"></div>
+        </div>
+        <div class="transport-right">
+            <span id="perf-event-count">0 events</span>
+            <button onclick="perfSaveSession()">Save</button>
+            <button onclick="perfRender()" class="primary">Render</button>
+        </div>
+    </div>
+
+    <!-- PERFORM: Mixer Panel (4 channel strips + master) -->
+    <div id="perform-panel">
+        <div id="mixer"><!-- Rendered by JS: renderMixer() --></div>
     </div>
 
     <!-- BOTTOM: Effect Chain Rack -->
@@ -372,6 +398,11 @@
                 <div class="sc-row"><kbd>Cmd+0</kbd> Fit to window</div>
                 <div class="sc-row"><kbd>M</kbd> Mute track</div>
                 <div class="sc-row"><kbd>S</kbd> Solo track</div>
+                <h3>Perform</h3>
+                <div class="sc-row"><kbd>1-4</kbd> Trigger layers</div>
+                <div class="sc-row"><kbd>Space</kbd> Play/Pause</div>
+                <div class="sc-row"><kbd>R</kbd> Toggle recording</div>
+                <div class="sc-row"><kbd>Shift+P</kbd> Panic (reset all)</div>
             </div>
         </div>
     </div>

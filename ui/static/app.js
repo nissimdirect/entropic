@@ -130,13 +130,28 @@ let deviceIdCounter = 0;
 let previewDebounce = null;
 let selectedLayerId = null;
 let mixLevel = 1.0;              // Wet/dry mix: 0.0 = original, 1.0 = full effect
-let appMode = 'quick';           // 'quick' | 'timeline'
+let appMode = 'quick';           // 'quick' | 'timeline' | 'perform'
 
 // Spatial mask drawing state
 let maskDrawing = false;
 let maskStartX = 0;
 let maskStartY = 0;
 let maskRect = null;             // {x, y, w, h} in canvas pixels during draw
+
+// ============ PERFORM MODE STATE ============
+
+let perfLayers = [];              // Layer configs from server [{layer_id, name, effects, trigger_mode, ...}]
+let perfLayerStates = {};         // Client-side layer states {layer_id: {active, opacity, muted, soloed}}
+let perfPlaying = false;
+let perfRecording = false;        // Explicit recording (R key)
+let perfFrameIndex = 0;
+let perfSession = {type:'performance', lanes:[]};  // PerformanceSession dict (auto-buffer)
+let perfEventCount = 0;
+let perfAnimFrame = null;         // requestAnimationFrame ID
+let perfLastFrameTime = 0;
+const PERF_FPS = 15;             // Preview framerate
+const PERF_MAX_EVENTS = 50000;   // Buffer cap (same as CLI)
+const PERF_LAYER_COLORS = ['#ff4444', '#4488ff', '#44cc44', '#ffcc00'];  // L1-L4
 
 // ============ HISTORY (Undo/Redo) ============
 
@@ -446,6 +461,14 @@ async function uploadVideo(file) {
         showPreview(data.preview);
         updateFrameInfo(data.info);
 
+        // Suggest perform mode (toast with action)
+        if (appMode === 'quick') {
+            showToast('Video loaded. Try Perform mode?', 'info', {
+                label: 'Switch to Perform',
+                fn: "function(){setMode('perform')}",
+            }, 5000);
+        }
+
         // Sync timeline with loaded video
         if (window.timelineEditor) {
             timelineEditor.fps = data.info.fps || 30;
@@ -573,10 +596,12 @@ function setupKeyboard() {
         // --- Non-modifier shortcuts: skip if typing in text input or modal open ---
         if (isTextInput() || isModalOpen()) return;
 
-        // Space = Play/pause (timeline) or A/B compare (quick)
+        // Space = Play/pause (mode-dependent)
         if (e.code === 'Space' && videoLoaded) {
             e.preventDefault();
-            if (appMode === 'timeline' && window.timelineEditor) {
+            if (appMode === 'perform') {
+                perfTogglePlay();
+            } else if (appMode === 'timeline' && window.timelineEditor) {
                 timelineEditor.togglePlayback();
             } else if (!isShowingOriginal) {
                 isShowingOriginal = true;
@@ -587,6 +612,29 @@ function setupKeyboard() {
                     .then(data => { if (isShowingOriginal) img.src = data.preview; });
             }
             return;
+        }
+
+        // --- Perform mode shortcuts (keys 1-4, R, Shift+P) ---
+        if (appMode === 'perform' && videoLoaded) {
+            // Keys 1-4: trigger layers
+            if (e.key >= '1' && e.key <= '4') {
+                e.preventDefault();
+                const layerId = parseInt(e.key) - 1;
+                perfTriggerLayer(layerId, 'keydown');
+                return;
+            }
+            // R: toggle recording
+            if (e.key === 'r') {
+                e.preventDefault();
+                perfToggleRecord();
+                return;
+            }
+            // Shift+P: panic
+            if (e.key === 'P' && e.shiftKey) {
+                e.preventDefault();
+                perfPanic();
+                return;
+            }
         }
 
         // Delete/Backspace = remove selected
@@ -725,6 +773,11 @@ function setupKeyboard() {
             isShowingOriginal = false;
             const img = document.getElementById('preview-img');
             if (originalPreviewSrc) img.src = originalPreviewSrc;
+        }
+        // Perform mode: key release for gate mode
+        if (appMode === 'perform' && e.key >= '1' && e.key <= '4') {
+            const layerId = parseInt(e.key) - 1;
+            perfTriggerLayer(layerId, 'keyup');
         }
     });
 }
@@ -1248,10 +1301,24 @@ function schedulePreview() {
 
 async function previewChain() {
     if (!videoLoaded) return;
+    // Perform mode uses its own preview loop — skip
+    if (appMode === 'perform' && perfPlaying) return;
 
     try {
         let res;
-        if (appMode === 'timeline' && window.timelineEditor) {
+        if (appMode === 'perform' && perfLayers.length > 0) {
+            // Perform mode: composite via layer states
+            const layerStates = perfLayers.map(l => ({
+                layer_id: l.layer_id,
+                active: perfLayerStates[l.layer_id]?.active ?? (l.trigger_mode === 'always_on'),
+                opacity: perfLayerStates[l.layer_id]?.opacity ?? l.opacity,
+            }));
+            res = await fetch(`${API}/api/perform/frame`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frame_number: currentFrame, layer_states: layerStates }),
+            });
+        } else if (appMode === 'timeline' && window.timelineEditor) {
             // Timeline mode: send all active regions to server
             const regions = timelineEditor.getActiveRegions().map(r => ({
                 start: r.startFrame,
@@ -1609,25 +1676,45 @@ let isShowingOriginal = false;
 // ============ MODE SWITCHING (Quick / Timeline) ============
 
 function setMode(mode) {
+    // Block mode switch during perform playback (Norman: prevent mode errors)
+    if (perfPlaying && appMode === 'perform' && mode !== 'perform') {
+        showToast('Stop playback first (Space)', 'info');
+        return;
+    }
+
+    // Warn about unsaved perform data when leaving perform mode
+    if (appMode === 'perform' && mode !== 'perform' && perfEventCount > 0) {
+        if (!confirm('You have unsaved performance data. Leave Perform mode?')) return;
+    }
+
+    // Stop perform playback if leaving perform mode
+    if (appMode === 'perform' && mode !== 'perform') {
+        perfStop();
+    }
+
     appMode = mode;
     const appEl = document.getElementById('app');
 
-    // Toggle CSS class
-    if (mode === 'quick') {
-        appEl.classList.add('quick-mode');
-    } else {
-        appEl.classList.remove('quick-mode');
-    }
+    // Toggle CSS classes
+    appEl.classList.remove('quick-mode', 'perform-mode');
+    if (mode === 'quick') appEl.classList.add('quick-mode');
+    else if (mode === 'perform') appEl.classList.add('perform-mode');
 
     // Update mode toggle buttons
     document.querySelectorAll('.mode-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.mode === mode);
     });
 
-    // Show/hide frame scrubber (quick mode uses slider, timeline mode uses playhead)
+    // Update mode badge
+    const badge = document.getElementById('mode-badge');
+    if (badge) {
+        badge.textContent = mode.toUpperCase();
+    }
+
+    // Show/hide frame scrubber
     const scrubber = document.getElementById('frame-scrubber');
     if (scrubber) {
-        scrubber.style.display = (mode === 'quick' && videoLoaded) ? 'block' : (mode === 'timeline' ? 'none' : '');
+        scrubber.style.display = (mode === 'quick' && videoLoaded) ? 'block' : 'none';
     }
 
     // When entering timeline mode, sync timeline with current state
@@ -1639,6 +1726,22 @@ function setMode(mode) {
     // Deselect region when switching to quick mode
     if (mode === 'quick' && window.timelineEditor) {
         timelineEditor.selectedRegionId = null;
+    }
+
+    // When entering perform mode
+    if (mode === 'perform') {
+        if (!videoLoaded) {
+            showToast('Load a video first', 'info');
+            appMode = 'quick';
+            appEl.classList.remove('perform-mode');
+            appEl.classList.add('quick-mode');
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === 'quick');
+            });
+            if (badge) badge.textContent = 'QUICK';
+            return;
+        }
+        perfInitLayers();
     }
 
     schedulePreview();
@@ -1701,7 +1804,7 @@ function syncChainToRegion() {
 // ============ PROJECT SAVE/LOAD ============
 
 function getProjectState() {
-    return {
+    const state = {
         name: document.getElementById('file-name').textContent || 'Untitled',
         mode: appMode,
         timeline: window.timelineEditor ? timelineEditor.serialize() : null,
@@ -1710,6 +1813,14 @@ function getProjectState() {
         currentFrame,
         totalFrames,
     };
+    // Include perform mode data
+    if (appMode === 'perform' && perfLayers.length > 0) {
+        state.perfLayers = perfLayers;
+        state.perfLayerStates = perfLayerStates;
+        state.perfSession = perfSession;
+        state.perfFrameIndex = perfFrameIndex;
+    }
+    return state;
 }
 
 async function saveProject() {
@@ -1789,6 +1900,15 @@ async function loadProject() {
                 mixLevel = p.mixLevel;
                 document.getElementById('mix-slider').value = mixLevel * 100;
                 document.getElementById('mix-value').textContent = Math.round(mixLevel * 100) + '%';
+            }
+
+            // Restore perform mode state
+            if (p.perfLayers) {
+                perfLayers = p.perfLayers;
+                perfLayerStates = p.perfLayerStates || {};
+                perfSession = p.perfSession || {type:'performance', lanes:[]};
+                perfFrameIndex = p.perfFrameIndex || 0;
+                if (appMode === 'perform') renderMixer();
             }
 
             pushHistory('Load Project');
@@ -2038,6 +2158,611 @@ async function _doSavePreset(name, desc) {
         showErrorToast(`Failed to save preset: ${err.message}`);
     }
 }
+
+// ============ PERFORM MODE ============
+
+// --- Init ---
+async function perfInitLayers() {
+    // If Quick mode had effects, migrate them to L1 (handoff)
+    let quickChain = null;
+    if (chain.length > 0) {
+        quickChain = chain.filter(d => !d.bypassed).map(d => ({
+            name: d.name,
+            params: { ...d.params },
+        }));
+    }
+
+    try {
+        const res = await fetch(`${API}/api/perform/init`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ auto: true }),
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            perfLayers = data.layers;
+
+            // Handoff: Quick mode chain -> L1 effects
+            if (quickChain && quickChain.length > 0 && perfLayers.length > 1) {
+                perfLayers[1].effects = quickChain;
+                perfLayers[1].name = 'Quick Chain';
+            }
+
+            // Init client-side states
+            perfLayerStates = {};
+            for (const l of perfLayers) {
+                perfLayerStates[l.layer_id] = {
+                    active: l.trigger_mode === 'always_on',
+                    opacity: l.opacity,
+                    muted: false,
+                    soloed: false,
+                };
+            }
+
+            // Reset perform state
+            perfFrameIndex = 0;
+            perfPlaying = false;
+            perfRecording = false;
+            perfSession = { type: 'performance', lanes: [] };
+            perfEventCount = 0;
+
+            // Update transport
+            perfUpdateTransport();
+
+            // Set duration from video info
+            const durEl = document.getElementById('perf-duration');
+            if (durEl && totalFrames > 0) {
+                const info = totalFrames / 30; // Approximate
+                durEl.textContent = formatTime(info);
+            }
+
+            const scrubber = document.querySelector('#perf-scrubber input');
+            if (scrubber) scrubber.max = totalFrames - 1;
+
+            renderMixer();
+            schedulePreview();
+        }
+    } catch (err) {
+        showErrorToast(`Perform init failed: ${err.message}`);
+    }
+}
+
+// --- Mixer Panel Rendering ---
+function renderTriggerContent(mode, isActive) {
+    switch (mode) {
+        case 'toggle':
+            return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="3" y="3" width="10" height="10" stroke="currentColor" stroke-width="2" fill="none"/>
+            </svg>`;
+
+        case 'gate':
+            return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" fill="${isActive ? 'currentColor' : 'none'}"/>
+            </svg>`;
+
+        case 'adsr':
+            return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" class="adsr-ring">
+                <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" fill="none"
+                    stroke-dasharray="37.7" stroke-dashoffset="94"/>
+            </svg>`;
+
+        case 'one_shot':
+            return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 2 L9.5 6.5 L14 6.5 L10.5 9.5 L12 14 L8 11 L4 14 L5.5 9.5 L2 6.5 L6.5 6.5 Z"
+                    fill="currentColor" stroke="currentColor" stroke-width="1"/>
+            </svg>`;
+
+        case 'always_on':
+            return `<div class="always-on-dot"></div>`;
+
+        default:
+            return isActive ? 'ON' : 'OFF';
+    }
+}
+
+function renderMixer() {
+    const mixer = document.getElementById('mixer');
+    if (!mixer) return;
+
+    let html = '';
+    for (let i = 0; i < perfLayers.length; i++) {
+        const l = perfLayers[i];
+        const state = perfLayerStates[l.layer_id] || {};
+        const color = PERF_LAYER_COLORS[i] || '#888';
+        const isActive = state.active || false;
+        const opacity = state.opacity ?? l.opacity;
+        const isMuted = state.muted || false;
+        const isSoloed = state.soloed || false;
+
+        // Effect chain summary
+        const effectNames = (l.effects || []).map(e => e.name).join(' + ') || 'No effects';
+
+        // Trigger mode display
+        const triggerModes = ['toggle', 'gate', 'adsr', 'one_shot', 'always_on'];
+
+        html += `
+        <div class="channel-strip ${isActive ? 'active-strip' : ''}" data-layer-id="${l.layer_id}">
+            <div class="channel-strip-header">
+                <span class="strip-color" style="background:${color}"></span>
+                <span class="strip-key">${i + 1}</span>
+                <span class="strip-name">${esc(l.name)}</span>
+            </div>
+            <button class="strip-trigger mode-${l.trigger_mode} ${isActive ? 'lit' : ''}"
+                    ${l.trigger_mode === 'always_on' ? '' : `onmousedown="perfTriggerLayer(${l.layer_id}, 'keydown')" onmouseup="perfTriggerLayer(${l.layer_id}, 'keyup')"`}>
+                ${renderTriggerContent(l.trigger_mode, isActive)}
+            </button>
+            <div class="strip-effects" onclick="perfSelectLayerForEdit(${l.layer_id})" title="Click to edit effects">${esc(effectNames)}</div>
+            <div class="strip-selectors">
+                <select onchange="perfSetTriggerMode(${l.layer_id}, this.value)">
+                    ${triggerModes.map(m => `<option value="${m}" ${m === l.trigger_mode ? 'selected' : ''}>${m.replace('_', ' ')}</option>`).join('')}
+                </select>
+                <select onchange="perfSetAdsrPreset(${l.layer_id}, this.value)">
+                    <option value="pluck" ${l.adsr_preset === 'pluck' ? 'selected' : ''}>pluck</option>
+                    <option value="sustain" ${l.adsr_preset === 'sustain' ? 'selected' : ''}>sustain</option>
+                    <option value="stab" ${l.adsr_preset === 'stab' ? 'selected' : ''}>stab</option>
+                    <option value="pad" ${l.adsr_preset === 'pad' ? 'selected' : ''}>pad</option>
+                </select>
+            </div>
+            <div class="strip-fader-wrap">
+                <input type="range" class="strip-fader" min="0" max="100" value="${Math.round(opacity * 100)}"
+                       oninput="perfSetOpacity(${l.layer_id}, this.value / 100)">
+                <span class="strip-fader-val">${Math.round(opacity * 100)}%</span>
+            </div>
+            <div class="strip-bottom">
+                <button class="${isMuted ? 'muted' : ''}" onclick="perfToggleMute(${l.layer_id})">M</button>
+                <button class="${isSoloed ? 'soloed' : ''}" onclick="perfToggleSolo(${l.layer_id})">S</button>
+            </div>
+        </div>`;
+    }
+
+    // Master strip
+    html += `
+    <div class="channel-strip master-strip">
+        <div class="channel-strip-header">
+            <span class="strip-color" style="background:var(--text-dim)"></span>
+            <span class="strip-name">MASTER</span>
+        </div>
+        <div style="padding:8px 0;font-size:10px;color:var(--text-dim);">Preview: ${PERF_FPS}fps</div>
+        <div class="strip-fader-wrap">
+            <input type="range" class="strip-fader" min="0" max="100" value="100"
+                   oninput="mixLevel = this.value / 100; document.getElementById('mix-slider').value = this.value; document.getElementById('mix-value').textContent = this.value + '%';">
+            <span class="strip-fader-val">100%</span>
+        </div>
+        <div class="strip-bottom">
+            <button onclick="perfPanic()">PANIC</button>
+        </div>
+    </div>`;
+
+    mixer.innerHTML = html;
+}
+
+// --- Layer Triggers (3-tier feedback) ---
+function perfTriggerLayer(layerId, eventType) {
+    const layer = perfLayers.find(l => l.layer_id === layerId);
+    if (!layer) return;
+    const state = perfLayerStates[layerId];
+    if (!state) return;
+
+    // Respect mute
+    if (state.muted) return;
+
+    const mode = layer.trigger_mode;
+
+    if (mode === 'always_on') return; // No-op
+
+    if (eventType === 'keydown') {
+        if (mode === 'toggle') {
+            state.active = !state.active;
+        } else if (mode === 'gate' || mode === 'adsr' || mode === 'one_shot') {
+            state.active = true;
+        }
+        // Record event
+        perfRecordEvent(layerId, 'active', state.active ? 1.0 : 0.0);
+    } else if (eventType === 'keyup') {
+        if (mode === 'gate') {
+            state.active = false;
+            perfRecordEvent(layerId, 'active', 0.0);
+        }
+        // Toggle, ADSR, one_shot: no-op on keyup
+    }
+
+    // Tier 1: INSTANT visual feedback (0ms, client-side only)
+    perfUpdateStripVisuals(layerId);
+
+    // Tier 2: Server preview (throttled)
+    if (!perfPlaying) {
+        schedulePreview();
+    }
+}
+
+function perfUpdateStripVisuals(layerId) {
+    const strip = document.querySelector(`.channel-strip[data-layer-id="${layerId}"]`);
+    if (!strip) return;
+    const state = perfLayerStates[layerId];
+    const trigger = strip.querySelector('.strip-trigger');
+
+    if (state.active) {
+        strip.classList.add('active-strip');
+        if (trigger) { trigger.classList.add('lit'); trigger.textContent = 'ON'; }
+    } else {
+        strip.classList.remove('active-strip');
+        if (trigger) { trigger.classList.remove('lit'); trigger.textContent = 'OFF'; }
+    }
+}
+
+// --- Layer Configuration ---
+function perfSetTriggerMode(layerId, mode) {
+    const layer = perfLayers.find(l => l.layer_id === layerId);
+    if (layer) {
+        layer.trigger_mode = mode;
+        const state = perfLayerStates[layerId];
+        if (state) {
+            state.active = (mode === 'always_on');
+        }
+        renderMixer();
+    }
+}
+
+function perfSetAdsrPreset(layerId, preset) {
+    const layer = perfLayers.find(l => l.layer_id === layerId);
+    if (layer) layer.adsr_preset = preset;
+}
+
+function perfSetOpacity(layerId, value) {
+    const state = perfLayerStates[layerId];
+    if (state) {
+        state.opacity = value;
+        perfRecordEvent(layerId, 'opacity', value);
+    }
+    // Update fader value display
+    const strip = document.querySelector(`.channel-strip[data-layer-id="${layerId}"]`);
+    if (strip) {
+        const valSpan = strip.querySelector('.strip-fader-val');
+        if (valSpan) valSpan.textContent = Math.round(value * 100) + '%';
+    }
+    if (!perfPlaying) schedulePreview();
+}
+
+function perfToggleMute(layerId) {
+    const state = perfLayerStates[layerId];
+    if (state) {
+        state.muted = !state.muted;
+        if (state.muted) state.active = false;
+        renderMixer();
+        if (!perfPlaying) schedulePreview();
+    }
+}
+
+function perfToggleSolo(layerId) {
+    const state = perfLayerStates[layerId];
+    if (state) {
+        state.soloed = !state.soloed;
+        // If any layer is soloed, mute all non-soloed layers
+        const anySoloed = Object.values(perfLayerStates).some(s => s.soloed);
+        if (anySoloed) {
+            for (const [lid, s] of Object.entries(perfLayerStates)) {
+                s.muted = !s.soloed;
+            }
+        } else {
+            for (const [lid, s] of Object.entries(perfLayerStates)) {
+                s.muted = false;
+            }
+        }
+        renderMixer();
+        if (!perfPlaying) schedulePreview();
+    }
+}
+
+function perfSelectLayerForEdit(layerId) {
+    const layer = perfLayers.find(l => l.layer_id === layerId);
+    if (!layer) return;
+
+    // Load layer's effects into the chain rack for editing
+    chain = (layer.effects || []).map(eff => ({
+        id: deviceIdCounter++,
+        name: eff.name,
+        params: JSON.parse(JSON.stringify(eff.params || {})),
+        bypassed: false,
+    }));
+    selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
+
+    // Store which perform layer we're editing
+    window._perfEditingLayerId = layerId;
+
+    renderChain();
+    renderLayers();
+    showToast(`Editing L${layerId + 1}: ${layer.name}`, 'info', null, 2000);
+}
+
+// Override syncChainToRegion to also sync to perform layer
+const _origSyncChainToRegion = syncChainToRegion;
+syncChainToRegion = function() {
+    _origSyncChainToRegion();
+
+    // If editing a perform layer, sync chain back to it
+    if (appMode === 'perform' && window._perfEditingLayerId !== undefined) {
+        const layer = perfLayers.find(l => l.layer_id === window._perfEditingLayerId);
+        if (layer) {
+            layer.effects = chain.map(d => ({
+                name: d.name,
+                params: JSON.parse(JSON.stringify(d.params)),
+            }));
+            renderMixer();
+        }
+    }
+};
+
+// --- Playback Loop ---
+function perfTogglePlay() {
+    if (perfPlaying) {
+        perfStop();
+    } else {
+        perfStart();
+    }
+}
+
+function perfStart() {
+    if (!videoLoaded || perfLayers.length === 0) return;
+    perfPlaying = true;
+    perfLastFrameTime = performance.now();
+
+    const btn = document.getElementById('perf-play-btn');
+    if (btn) btn.innerHTML = '&#9646;&#9646; Pause';
+
+    // Disable mode buttons during playback (Norman: prevent mode errors)
+    document.querySelectorAll('.mode-btn').forEach(b => {
+        if (b.dataset.mode !== 'perform') b.disabled = true;
+    });
+
+    perfLoop();
+}
+
+function perfStop() {
+    perfPlaying = false;
+    if (perfAnimFrame) {
+        cancelAnimationFrame(perfAnimFrame);
+        perfAnimFrame = null;
+    }
+
+    const btn = document.getElementById('perf-play-btn');
+    if (btn) btn.innerHTML = '&#9654; Play';
+
+    // Re-enable mode buttons
+    document.querySelectorAll('.mode-btn').forEach(b => b.disabled = false);
+}
+
+async function perfLoop() {
+    if (!perfPlaying) return;
+
+    const now = performance.now();
+    const elapsed = now - perfLastFrameTime;
+    const frameInterval = 1000 / PERF_FPS;
+
+    if (elapsed >= frameInterval) {
+        perfLastFrameTime = now - (elapsed % frameInterval);
+        perfFrameIndex++;
+
+        // Loop video
+        if (perfFrameIndex >= totalFrames) {
+            perfFrameIndex = 0;
+        }
+
+        // Build layer states
+        const layerStates = perfLayers.map(l => {
+            const s = perfLayerStates[l.layer_id] || {};
+            return {
+                layer_id: l.layer_id,
+                active: s.muted ? false : (s.active ?? (l.trigger_mode === 'always_on')),
+                opacity: s.opacity ?? l.opacity,
+            };
+        });
+
+        try {
+            const res = await fetch(`${API}/api/perform/frame`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frame_number: perfFrameIndex, layer_states: layerStates }),
+            });
+            const data = await res.json();
+            if (data.preview) {
+                showPreview(data.preview);
+            }
+        } catch (err) {
+            // Server disconnect — auto-pause (Norman: error prevention)
+            if (_serverDown) {
+                perfStop();
+                showToast('Playback paused: server disconnected', 'error');
+                return;
+            }
+        }
+
+        perfUpdateTransport();
+    }
+
+    perfAnimFrame = requestAnimationFrame(perfLoop);
+}
+
+// --- Transport Controls ---
+function perfUpdateTransport() {
+    const timeEl = document.getElementById('perf-time');
+    const frameEl = document.getElementById('perf-frame');
+    const eventEl = document.getElementById('perf-event-count');
+    const scrubber = document.querySelector('#perf-scrubber input');
+
+    if (timeEl) timeEl.textContent = formatTime(perfFrameIndex / 30);
+    if (frameEl) frameEl.textContent = `F:${perfFrameIndex}`;
+    if (eventEl) eventEl.textContent = `${perfEventCount} events`;
+    if (scrubber) scrubber.value = perfFrameIndex;
+}
+
+function perfScrub(value) {
+    perfFrameIndex = parseInt(value);
+    perfUpdateTransport();
+    if (!perfPlaying) schedulePreview();
+}
+
+function formatTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 100);
+    return `${m}:${String(s).padStart(2, '0')}:${String(ms).padStart(2, '0')}`;
+}
+
+// --- Recording ---
+function perfToggleRecord() {
+    perfRecording = !perfRecording;
+    const btn = document.getElementById('perf-rec-btn');
+
+    if (perfRecording) {
+        // Clear buffer for fresh take
+        perfSession = { type: 'performance', lanes: [] };
+        perfEventCount = 0;
+        if (btn) btn.classList.add('recording');
+        showToast('Recording armed — buffer cleared', 'info', null, 2000);
+    } else {
+        if (btn) btn.classList.remove('recording');
+        if (perfEventCount > 0) {
+            showToast(`Recording stopped: ${perfEventCount} events`, 'success', {
+                label: 'Save',
+                fn: 'perfSaveSession',
+            }, 6000);
+        } else {
+            showToast('Recording stopped (no events)', 'info', null, 2000);
+        }
+    }
+    perfUpdateTransport();
+}
+
+function perfRecordEvent(layerId, param, value) {
+    if (perfEventCount >= PERF_MAX_EVENTS) {
+        if (perfEventCount === PERF_MAX_EVENTS) {
+            showToast(`Buffer full (${PERF_MAX_EVENTS} events)`, 'error');
+        }
+        return;
+    }
+
+    // Always auto-buffer (CLI pattern)
+    // Find or create lane in perfSession
+    let lane = perfSession.lanes.find(l =>
+        l.layer_id === layerId && l.param === param
+    );
+    if (!lane) {
+        lane = {
+            type: 'midi_event',
+            effect_idx: layerId,
+            layer_id: layerId,
+            param: param,
+            keyframes: [],
+            curve: 'step',
+        };
+        perfSession.lanes.push(lane);
+    }
+    lane.keyframes.push([perfFrameIndex, value]);
+    perfEventCount++;
+
+    // Show warning at 90% capacity
+    if (perfEventCount === Math.floor(PERF_MAX_EVENTS * 0.9)) {
+        showToast(`Buffer 90% full (${perfEventCount}/${PERF_MAX_EVENTS})`, 'error');
+    }
+
+    perfUpdateTransport();
+}
+
+// --- Panic ---
+function perfPanic() {
+    // Reset all layer states
+    for (const l of perfLayers) {
+        const state = perfLayerStates[l.layer_id];
+        if (state) {
+            state.active = l.trigger_mode === 'always_on';
+            state.muted = false;
+            state.soloed = false;
+        }
+    }
+    renderMixer();
+    showToast('ALL LAYERS RESET', 'info', null, 1000);
+    if (!perfPlaying) schedulePreview();
+}
+
+// --- Save & Render ---
+async function perfSaveSession() {
+    if (perfEventCount === 0) {
+        showToast('No performance data to save', 'info');
+        return;
+    }
+
+    const layersConfig = perfLayers.map(l => ({
+        ...l,
+        video_path: '', // Server fills this in
+    }));
+
+    try {
+        const res = await fetch(`${API}/api/perform/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                layers_config: layersConfig,
+                events: perfSession,
+                duration_frames: perfFrameIndex,
+            }),
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            showToast(`Performance saved: ${data.name}`, 'success', {
+                label: 'Reveal in Finder',
+                fn: `function(){revealInFinder('${(data.path || '').replace(/'/g, "\\'")}')}`,
+            }, 6000);
+        }
+    } catch (err) {
+        showErrorToast(`Save failed: ${err.message}`);
+    }
+}
+
+async function perfRender() {
+    if (perfEventCount === 0) {
+        showToast('No performance data to render', 'info');
+        return;
+    }
+
+    const btn = document.querySelector('.transport-right .primary');
+    const origText = btn ? btn.textContent : '';
+    if (btn) { btn.textContent = 'Rendering...'; btn.disabled = true; }
+
+    try {
+        const res = await fetch(`${API}/api/perform/render`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                layers_config: perfLayers,
+                events: perfSession,
+                duration_frames: perfFrameIndex,
+                fps: 30,
+                crf: 18,
+            }),
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            showToast(`Rendered: ${data.size_mb}MB @ ${data.fps}fps`, 'success', {
+                label: 'Reveal in Finder',
+                fn: `function(){revealInFinder('${(data.path || '').replace(/'/g, "\\'")}')}`,
+            }, 8000);
+        } else {
+            showErrorToast(`Render failed: ${data.detail || 'Unknown error'}`);
+        }
+    } catch (err) {
+        showErrorToast(`Render error: ${err.message}`);
+    } finally {
+        if (btn) { btn.textContent = origText; btn.disabled = false; }
+    }
+}
+
+// --- beforeunload: warn about unsaved performance data ---
+window.addEventListener('beforeunload', e => {
+    if (appMode === 'perform' && perfEventCount > 0) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved performance data. Leave?';
+    }
+});
 
 // ============ BOOT ============
 init();
