@@ -86,8 +86,9 @@
             <span id="mix-value">100%</span>
         </div>
         <div class="mode-toggle">
-            <button class="mode-btn active" data-mode="quick" onclick="setMode('quick')">Quick</button>
-            <button class="mode-btn" data-mode="timeline" onclick="setMode('timeline')">Timeline</button>
+            <!-- Quick mode flagged off (FEATURE_QUICK_MODE=false). Button preserved, hidden. -->
+            <button class="mode-btn" data-mode="quick" onclick="setMode('quick')" style="display:none">Quick</button>
+            <button class="mode-btn active" data-mode="timeline" onclick="setMode('timeline')">Timeline</button>
             <button class="mode-btn" data-mode="perform" onclick="setMode('perform')">Perform</button>
         </div>
         <div class="transport">
@@ -128,7 +129,7 @@
             <p class="hint">Drop video, image, GIF — or anything else for creative interpretation</p>
         </div>
         <img id="preview-img" style="display:none">
-        <div id="mode-badge">QUICK</div>
+        <div id="mode-badge">TIMELINE</div>
         <div id="perf-hud" style="display:none">
             <span id="perf-hud-rec"></span>
             <span id="perf-hud-time"></span>
@@ -163,6 +164,8 @@
         <div id="timeline-header">
             <span>Timeline</span>
             <div class="timeline-controls">
+                <button id="perform-toggle-btn" onclick="togglePerformPanel()" title="Toggle Perform Mixer" class="perform-toggle-btn">Perform</button>
+                <span class="timeline-controls-sep"></span>
                 <button onclick="timelineEditor.zoomIn()" title="Zoom In (+)">+</button>
                 <button onclick="timelineEditor.zoomOut()" title="Zoom Out (-)">-</button>
                 <button onclick="timelineEditor.fitToWindow()" title="Fit to Window (Cmd+0)">Fit</button>

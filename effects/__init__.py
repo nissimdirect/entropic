@@ -276,7 +276,7 @@ EFFECTS = {
     "stutter": {
         "fn": stutter,
         "category": "temporal",
-        "params": {"repeat": 3, "interval": 8},
+        "params": {"repeat": 3, "interval": 8, "seed": 42},
         "description": "Freeze-stutter: hold frames at intervals (skipping record)",
     },
     "dropout": {
@@ -294,13 +294,13 @@ EFFECTS = {
     "feedback": {
         "fn": feedback,
         "category": "temporal",
-        "params": {"decay": 0.3},
+        "params": {"decay": 0.3, "seed": 42},
         "description": "Ghost trails from previous frames (video echo)",
     },
     "tapestop": {
         "fn": tape_stop,
         "category": "temporal",
-        "params": {"trigger": 0.7, "ramp_frames": 15},
+        "params": {"trigger": 0.7, "ramp_frames": 15, "seed": 42},
         "description": "Freeze and fade to black like a tape machine stopping",
     },
     "tremolo": {
@@ -312,13 +312,13 @@ EFFECTS = {
     "delay": {
         "fn": delay,
         "category": "temporal",
-        "params": {"delay_frames": 5, "decay": 0.4},
+        "params": {"delay_frames": 5, "decay": 0.4, "seed": 42},
         "description": "Ghost echo from N frames ago (video delay line)",
     },
     "decimator": {
         "fn": decimator,
         "category": "temporal",
-        "params": {"factor": 3},
+        "params": {"factor": 3, "seed": 42},
         "description": "Reduce effective framerate (choppy lo-fi motion)",
     },
     "samplehold": {

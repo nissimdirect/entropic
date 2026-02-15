@@ -6,15 +6,23 @@ Effects that operate across frames (need frame_index context).
 import numpy as np
 
 
-# Module-level state for stateful temporal effects
-_stutter_state = {"held_frame": None, "hold_until": -1}
-_feedback_state = {"prev_frame": None}
-_tapestop_state = {"frozen_frame": None, "trigger_frame": -1}
-_delay_state = {"buffer": []}
-_decimator_state = {"held_frame": None}
-_samplehold_state = {"held_frame": None, "hold_until": -1}
-_granulator_state = {"buffer": [], "grain_pos": 0.0}
-_beatrepeat_state = {"buffer": [], "repeating": False, "repeat_until": -1, "repeat_start": -1, "grid_frames": 4}
+# Unified state dict for all temporal effects, keyed by f"{effect}_{seed}"
+# This allows multiple instances of the same effect (e.g. two timeline regions
+# both using "feedback" with different seeds) to maintain independent state.
+_temporal_state = {}
+
+
+def _get_state(key, default_factory):
+    """Get or create temporal state for this effect instance."""
+    if key not in _temporal_state:
+        _temporal_state[key] = default_factory()
+    return _temporal_state[key]
+
+
+def _cleanup_if_done(key, frame_index, total_frames):
+    """Remove state at end of render to prevent memory leaks."""
+    if frame_index >= total_frames - 1:
+        _temporal_state.pop(key, None)
 
 
 def stutter(
@@ -23,6 +31,7 @@ def stutter(
     interval: int = 8,
     frame_index: int = 0,
     total_frames: int = 1,
+    seed: int = 42,
 ) -> np.ndarray:
     """Freeze-stutter: hold a frame for `repeat` frames every `interval` frames.
 
@@ -34,34 +43,41 @@ def stutter(
         interval: How often to trigger a stutter (every N frames).
         frame_index: Current frame number (injected by render loop).
         total_frames: Total frame count (injected by render loop).
+        seed: Random seed for state isolation.
 
     Returns:
         Frame (H, W, 3) uint8 — either the original or a held copy.
     """
-    global _stutter_state
-
     repeat = max(1, int(repeat))
     interval = max(1, int(interval))
 
+    key = f"stutter_{seed}"
+    state = _get_state(key, lambda: {"held_frame": None, "hold_until": -1})
+
     # Reset state at frame 0 (new render)
     if frame_index == 0:
-        _stutter_state = {"held_frame": None, "hold_until": -1}
+        state["held_frame"] = None
+        state["hold_until"] = -1
 
     # If we're in a hold period, return the held frame
-    if frame_index <= _stutter_state["hold_until"] and _stutter_state["held_frame"] is not None:
-        held = _stutter_state["held_frame"]
+    if frame_index <= state["hold_until"] and state["held_frame"] is not None:
+        held = state["held_frame"]
         # Resize if frame dimensions changed (safety)
         if held.shape != frame.shape:
-            _stutter_state["held_frame"] = None
+            state["held_frame"] = None
+            _cleanup_if_done(key, frame_index, total_frames)
             return frame.copy()
+        _cleanup_if_done(key, frame_index, total_frames)
         return held.copy()
 
     # Check if this frame triggers a new stutter
     if frame_index % interval == 0:
-        _stutter_state["held_frame"] = frame.copy()
-        _stutter_state["hold_until"] = frame_index + repeat - 1
+        state["held_frame"] = frame.copy()
+        state["hold_until"] = frame_index + repeat - 1
+        _cleanup_if_done(key, frame_index, total_frames)
         return frame.copy()
 
+    _cleanup_if_done(key, frame_index, total_frames)
     return frame.copy()
 
 
@@ -137,6 +153,7 @@ def feedback(
     decay: float = 0.3,
     frame_index: int = 0,
     total_frames: int = 1,
+    seed: int = 42,
 ) -> np.ndarray:
     """Overlay previous frame at partial opacity, creating ghost trails.
 
@@ -148,23 +165,26 @@ def feedback(
         decay: How much of the previous frame persists (0.0-0.95).
         frame_index: Current frame number.
         total_frames: Total frame count.
+        seed: Random seed for state isolation.
 
     Returns:
         Frame with ghost overlay from previous frame.
     """
-    global _feedback_state
-
     decay = max(0.0, min(0.95, float(decay)))
+
+    key = f"feedback_{seed}"
+    state = _get_state(key, lambda: {"prev_frame": None})
 
     # Reset at frame 0
     if frame_index == 0:
-        _feedback_state = {"prev_frame": None}
+        state["prev_frame"] = None
 
-    prev = _feedback_state["prev_frame"]
+    prev = state["prev_frame"]
 
     if prev is None or prev.shape != frame.shape:
         # No previous frame — pass through
-        _feedback_state["prev_frame"] = frame.copy()
+        state["prev_frame"] = frame.copy()
+        _cleanup_if_done(key, frame_index, total_frames)
         return frame.copy()
 
     # Blend: current * (1 - decay) + previous * decay
@@ -173,7 +193,8 @@ def feedback(
         0, 255
     ).astype(np.uint8)
 
-    _feedback_state["prev_frame"] = result.copy()
+    state["prev_frame"] = result.copy()
+    _cleanup_if_done(key, frame_index, total_frames)
     return result
 
 
@@ -183,6 +204,7 @@ def tape_stop(
     ramp_frames: int = 15,
     frame_index: int = 0,
     total_frames: int = 1,
+    seed: int = 42,
 ) -> np.ndarray:
     """Tape stop: freeze and darken like a tape machine powering down.
 
@@ -195,30 +217,35 @@ def tape_stop(
         ramp_frames: How many frames the fade-to-black takes.
         frame_index: Current frame number.
         total_frames: Total frame count.
+        seed: Random seed for state isolation.
 
     Returns:
         Frame — normal before trigger, frozen+darkening after.
     """
-    global _tapestop_state
-
     trigger = max(0.0, min(1.0, float(trigger)))
     ramp_frames = max(1, int(ramp_frames))
     trigger_frame = int(trigger * max(1, total_frames - 1))
 
+    key = f"tapestop_{seed}"
+    state = _get_state(key, lambda: {"frozen_frame": None, "trigger_frame": trigger_frame})
+
     # Reset at frame 0
     if frame_index == 0:
-        _tapestop_state = {"frozen_frame": None, "trigger_frame": trigger_frame}
+        state["frozen_frame"] = None
+        state["trigger_frame"] = trigger_frame
 
     # Before trigger — pass through
     if frame_index < trigger_frame:
+        _cleanup_if_done(key, frame_index, total_frames)
         return frame.copy()
 
     # At trigger — capture the freeze frame
-    if _tapestop_state["frozen_frame"] is None or frame_index == trigger_frame:
-        _tapestop_state["frozen_frame"] = frame.copy()
+    if state["frozen_frame"] is None or frame_index == trigger_frame:
+        state["frozen_frame"] = frame.copy()
 
-    frozen = _tapestop_state["frozen_frame"]
+    frozen = state["frozen_frame"]
     if frozen.shape != frame.shape:
+        _cleanup_if_done(key, frame_index, total_frames)
         return frame.copy()
 
     # After trigger — frozen frame with progressive darkening
@@ -226,6 +253,7 @@ def tape_stop(
     brightness = max(0.0, 1.0 - (frames_since_trigger / ramp_frames))
 
     result = np.clip(frozen.astype(np.float32) * brightness, 0, 255).astype(np.uint8)
+    _cleanup_if_done(key, frame_index, total_frames)
     return result
 
 
@@ -270,6 +298,7 @@ def delay(
     decay: float = 0.4,
     frame_index: int = 0,
     total_frames: int = 1,
+    seed: int = 42,
 ) -> np.ndarray:
     """Ghost frames overlaid with decay — video echo/delay effect.
 
@@ -282,20 +311,22 @@ def delay(
         decay: Opacity of the delayed frame (0.0-0.9).
         frame_index: Current frame number.
         total_frames: Total frame count.
+        seed: Random seed for state isolation.
 
     Returns:
         Frame blended with a frame from N frames ago.
     """
-    global _delay_state
-
     delay_frames = max(1, min(60, int(delay_frames)))
     decay = max(0.0, min(0.9, float(decay)))
 
+    key = f"delay_{seed}"
+    state = _get_state(key, lambda: {"buffer": []})
+
     # Reset at frame 0
     if frame_index == 0:
-        _delay_state = {"buffer": []}
+        state["buffer"] = []
 
-    buf = _delay_state["buffer"]
+    buf = state["buffer"]
 
     # Store current frame in buffer
     buf.append(frame.copy())
@@ -307,12 +338,14 @@ def delay(
 
     # If we don't have enough history yet, pass through
     if len(buf) <= delay_frames:
+        _cleanup_if_done(key, frame_index, total_frames)
         return frame.copy()
 
     # Get the delayed frame
     delayed = buf[-(delay_frames + 1)]
 
     if delayed.shape != frame.shape:
+        _cleanup_if_done(key, frame_index, total_frames)
         return frame.copy()
 
     # Blend: current * (1 - decay) + delayed * decay
@@ -320,6 +353,7 @@ def delay(
         frame.astype(np.float32) * (1.0 - decay) + delayed.astype(np.float32) * decay,
         0, 255
     ).astype(np.uint8)
+    _cleanup_if_done(key, frame_index, total_frames)
     return result
 
 
@@ -328,6 +362,7 @@ def decimator(
     factor: int = 3,
     frame_index: int = 0,
     total_frames: int = 1,
+    seed: int = 42,
 ) -> np.ndarray:
     """Reduce effective framerate by holding every Nth frame.
 
@@ -339,28 +374,33 @@ def decimator(
         factor: Hold every Nth frame (2 = half framerate, 4 = quarter).
         frame_index: Current frame number.
         total_frames: Total frame count.
+        seed: Random seed for state isolation.
 
     Returns:
         Current frame if on a sample point, otherwise the last sampled frame.
     """
-    global _decimator_state
-
     factor = max(1, min(30, int(factor)))
+
+    key = f"decimator_{seed}"
+    state = _get_state(key, lambda: {"held_frame": None})
 
     # Reset at frame 0
     if frame_index == 0:
-        _decimator_state = {"held_frame": None}
+        state["held_frame"] = None
 
     # On a sample point: capture and return
     if frame_index % factor == 0:
-        _decimator_state["held_frame"] = frame.copy()
+        state["held_frame"] = frame.copy()
+        _cleanup_if_done(key, frame_index, total_frames)
         return frame.copy()
 
     # Between sample points: return held frame
-    held = _decimator_state.get("held_frame")
+    held = state.get("held_frame")
     if held is not None and held.shape == frame.shape:
+        _cleanup_if_done(key, frame_index, total_frames)
         return held.copy()
 
+    _cleanup_if_done(key, frame_index, total_frames)
     return frame.copy()
 
 
@@ -388,29 +428,34 @@ def sample_and_hold(
     Returns:
         Current frame or a held copy.
     """
-    global _samplehold_state
-
     hold_min = max(1, min(60, int(hold_min)))
     hold_max = max(hold_min, min(60, int(hold_max)))
 
+    key = f"samplehold_{seed}"
+    state = _get_state(key, lambda: {"held_frame": None, "hold_until": -1})
+
     # Reset at frame 0
     if frame_index == 0:
-        _samplehold_state = {"held_frame": None, "hold_until": -1}
+        state["held_frame"] = None
+        state["hold_until"] = -1
 
     # If we're in a hold period, return the held frame
-    if frame_index <= _samplehold_state["hold_until"] and _samplehold_state["held_frame"] is not None:
-        held = _samplehold_state["held_frame"]
+    if frame_index <= state["hold_until"] and state["held_frame"] is not None:
+        held = state["held_frame"]
         if held.shape != frame.shape:
-            _samplehold_state["held_frame"] = None
+            state["held_frame"] = None
+            _cleanup_if_done(key, frame_index, total_frames)
             return frame.copy()
+        _cleanup_if_done(key, frame_index, total_frames)
         return held.copy()
 
     # Hold expired or first frame — capture new sample
     rng = np.random.RandomState(seed + frame_index)
     hold_duration = rng.randint(hold_min, hold_max + 1)
-    _samplehold_state["held_frame"] = frame.copy()
-    _samplehold_state["hold_until"] = frame_index + hold_duration - 1
+    state["held_frame"] = frame.copy()
+    state["hold_until"] = frame_index + hold_duration - 1
 
+    _cleanup_if_done(key, frame_index, total_frames)
     return frame.copy()
 
 
@@ -451,8 +496,6 @@ def granulator(
     Returns:
         Frame (H, W, 3) uint8 — a grain selected from the buffer.
     """
-    global _granulator_state
-
     grain_size = max(1, min(60, int(grain_size)))
     spray = max(0.0, min(1.0, float(spray)))
     density = max(1, min(4, int(density)))
@@ -460,11 +503,15 @@ def granulator(
     position = max(0.0, min(1.0, float(position)))
     reverse_prob = max(0.0, min(1.0, float(reverse_prob)))
 
+    key = f"granulator_{seed}"
+    state = _get_state(key, lambda: {"buffer": [], "grain_pos": position})
+
     # Reset at frame 0
     if frame_index == 0:
-        _granulator_state = {"buffer": [], "grain_pos": position}
+        state["buffer"] = []
+        state["grain_pos"] = position
 
-    buf = _granulator_state["buffer"]
+    buf = state["buffer"]
 
     # Always buffer the incoming frame
     buf.append(frame.copy())
@@ -476,16 +523,17 @@ def granulator(
 
     # Need at least a few frames before granulating
     if len(buf) < grain_size + 1:
+        _cleanup_if_done(key, frame_index, total_frames)
         return frame.copy()
 
     rng = np.random.RandomState(seed + frame_index)
 
     # Advance grain position based on scan speed
-    _granulator_state["grain_pos"] += scan_speed / max(1, total_frames)
-    if _granulator_state["grain_pos"] > 1.0:
-        _granulator_state["grain_pos"] -= 1.0
+    state["grain_pos"] += scan_speed / max(1, total_frames)
+    if state["grain_pos"] > 1.0:
+        state["grain_pos"] -= 1.0
 
-    current_pos = _granulator_state["grain_pos"]
+    current_pos = state["grain_pos"]
 
     # Select grain(s)
     result = np.zeros(frame.shape, dtype=np.float32)
@@ -515,6 +563,7 @@ def granulator(
 
     # Average overlapping grains
     result = result / density
+    _cleanup_if_done(key, frame_index, total_frames)
     return np.clip(result, 0, 255).astype(np.uint8)
 
 
@@ -556,8 +605,6 @@ def beat_repeat(
     Returns:
         Frame (H, W, 3) uint8 — original or repeated from buffer.
     """
-    global _beatrepeat_state
-
     interval = max(1, min(120, int(interval)))
     offset = max(0, min(60, int(offset)))
     gate = max(0, min(120, int(gate)))
@@ -567,17 +614,22 @@ def beat_repeat(
     decay = max(0.0, min(1.0, float(decay)))
     pitch_decay = max(0.0, min(1.0, float(pitch_decay)))
 
+    key = f"beatrepeat_{seed}"
+    state = _get_state(key, lambda: {
+        "buffer": [],
+        "repeating": False,
+        "repeat_until": -1,
+        "repeat_start": -1,
+        "grid_frames": grid,
+    })
+
     # Reset at frame 0
     if frame_index == 0:
-        _beatrepeat_state = {
-            "buffer": [],
-            "repeating": False,
-            "repeat_until": -1,
-            "repeat_start": -1,
-            "grid_frames": grid,
-        }
-
-    state = _beatrepeat_state
+        state["buffer"] = []
+        state["repeating"] = False
+        state["repeat_until"] = -1
+        state["repeat_start"] = -1
+        state["grid_frames"] = grid
 
     # Always buffer recent frames (keep enough for the grid)
     state["buffer"].append(frame.copy())
@@ -622,7 +674,9 @@ def beat_repeat(
             ).astype(np.uint8)
 
         if repeated.shape == frame.shape:
+            _cleanup_if_done(key, frame_index, total_frames)
             return repeated
+        _cleanup_if_done(key, frame_index, total_frames)
         return frame.copy()
     else:
         state["repeating"] = False
@@ -646,8 +700,10 @@ def beat_repeat(
             state["grid_frames"] = effective_grid
 
             # Return current frame (first frame of the repeat)
+            _cleanup_if_done(key, frame_index, total_frames)
             return frame.copy()
 
+    _cleanup_if_done(key, frame_index, total_frames)
     return frame.copy()
 
 

@@ -141,7 +141,11 @@ let deviceIdCounter = 0;
 let previewDebounce = null;
 let selectedLayerId = null;
 let mixLevel = 1.0;              // Wet/dry mix: 0.0 = original, 1.0 = full effect
-let appMode = 'quick';           // 'quick' | 'timeline' | 'perform'
+let appMode = 'timeline';        // 'quick' | 'timeline' | 'perform'
+
+// Feature flags
+const FEATURE_QUICK_MODE = false; // Quick mode flagged off — Timeline is default. Code preserved.
+let performToggleActive = false;  // Whether the Perform toggle within Timeline mode is active
 
 // Spatial mask drawing state
 let maskDrawing = false;
@@ -254,8 +258,8 @@ async function init() {
     // Initialize timeline editor
     window.timelineEditor = new TimelineEditor('timeline-canvas');
 
-    // Start in quick mode (hides timeline)
-    setMode('quick');
+    // Start in timeline mode (default — Quick mode flagged off)
+    setMode('timeline');
 
     // Dismiss boot screen
     const boot = document.getElementById('boot-screen');
@@ -453,7 +457,9 @@ async function uploadVideo(file) {
         return;
     }
 
-    document.getElementById('file-name').textContent = file.name;
+    const fileNameEl = document.getElementById('file-name');
+    fileNameEl.textContent = file.name;
+    fileNameEl.classList.add('uploading');
     document.getElementById('empty-state').style.display = 'none';
 
     const form = new FormData();
@@ -465,9 +471,11 @@ async function uploadVideo(file) {
             const errBody = await res.text();
             showErrorToast(`Upload failed: ${res.status} ${res.statusText}`);
             console.error('Upload error response:', errBody);
+            fileNameEl.classList.remove('uploading');
             return;
         }
         const data = await res.json();
+        fileNameEl.classList.remove('uploading');
 
         videoLoaded = true;
         totalFrames = data.info.total_frames || 100;
@@ -476,16 +484,16 @@ async function uploadVideo(file) {
         const slider = document.getElementById('frame-slider');
         slider.max = totalFrames - 1;
         slider.value = 0;
-        document.getElementById('frame-scrubber').style.display = appMode === 'quick' ? 'block' : 'none';
+        document.getElementById('frame-scrubber').style.display = (appMode === 'quick' && FEATURE_QUICK_MODE) ? 'block' : 'none';
 
         showPreview(data.preview);
         updateFrameInfo(data.info);
 
-        // Suggest perform mode (toast with action)
-        if (appMode === 'quick') {
-            showToast('Video loaded. Try Perform mode?', 'info', {
-                label: 'Switch to Perform',
-                fn: "function(){setMode('perform')}",
+        // Suggest perform toggle (toast with action)
+        if (appMode === 'timeline' && !performToggleActive) {
+            showToast('Video loaded. Try the Perform mixer?', 'info', {
+                label: 'Open Mixer',
+                fn: "function(){togglePerformPanel()}",
             }, 5000);
         }
 
@@ -502,6 +510,8 @@ async function uploadVideo(file) {
         }
     } catch (err) {
         console.error('Upload failed:', err);
+        showErrorToast(`Upload error: ${err.message}`);
+        fileNameEl.classList.remove('uploading');
     }
 }
 
@@ -635,7 +645,8 @@ function setupKeyboard() {
         }
 
         // --- Perform mode shortcuts (keys 1-4, R, Shift+P) ---
-        if (appMode === 'perform' && videoLoaded) {
+        // Active in full Perform mode OR when Perform toggle is on in Timeline mode
+        if ((appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) && videoLoaded && perfLayers.length > 0) {
             // Keys 1-4: trigger layers (blocked during review)
             if (e.key >= '1' && e.key <= '4') {
                 e.preventDefault();
@@ -799,7 +810,7 @@ function setupKeyboard() {
             if (originalPreviewSrc) img.src = originalPreviewSrc;
         }
         // Perform mode: key release for gate mode (blocked during review)
-        if (appMode === 'perform' && !perfReviewing && e.key >= '1' && e.key <= '4') {
+        if ((appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) && !perfReviewing && e.key >= '1' && e.key <= '4') {
             const layerId = parseInt(e.key) - 1;
             perfTriggerLayer(layerId, 'keyup');
         }
@@ -939,6 +950,25 @@ function renderChain() {
 
     // Setup device reordering
     setupDeviceReorder();
+
+    // Mark overflowing param panels
+    document.querySelectorAll('.device-params').forEach(panel => {
+        if (panel.scrollHeight > panel.clientHeight) {
+            const total = panel.querySelectorAll('.param-control, .dropdown-container, .toggle-container').length;
+            const visible = Array.from(panel.children).filter(c => {
+                const rect = c.getBoundingClientRect();
+                const parentRect = panel.getBoundingClientRect();
+                return rect.bottom <= parentRect.bottom;
+            }).length;
+            const hidden = total - visible;
+            if (hidden > 0) {
+                panel.classList.add('has-overflow');
+                panel.dataset.overflowHint = `+${hidden} more`;
+            }
+        } else {
+            panel.classList.remove('has-overflow');
+        }
+    });
 }
 
 // ============ LAYERS PANEL (Photoshop-style) ============
@@ -947,7 +977,7 @@ function renderLayers() {
     const list = document.getElementById('layers-list');
 
     // PERFORM MODE: show perform layers instead of chain
-    if (appMode === 'perform' && perfLayers.length > 0) {
+    if ((appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) && perfLayers.length > 0) {
         list.innerHTML = perfLayers.map((l, i) => {
             const state = perfLayerStates[l.layer_id] || {};
             const isActive = state.active || l.trigger_mode === 'always_on';
@@ -1375,11 +1405,12 @@ function schedulePreview() {
 async function previewChain() {
     if (!videoLoaded) return;
     // Perform mode uses its own preview loop — skip
-    if (appMode === 'perform' && perfPlaying) return;
+    if ((appMode === 'perform' || performToggleActive) && perfPlaying) return;
 
     try {
         let res;
-        if (appMode === 'perform' && perfLayers.length > 0) {
+        const usePerformPreview = (appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) && perfLayers.length > 0;
+        if (usePerformPreview) {
             // Perform mode: send trigger events for ADSR processing
             const events = perfTriggerQueue.splice(0);
             const body = { frame_number: currentFrame };
@@ -1404,7 +1435,7 @@ async function previewChain() {
                 body: JSON.stringify({ frame_number: currentFrame, regions, mix: mixLevel }),
             });
         } else {
-            // Quick mode: existing flat chain behavior
+            // Flat chain behavior (Quick mode legacy / fallback)
             const activeEffects = chain
                 .filter(d => !d.bypassed)
                 .map(d => ({ name: d.name, params: d.params }));
@@ -1418,7 +1449,7 @@ async function previewChain() {
         showPreview(data.preview);
         updateMaskOverlay();
         // Sync perform mode UI with server envelope states
-        if (data.layer_states && appMode === 'perform') {
+        if (data.layer_states && (appMode === 'perform' || performToggleActive)) {
             perfSyncWithServer(data.layer_states);
         }
     } catch (err) {
@@ -1748,9 +1779,14 @@ async function startExport() {
 let originalPreviewSrc = null;
 let isShowingOriginal = false;
 
-// ============ MODE SWITCHING (Quick / Timeline) ============
+// ============ MODE SWITCHING (Timeline / Perform) ============
 
 function setMode(mode) {
+    // Feature flag: redirect Quick mode requests to Timeline
+    if (mode === 'quick' && !FEATURE_QUICK_MODE) {
+        mode = 'timeline';
+    }
+
     // Block mode switch during perform playback (Norman: prevent mode errors)
     if (perfPlaying && appMode === 'perform' && mode !== 'perform') {
         showToast('Stop playback first (Space)', 'info');
@@ -1765,6 +1801,11 @@ function setMode(mode) {
     // Stop perform playback if leaving perform mode
     if (appMode === 'perform' && mode !== 'perform') {
         perfStop();
+    }
+
+    // When leaving timeline mode, deactivate perform toggle
+    if (appMode === 'timeline' && mode !== 'timeline') {
+        setPerformToggle(false);
     }
 
     appMode = mode;
@@ -1807,19 +1848,48 @@ function setMode(mode) {
     if (mode === 'perform') {
         if (!videoLoaded) {
             showToast('Load a video first', 'info');
-            appMode = 'quick';
+            appMode = 'timeline';
             appEl.classList.remove('perform-mode');
-            appEl.classList.add('quick-mode');
             document.querySelectorAll('.mode-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.mode === 'quick');
+                btn.classList.toggle('active', btn.dataset.mode === 'timeline');
             });
-            if (badge) badge.textContent = 'QUICK';
+            if (badge) badge.textContent = 'TIMELINE';
             return;
         }
         perfInitLayers();
     }
 
     schedulePreview();
+}
+
+// ============ PERFORM TOGGLE (within Timeline mode) ============
+
+function setPerformToggle(active) {
+    performToggleActive = active;
+    const appEl = document.getElementById('app');
+    const toggleBtn = document.getElementById('perform-toggle-btn');
+
+    if (active) {
+        appEl.classList.add('timeline-perform');
+        if (toggleBtn) toggleBtn.classList.add('active');
+        // Initialize perform layers if not already loaded
+        if (videoLoaded && perfLayers.length === 0) {
+            perfInitLayers();
+        } else if (perfLayers.length > 0) {
+            renderMixer();
+        }
+    } else {
+        appEl.classList.remove('timeline-perform');
+        if (toggleBtn) toggleBtn.classList.remove('active');
+    }
+}
+
+function togglePerformPanel() {
+    if (!videoLoaded) {
+        showToast('Load a video first', 'info');
+        return;
+    }
+    setPerformToggle(!performToggleActive);
 }
 
 // ============ TIMELINE ↔ APP SYNC ============
@@ -1888,8 +1958,8 @@ function getProjectState() {
         currentFrame,
         totalFrames,
     };
-    // Include perform mode data
-    if (appMode === 'perform' && perfLayers.length > 0) {
+    // Include perform mode data (full perform mode or timeline+perform toggle)
+    if ((appMode === 'perform' || performToggleActive) && perfLayers.length > 0) {
         state.perfLayers = perfLayers;
         state.perfLayerStates = perfLayerStates;
         state.perfSession = perfSession;
@@ -2238,7 +2308,7 @@ async function _doSavePreset(name, desc) {
 
 // --- Init ---
 async function perfInitLayers() {
-    // If Quick mode had effects, migrate them to L1 (handoff)
+    // If chain had effects, migrate them to L2 (handoff from Timeline/Quick)
     let quickChain = null;
     if (chain.length > 0) {
         quickChain = chain.filter(d => !d.bypassed).map(d => ({
@@ -2257,10 +2327,10 @@ async function perfInitLayers() {
         if (data.status === 'ok') {
             perfLayers = data.layers;
 
-            // Handoff: Quick mode chain -> L2 effects (L1 is always-on base)
+            // Handoff: existing chain -> L2 effects (L1 is always-on base)
             if (quickChain && quickChain.length > 0 && perfLayers.length > 1) {
                 perfLayers[1].effects = quickChain;
-                perfLayers[1].name = 'Quick Chain';
+                perfLayers[1].name = 'Chain Import';
                 // Sync migrated effects to server LayerStack
                 fetch(`${API}/api/perform/update_layer`, {
                     method: 'POST',
@@ -3287,7 +3357,7 @@ function perfUpdateEventDensityPosition() {
 
 // --- beforeunload: warn about unsaved performance data ---
 window.addEventListener('beforeunload', e => {
-    if (appMode === 'perform' && perfEventCount > 0) {
+    if ((appMode === 'perform' || performToggleActive) && perfEventCount > 0) {
         e.preventDefault();
         e.returnValue = 'You have unsaved performance data. Leave?';
     }

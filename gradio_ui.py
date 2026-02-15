@@ -118,7 +118,9 @@ def process_full_video(video_file, effect_name, param1_val, param2_val, param3_v
 
             for i, frame_path in enumerate(frames):
                 frame = load_frame(str(frame_path))
-                processed = apply_chain(frame, effects)
+                processed = apply_chain(frame, effects,
+                                       frame_index=i,
+                                       total_frames=total)
                 save_frame(processed, str(Path(tmp_processed) / frame_path.name))
                 progress((i + 1) / total, desc=f"Processing frame {i + 1}/{total}")
 

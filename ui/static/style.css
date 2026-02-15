@@ -148,6 +148,19 @@ body {
 #upload-zone label:hover { background: var(--bg-hover); }
 #file-input { display: none; }
 #file-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#file-name.uploading { color: var(--accent); }
+#file-name.uploading::after {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-left: 6px;
+    border: 2px solid var(--text-dim);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+}
 
 /* --- GRIP HANDLE (6 dots) --- */
 .grip {
@@ -951,7 +964,32 @@ h3 .count {
     flex-wrap: wrap;
     gap: 8px;
     justify-content: center;
+    max-height: 120px;
+    overflow-y: hidden;
+    position: relative;
 }
+.device-params:hover {
+    overflow-y: auto;
+}
+.device-params:hover::-webkit-scrollbar { width: 3px; }
+.device-params:hover::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 2px; }
+.device-params.has-overflow::after {
+    content: attr(data-overflow-hint);
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 28px;
+    background: linear-gradient(transparent, var(--bg-mid));
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    font-size: 9px;
+    color: var(--text-dim);
+    padding-bottom: 3px;
+    pointer-events: none;
+}
+.device-params:hover.has-overflow::after { display: none; }
 
 /* --- KNOB (Moog-inspired) --- */
 /* Control types: knob, dropdown, toggle */
@@ -1331,6 +1369,45 @@ h3 .count {
     cursor: crosshair;
 }
 
+/* Perform toggle button within Timeline header */
+.perform-toggle-btn {
+    background: var(--bg-light) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text-dim) !important;
+    padding: 2px 10px !important;
+    font-size: 10px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: all 0.15s ease;
+}
+
+.perform-toggle-btn:hover {
+    color: #ff6b35 !important;
+    border-color: #ff6b3566 !important;
+}
+
+.perform-toggle-btn.active {
+    background: #ff6b35 !important;
+    color: #000 !important;
+    border-color: #ff6b35 !important;
+    font-weight: 600;
+}
+
+.timeline-controls-sep {
+    width: 1px;
+    height: 16px;
+    background: var(--border);
+    margin: 0 4px;
+}
+
+/* Timeline + Perform toggle: show mixer/transport within timeline mode */
+#app.timeline-perform {
+    grid-template-rows: 44px 1fr 180px auto auto 160px;
+}
+
+#app.timeline-perform #perform-transport { display: flex; }
+#app.timeline-perform #perform-panel { display: block; }
+
 /* Mode toggle in topbar */
 .mode-toggle {
     display: flex;
@@ -1407,6 +1484,7 @@ h3 .count {
 }
 
 .perform-mode #perf-hud { display: flex; }
+.timeline-perform #perf-hud { display: flex; }
 
 #perf-hud-rec {
     color: var(--accent);

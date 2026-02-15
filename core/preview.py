@@ -131,9 +131,12 @@ def preview_frame(
 
     # Extract single frame
     frame = extract_single_frame(str(source_video), frame_number)
+    info = probe_video(str(source_video))
 
     # Apply effects
-    processed = apply_chain(frame, effects)
+    processed = apply_chain(frame, effects,
+                            frame_index=frame_number,
+                            total_frames=info.get("total_frames", 1))
 
     # Save preview
     preview_path = project_dir / "renders" / "lo" / f"{recipe_id}-preview.png"
@@ -174,7 +177,9 @@ def render_sample_frames(
     paths = []
     for fn in frame_nums:
         frame = extract_single_frame(str(source_video), fn)
-        processed = apply_chain(frame, effects)
+        processed = apply_chain(frame, effects,
+                                frame_index=fn,
+                                total_frames=total_frames)
         out = project_dir / "renders" / "lo" / f"{recipe_id}-sample-{fn:06d}.png"
         save_frame(processed, str(out))
         paths.append(out)
