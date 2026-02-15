@@ -129,6 +129,11 @@
         </div>
         <img id="preview-img" style="display:none">
         <div id="mode-badge">QUICK</div>
+        <div id="perf-hud" style="display:none">
+            <span id="perf-hud-rec"></span>
+            <span id="perf-hud-time"></span>
+            <span id="perf-hud-events"></span>
+        </div>
         <div id="frame-info"></div>
         <div id="frame-scrubber">
             <input type="range" id="frame-slider" min="0" max="100" value="0">
@@ -174,6 +179,7 @@
             <button id="perf-play-btn" onclick="perfTogglePlay()" title="Space">&#9654; Play</button>
             <button id="perf-rec-btn" onclick="perfToggleRecord()" title="R">&#9679; Rec</button>
             <button onclick="perfPanic()" title="Shift+P">&#8634; Panic</button>
+            <button id="perf-loop-btn" onclick="perfToggleLoop()" title="Loop">⟲ Loop</button>
         </div>
         <div class="transport-center">
             <span id="perf-time">0:00:00</span> / <span id="perf-duration">--:--</span>
@@ -361,33 +367,33 @@
         </div>
         <div class="modal-body shortcut-body">
             <div class="shortcut-col">
-                <h3>Chain Editing</h3>
+                <h3 data-shortcut-mode="common">Chain Editing</h3>
                 <div class="sc-row"><kbd>Cmd+D</kbd> Duplicate effect</div>
                 <div class="sc-row"><kbd>Del</kbd> Remove effect</div>
                 <div class="sc-row"><kbd>[</kbd> <kbd>]</kbd> Move up/down</div>
                 <div class="sc-row"><kbd>B</kbd> Bypass toggle</div>
                 <div class="sc-row"><kbd>R</kbd> Reset to defaults</div>
                 <div class="sc-row"><kbd>&uarr;</kbd> <kbd>&darr;</kbd> Select prev/next</div>
-                <h3>Parameters</h3>
+                <h3 data-shortcut-mode="common">Parameters</h3>
                 <div class="sc-row"><kbd>Drag</kbd> Adjust knob</div>
                 <div class="sc-row"><kbd>Shift+Drag</kbd> Fine adjust</div>
                 <div class="sc-row"><kbd>Dbl-click</kbd> Reset to default</div>
             </div>
             <div class="shortcut-col">
-                <h3>Preview</h3>
+                <h3 data-shortcut-mode="common">Preview</h3>
                 <div class="sc-row"><kbd>Space</kbd> A/B compare</div>
                 <div class="sc-row"><kbd>P</kbd> Refresh preview</div>
                 <div class="sc-row"><kbd>&larr;</kbd> <kbd>&rarr;</kbd> Prev/next frame</div>
                 <div class="sc-row"><kbd>Shift+&larr;</kbd> <kbd>Shift+&rarr;</kbd> Jump 10</div>
-                <h3>File</h3>
+                <h3 data-shortcut-mode="common">File</h3>
                 <div class="sc-row"><kbd>Cmd+O</kbd> Open file</div>
                 <div class="sc-row"><kbd>Cmd+E</kbd> Export</div>
                 <div class="sc-row"><kbd>Cmd+S</kbd> Save preset</div>
-                <h3>UI</h3>
+                <h3 data-shortcut-mode="common">UI</h3>
                 <div class="sc-row"><kbd>Tab</kbd> Toggle sidebar</div>
                 <div class="sc-row"><kbd>Esc</kbd> Close modal</div>
                 <div class="sc-row"><kbd>?</kbd> This reference</div>
-                <h3>Timeline</h3>
+                <h3 data-shortcut-mode="timeline">Timeline</h3>
                 <div class="sc-row"><kbd>I</kbd> Set in-point</div>
                 <div class="sc-row"><kbd>O</kbd> Set out-point</div>
                 <div class="sc-row"><kbd>Cmd+R</kbd> Create region</div>
@@ -398,7 +404,7 @@
                 <div class="sc-row"><kbd>Cmd+0</kbd> Fit to window</div>
                 <div class="sc-row"><kbd>M</kbd> Mute track</div>
                 <div class="sc-row"><kbd>S</kbd> Solo track</div>
-                <h3>Perform</h3>
+                <h3 data-shortcut-mode="perform">Perform</h3>
                 <div class="sc-row"><kbd>1-4</kbd> Trigger layers</div>
                 <div class="sc-row"><kbd>Space</kbd> Play/Pause</div>
                 <div class="sc-row"><kbd>R</kbd> Toggle recording</div>

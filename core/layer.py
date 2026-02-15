@@ -59,6 +59,7 @@ class Layer:
     z_order: int = 0
     trigger_mode: str = "toggle"  # "toggle" | "gate" | "adsr" | "one_shot" | "always_on"
     adsr_preset: str = "sustain"
+    blend_mode: str = "normal"  # "normal"|"multiply"|"screen"|"overlay"|"add"|"difference"|"soft_light"
     choke_group: int | None = None
     midi_note: int | None = None
     midi_cc_opacity: int | None = None
@@ -164,6 +165,7 @@ class Layer:
             "z_order": self.z_order,
             "trigger_mode": self.trigger_mode,
             "adsr_preset": self.adsr_preset,
+            "blend_mode": self.blend_mode,
             "choke_group": self.choke_group,
             "midi_note": self.midi_note,
             "midi_cc_opacity": self.midi_cc_opacity,
@@ -174,11 +176,63 @@ class Layer:
         return cls(**{k: v for k, v in d.items() if not k.startswith("_")})
 
 
+# ─── Blend Mode Functions (Photoshop-compatible) ───
+# All operate on float32 arrays normalized to 0-255.
+
+BLEND_MODES = [
+    "normal", "multiply", "screen", "overlay",
+    "add", "difference", "soft_light",
+]
+
+
+def _blend_multiply(bottom, top):
+    return bottom * top / 255.0
+
+
+def _blend_screen(bottom, top):
+    return 255.0 - (255.0 - bottom) * (255.0 - top) / 255.0
+
+
+def _blend_overlay(bottom, top):
+    """Overlay = Multiply where bottom is dark, Screen where bottom is light."""
+    mask = bottom < 128.0
+    result = np.where(
+        mask,
+        2.0 * bottom * top / 255.0,
+        255.0 - 2.0 * (255.0 - bottom) * (255.0 - top) / 255.0,
+    )
+    return result
+
+
+def _blend_add(bottom, top):
+    return np.minimum(255.0, bottom + top)
+
+
+def _blend_difference(bottom, top):
+    return np.abs(bottom - top)
+
+
+def _blend_soft_light(bottom, top):
+    """Pegtop soft light formula (continuous, no branch)."""
+    t = top / 255.0
+    return (1.0 - 2.0 * t) * (bottom ** 2 / 255.0) + 2.0 * t * bottom
+
+
+_BLEND_FNS = {
+    "multiply": _blend_multiply,
+    "screen": _blend_screen,
+    "overlay": _blend_overlay,
+    "add": _blend_add,
+    "difference": _blend_difference,
+    "soft_light": _blend_soft_light,
+}
+
+
 class LayerStack:
     """Manages multiple layers and composites them together.
 
-    Layers are sorted by z_order (lowest = bottom) and alpha-blended
-    from bottom to top using Normal blend mode.
+    Layers are sorted by z_order (lowest = bottom) and blended
+    from bottom to top. Each layer can use a different blend mode.
     """
 
     def __init__(self, layers=None):
@@ -226,7 +280,7 @@ class LayerStack:
             layer.advance()
 
     def composite(self, frame_dict):
-        """Blend all visible layers from bottom to top.
+        """Blend all visible layers from bottom to top with blend modes.
 
         Args:
             frame_dict: {layer_id: numpy_frame} — pre-processed frames
@@ -252,7 +306,6 @@ class LayerStack:
                 if alpha >= 1.0:
                     result = frame.copy()
                 else:
-                    # Blend with black background
                     result = (frame.astype(np.float32) * alpha).astype(np.uint8)
                 continue
 
@@ -263,17 +316,34 @@ class LayerStack:
                 img = Image.fromarray(frame)
                 frame = np.array(img.resize((w, h), Image.LANCZOS))
 
-            # Alpha blend: result = bottom * (1-a) + top * a
-            if alpha >= 1.0:
-                result = frame.copy()
-            elif alpha > 0:
+            if alpha <= 0:
+                continue
+
+            # Get blend function
+            blend_fn = _BLEND_FNS.get(layer.blend_mode)
+
+            if blend_fn is None:
+                # Normal blend: result = bottom * (1-a) + top * a
+                if alpha >= 1.0:
+                    result = frame.copy()
+                else:
+                    r = result.astype(np.float32)
+                    f = frame.astype(np.float32)
+                    result = np.clip(r * (1.0 - alpha) + f * alpha, 0, 255).astype(np.uint8)
+            else:
+                # Non-normal blend mode:
+                # 1. Compute blended = blend_fn(bottom, top)
+                # 2. Mix with alpha: result = bottom * (1-a) + blended * a
                 r = result.astype(np.float32)
                 f = frame.astype(np.float32)
-                result = np.clip(r * (1.0 - alpha) + f * alpha, 0, 255).astype(np.uint8)
+                blended = blend_fn(r, f)
+                if alpha >= 1.0:
+                    result = np.clip(blended, 0, 255).astype(np.uint8)
+                else:
+                    result = np.clip(r * (1.0 - alpha) + blended * alpha, 0, 255).astype(np.uint8)
 
         # If no layers visible, return black frame
         if result is None:
-            # Try to get dimensions from any available frame
             for frame in frame_dict.values():
                 if frame is not None:
                     return np.zeros_like(frame)

@@ -20,6 +20,8 @@ from effects.color import (
     tape_saturation,
     cyanotype,
     infrared,
+    chroma_key,
+    luma_key,
 )
 from effects.distortion import (
     wave_distort,
@@ -220,6 +222,18 @@ EFFECTS = {
         "category": "color",
         "params": {"vegetation_glow": 1.0},
         "description": "Infrared film simulation (vegetation glows, sky darkens)",
+    },
+    "chroma_key": {
+        "fn": chroma_key,
+        "category": "color",
+        "params": {"hue": 120.0, "tolerance": 30.0, "softness": 10.0, "replace_color": "black"},
+        "description": "Green screen — key out a color range for transparency",
+    },
+    "luma_key": {
+        "fn": luma_key,
+        "category": "color",
+        "params": {"threshold": 0.3, "mode": "dark", "softness": 10.0},
+        "description": "Luminance key — key out dark or bright areas for transparency",
     },
     "hueshift": {
         "fn": hue_shift,

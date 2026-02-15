@@ -100,6 +100,17 @@ function restartServer() {
 // Shortcut reference
 function showShortcutRef() {
     document.getElementById('shortcut-overlay').style.display = 'flex';
+    // Highlight current mode's shortcuts
+    document.querySelectorAll('[data-shortcut-mode]').forEach(el => {
+        const mode = el.getAttribute('data-shortcut-mode');
+        if (mode === 'common') {
+            el.style.opacity = '1'; // Always visible
+        } else if (mode === appMode) {
+            el.style.opacity = '1'; // Current mode: full visibility
+        } else {
+            el.style.opacity = '0.3'; // Other modes: dimmed
+        }
+    });
 }
 function closeShortcutRef() {
     document.getElementById('shortcut-overlay').style.display = 'none';
@@ -144,11 +155,14 @@ let perfLayers = [];              // Layer configs from server [{layer_id, name,
 let perfLayerStates = {};         // Client-side layer states {layer_id: {active, opacity, muted, soloed}}
 let perfPlaying = false;
 let perfRecording = false;        // Explicit recording (R key)
+let perfReviewing = false;        // Review playback mode
 let perfFrameIndex = 0;
 let perfSession = {type:'performance', lanes:[]};  // PerformanceSession dict (auto-buffer)
 let perfEventCount = 0;
 let perfAnimFrame = null;         // requestAnimationFrame ID
 let perfLastFrameTime = 0;
+let perfTriggerQueue = [];        // Queued trigger events for next server frame
+let perfReviewFrameMap = {};      // Frame->events map for review playback
 const PERF_FPS = 15;             // Preview framerate
 const PERF_MAX_EVENTS = 50000;   // Buffer cap (same as CLI)
 const PERF_LAYER_COLORS = ['#ff4444', '#4488ff', '#44cc44', '#ffcc00'];  // L1-L4
@@ -616,17 +630,21 @@ function setupKeyboard() {
 
         // --- Perform mode shortcuts (keys 1-4, R, Shift+P) ---
         if (appMode === 'perform' && videoLoaded) {
-            // Keys 1-4: trigger layers
+            // Keys 1-4: trigger layers (blocked during review)
             if (e.key >= '1' && e.key <= '4') {
                 e.preventDefault();
-                const layerId = parseInt(e.key) - 1;
-                perfTriggerLayer(layerId, 'keydown');
+                if (!perfReviewing) {
+                    const layerId = parseInt(e.key) - 1;
+                    perfTriggerLayer(layerId, 'keydown');
+                }
                 return;
             }
-            // R: toggle recording
+            // R: toggle recording (blocked during review)
             if (e.key === 'r') {
                 e.preventDefault();
-                perfToggleRecord();
+                if (!perfReviewing) {
+                    perfToggleRecord();
+                }
                 return;
             }
             // Shift+P: panic
@@ -774,8 +792,8 @@ function setupKeyboard() {
             const img = document.getElementById('preview-img');
             if (originalPreviewSrc) img.src = originalPreviewSrc;
         }
-        // Perform mode: key release for gate mode
-        if (appMode === 'perform' && e.key >= '1' && e.key <= '4') {
+        // Perform mode: key release for gate mode (blocked during review)
+        if (appMode === 'perform' && !perfReviewing && e.key >= '1' && e.key <= '4') {
             const layerId = parseInt(e.key) - 1;
             perfTriggerLayer(layerId, 'keyup');
         }
@@ -921,6 +939,34 @@ function renderChain() {
 
 function renderLayers() {
     const list = document.getElementById('layers-list');
+
+    // PERFORM MODE: show perform layers instead of chain
+    if (appMode === 'perform' && perfLayers.length > 0) {
+        list.innerHTML = perfLayers.map((l, i) => {
+            const state = perfLayerStates[l.layer_id] || {};
+            const isActive = state.active || l.trigger_mode === 'always_on';
+            const opacity = Math.round((state.opacity ?? l.opacity) * 100);
+            const color = PERF_LAYER_COLORS[i] || '#888';
+            const modeTag = l.trigger_mode.replace('_', ' ');
+            const eyeIcon = state.muted ? '&#9675;' : '&#9679;';
+            const eyeClass = state.muted ? 'hidden' : '';
+            const activeClass = isActive ? 'selected' : '';
+            const mutedClass = state.muted ? 'bypassed-layer' : '';
+
+            return `
+                <div class="layer-item ${activeClass} ${mutedClass}"
+                     onclick="perfSelectLayerForEdit(${l.layer_id})">
+                    <span class="layer-eye ${eyeClass}"
+                          onclick="event.stopPropagation(); perfToggleMute(${l.layer_id})"
+                          title="${state.muted ? 'Unmute' : 'Mute'}">${eyeIcon}</span>
+                    <span class="layer-color-dot" style="background:${color};width:8px;height:8px;border-radius:50%;flex-shrink:0;"></span>
+                    <span class="layer-name">${l.name}</span>
+                    <span class="layer-index" style="min-width:32px;">${opacity}%</span>
+                    <span class="layer-index">${modeTag}</span>
+                </div>`;
+        }).join('');
+        return;
+    }
 
     // Layers are rendered top-to-bottom (last in chain = top layer, like Photoshop)
     const reversed = [...chain].reverse();
@@ -1307,16 +1353,14 @@ async function previewChain() {
     try {
         let res;
         if (appMode === 'perform' && perfLayers.length > 0) {
-            // Perform mode: composite via layer states
-            const layerStates = perfLayers.map(l => ({
-                layer_id: l.layer_id,
-                active: perfLayerStates[l.layer_id]?.active ?? (l.trigger_mode === 'always_on'),
-                opacity: perfLayerStates[l.layer_id]?.opacity ?? l.opacity,
-            }));
+            // Perform mode: send trigger events for ADSR processing
+            const events = perfTriggerQueue.splice(0);
+            const body = { frame_number: currentFrame };
+            if (events.length > 0) body.trigger_events = events;
             res = await fetch(`${API}/api/perform/frame`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frame_number: currentFrame, layer_states: layerStates }),
+                body: JSON.stringify(body),
             });
         } else if (appMode === 'timeline' && window.timelineEditor) {
             // Timeline mode: send all active regions to server
@@ -1346,6 +1390,10 @@ async function previewChain() {
         const data = await res.json();
         showPreview(data.preview);
         updateMaskOverlay();
+        // Sync perform mode UI with server envelope states
+        if (data.layer_states && appMode === 'perform') {
+            perfSyncWithServer(data.layer_states);
+        }
     } catch (err) {
         console.error('Preview failed:', err);
     }
@@ -2281,7 +2329,13 @@ function renderMixer() {
         const triggerModes = ['toggle', 'gate', 'adsr', 'one_shot', 'always_on'];
 
         html += `
-        <div class="channel-strip ${isActive ? 'active-strip' : ''}" data-layer-id="${l.layer_id}">
+        <div class="channel-strip ${isActive ? 'active-strip' : ''}" data-layer-id="${l.layer_id}"
+             draggable="true"
+             ondragstart="perfDragStart(event, ${l.layer_id})"
+             ondragover="perfDragOver(event)"
+             ondragleave="perfDragLeave(event)"
+             ondrop="perfDrop(event, ${l.layer_id})"
+             ondragend="perfDragEnd(event)">
             <div class="channel-strip-header">
                 <span class="strip-color" style="background:${color}"></span>
                 <span class="strip-key">${i + 1}</span>
@@ -2301,6 +2355,17 @@ function renderMixer() {
                     <option value="sustain" ${l.adsr_preset === 'sustain' ? 'selected' : ''}>sustain</option>
                     <option value="stab" ${l.adsr_preset === 'stab' ? 'selected' : ''}>stab</option>
                     <option value="pad" ${l.adsr_preset === 'pad' ? 'selected' : ''}>pad</option>
+                </select>
+                <select onchange="perfSetBlendMode(${l.layer_id}, this.value)" title="Blend mode">
+                    ${['normal','multiply','screen','overlay','add','difference','soft_light'].map(m =>
+                        `<option value="${m}" ${(l.blend_mode || 'normal') === m ? 'selected' : ''}>${m.replace('_', ' ')}</option>`
+                    ).join('')}
+                </select>
+                <select onchange="perfSetChokeGroup(${l.layer_id}, this.value)" title="Choke group">
+                    <option value="" ${l.choke_group == null ? 'selected' : ''}>No choke</option>
+                    <option value="0" ${l.choke_group === 0 ? 'selected' : ''}>Choke A</option>
+                    <option value="1" ${l.choke_group === 1 ? 'selected' : ''}>Choke B</option>
+                    <option value="2" ${l.choke_group === 2 ? 'selected' : ''}>Choke C</option>
                 </select>
             </div>
             <div class="strip-fader-wrap">
@@ -2356,14 +2421,20 @@ function perfTriggerLayer(layerId, eventType) {
         } else if (mode === 'gate' || mode === 'adsr' || mode === 'one_shot') {
             state.active = true;
         }
-        // Record event
+        // Queue trigger event for server ADSR processing
+        perfTriggerQueue.push({ layer_id: layerId, event: 'on' });
+        // Record event for automation
         perfRecordEvent(layerId, 'active', state.active ? 1.0 : 0.0);
     } else if (eventType === 'keyup') {
         if (mode === 'gate') {
             state.active = false;
             perfRecordEvent(layerId, 'active', 0.0);
         }
-        // Toggle, ADSR, one_shot: no-op on keyup
+        if (mode === 'adsr' || mode === 'gate') {
+            // Queue trigger_off for server ADSR release phase
+            perfTriggerQueue.push({ layer_id: layerId, event: 'off' });
+        }
+        // Toggle, one_shot: no-op on keyup (server handles auto-release)
     }
 
     // Tier 1: INSTANT visual feedback (0ms, client-side only)
@@ -2380,14 +2451,32 @@ function perfUpdateStripVisuals(layerId) {
     if (!strip) return;
     const state = perfLayerStates[layerId];
     const trigger = strip.querySelector('.strip-trigger');
+    const layer = perfLayers.find(l => l.layer_id === layerId);
 
     if (state.active) {
         strip.classList.add('active-strip');
-        if (trigger) { trigger.classList.add('lit'); trigger.textContent = 'ON'; }
+        if (trigger) {
+            trigger.classList.add('lit');
+            if (layer && (layer.trigger_mode === 'toggle' || layer.trigger_mode === 'gate' ||
+                          layer.trigger_mode === 'adsr' || layer.trigger_mode === 'one_shot')) {
+                // SVG icons handle their own visual state via CSS
+            } else {
+                trigger.textContent = 'ON';
+            }
+        }
     } else {
         strip.classList.remove('active-strip');
-        if (trigger) { trigger.classList.remove('lit'); trigger.textContent = 'OFF'; }
+        if (trigger) {
+            trigger.classList.remove('lit');
+            if (layer && (layer.trigger_mode === 'toggle' || layer.trigger_mode === 'gate' ||
+                          layer.trigger_mode === 'adsr' || layer.trigger_mode === 'one_shot')) {
+                // SVG icons handle their own visual state via CSS
+            } else {
+                trigger.textContent = 'OFF';
+            }
+        }
     }
+    renderLayers();
 }
 
 // --- Layer Configuration ---
@@ -2399,13 +2488,54 @@ function perfSetTriggerMode(layerId, mode) {
         if (state) {
             state.active = (mode === 'always_on');
         }
+        // Sync to server LayerStack (resets envelope)
+        fetch(`${API}/api/perform/update_layer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ layer_id: layerId, trigger_mode: mode }),
+        }).catch(() => {});
         renderMixer();
     }
 }
 
 function perfSetAdsrPreset(layerId, preset) {
     const layer = perfLayers.find(l => l.layer_id === layerId);
-    if (layer) layer.adsr_preset = preset;
+    if (layer) {
+        layer.adsr_preset = preset;
+        // Sync to server LayerStack (recreates envelope)
+        fetch(`${API}/api/perform/update_layer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ layer_id: layerId, adsr_preset: preset }),
+        }).catch(() => {});
+    }
+}
+
+function perfSetBlendMode(layerId, mode) {
+    const layer = perfLayers.find(l => l.layer_id === layerId);
+    if (layer) {
+        layer.blend_mode = mode;
+        // Sync to server LayerStack
+        fetch(`${API}/api/perform/update_layer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ layer_id: layerId, blend_mode: mode }),
+        }).catch(() => {});
+        if (!perfPlaying) schedulePreview();
+    }
+}
+
+function perfSetChokeGroup(layerId, value) {
+    const layer = perfLayers.find(l => l.layer_id === layerId);
+    if (layer) {
+        layer.choke_group = value === '' ? null : parseInt(value);
+        // Sync to server LayerStack
+        fetch(`${API}/api/perform/update_layer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ layer_id: layerId, choke_group: layer.choke_group }),
+        }).catch(() => {});
+    }
 }
 
 function perfSetOpacity(layerId, value) {
@@ -2414,6 +2544,8 @@ function perfSetOpacity(layerId, value) {
         state.opacity = value;
         perfRecordEvent(layerId, 'opacity', value);
     }
+    // Queue opacity change for server ADSR processing
+    perfTriggerQueue.push({ layer_id: layerId, event: 'opacity', value: value });
     // Update fader value display
     const strip = document.querySelector(`.channel-strip[data-layer-id="${layerId}"]`);
     if (strip) {
@@ -2429,6 +2561,7 @@ function perfToggleMute(layerId) {
         state.muted = !state.muted;
         if (state.muted) state.active = false;
         renderMixer();
+        renderLayers();
         if (!perfPlaying) schedulePreview();
     }
 }
@@ -2449,6 +2582,7 @@ function perfToggleSolo(layerId) {
             }
         }
         renderMixer();
+        renderLayers();
         if (!perfPlaying) schedulePreview();
     }
 }
@@ -2479,18 +2613,103 @@ const _origSyncChainToRegion = syncChainToRegion;
 syncChainToRegion = function() {
     _origSyncChainToRegion();
 
-    // If editing a perform layer, sync chain back to it
+    // If editing a perform layer, sync chain back to server LayerStack
     if (appMode === 'perform' && window._perfEditingLayerId !== undefined) {
         const layer = perfLayers.find(l => l.layer_id === window._perfEditingLayerId);
         if (layer) {
-            layer.effects = chain.map(d => ({
+            const effects = chain.map(d => ({
                 name: d.name,
                 params: JSON.parse(JSON.stringify(d.params)),
             }));
+            layer.effects = effects;
+            // Sync effects to server LayerStack
+            fetch(`${API}/api/perform/update_layer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ layer_id: layer.layer_id, effects }),
+            }).catch(() => {});
             renderMixer();
         }
     }
 };
+
+// --- Drag-to-Reorder Channel Strips ---
+let perfDragSourceId = null;
+
+function perfDragStart(event, layerId) {
+    perfDragSourceId = layerId;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', layerId);
+    event.currentTarget.classList.add('dragging');
+}
+
+function perfDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const target = event.currentTarget;
+    if (!target.classList.contains('master-strip')) {
+        target.classList.add('drag-over');
+    }
+}
+
+function perfDragLeave(event) {
+    event.currentTarget.classList.remove('drag-over');
+}
+
+function perfDrop(event, targetLayerId) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('drag-over');
+
+    if (perfDragSourceId === null || perfDragSourceId === targetLayerId) return;
+
+    // Find indices in perfLayers array
+    const sourceIdx = perfLayers.findIndex(l => l.layer_id === perfDragSourceId);
+    const targetIdx = perfLayers.findIndex(l => l.layer_id === targetLayerId);
+
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    // Swap positions in array
+    const [sourceLayer] = perfLayers.splice(sourceIdx, 1);
+    perfLayers.splice(targetIdx, 0, sourceLayer);
+
+    // Reassign z_order values (left = 0 = bottom, right = top)
+    perfReorderLayers();
+}
+
+function perfDragEnd(event) {
+    document.querySelectorAll('.channel-strip').forEach(strip => {
+        strip.classList.remove('dragging', 'drag-over');
+    });
+    perfDragSourceId = null;
+}
+
+async function perfReorderLayers() {
+    // Assign z_order based on position (index = z_order)
+    const updates = [];
+    for (let i = 0; i < perfLayers.length; i++) {
+        const layer = perfLayers[i];
+        if (layer.z_order !== i) {
+            layer.z_order = i;
+            updates.push(
+                fetch(`${API}/api/perform/update_layer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ layer_id: layer.layer_id, z_order: i }),
+                }).catch(() => {})
+            );
+        }
+    }
+
+    // Wait for all updates to complete
+    await Promise.all(updates);
+
+    // Re-render mixer and update preview
+    renderMixer();
+    renderLayers();
+    if (!perfPlaying) {
+        schedulePreview();
+    }
+}
 
 // --- Playback Loop ---
 function perfTogglePlay() {
@@ -2519,6 +2738,7 @@ function perfStart() {
 
 function perfStop() {
     perfPlaying = false;
+    perfReviewing = false;
     if (perfAnimFrame) {
         cancelAnimationFrame(perfAnimFrame);
         perfAnimFrame = null;
@@ -2526,6 +2746,10 @@ function perfStop() {
 
     const btn = document.getElementById('perf-play-btn');
     if (btn) btn.innerHTML = '&#9654; Play';
+
+    // Hide event density timeline if exists
+    const canvas = document.getElementById('perf-event-density');
+    if (canvas) canvas.dataset.active = 'false';
 
     // Re-enable mode buttons
     document.querySelectorAll('.mode-btn').forEach(b => b.disabled = false);
@@ -2544,28 +2768,67 @@ async function perfLoop() {
 
         // Loop video
         if (perfFrameIndex >= totalFrames) {
-            perfFrameIndex = 0;
+            if (perfLooping) {
+                perfFrameIndex = 0;
+            } else {
+                perfStop();
+                return;
+            }
         }
 
-        // Build layer states
-        const layerStates = perfLayers.map(l => {
-            const s = perfLayerStates[l.layer_id] || {};
-            return {
-                layer_id: l.layer_id,
-                active: s.muted ? false : (s.active ?? (l.trigger_mode === 'always_on')),
-                opacity: s.opacity ?? l.opacity,
-            };
-        });
+        // Drain trigger queue and send with this frame
+        let events = [];
+
+        if (perfReviewing) {
+            // Review mode: read events from recorded frame map
+            if (perfReviewFrameMap[perfFrameIndex]) {
+                for (const evt of perfReviewFrameMap[perfFrameIndex]) {
+                    if (evt.param === 'active') {
+                        // Convert active parameter to on/off event
+                        events.push({
+                            layer_id: evt.layer_id,
+                            event: evt.value > 0 ? 'on' : 'off',
+                        });
+                    } else if (evt.param === 'opacity') {
+                        events.push({
+                            layer_id: evt.layer_id,
+                            event: 'opacity',
+                            value: evt.value,
+                        });
+                    }
+                }
+            }
+            // Update event density timeline position
+            perfUpdateEventDensityPosition();
+        } else {
+            // Live mode: drain trigger queue
+            events = perfTriggerQueue.splice(0);
+
+            // Add muted layers as opacity=0 events (server needs to know)
+            for (const l of perfLayers) {
+                const s = perfLayerStates[l.layer_id];
+                if (s && s.muted && l._active) {
+                    events.push({ layer_id: l.layer_id, event: 'opacity', value: 0.0 });
+                }
+            }
+        }
 
         try {
             const res = await fetch(`${API}/api/perform/frame`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frame_number: perfFrameIndex, layer_states: layerStates }),
+                body: JSON.stringify({
+                    frame_number: perfFrameIndex,
+                    trigger_events: events.length > 0 ? events : undefined,
+                }),
             });
             const data = await res.json();
             if (data.preview) {
                 showPreview(data.preview);
+            }
+            // Tier 3: Sync UI with server envelope states
+            if (data.layer_states) {
+                perfSyncWithServer(data.layer_states);
             }
         } catch (err) {
             // Server disconnect — auto-pause (Norman: error prevention)
@@ -2582,6 +2845,50 @@ async function perfLoop() {
     perfAnimFrame = requestAnimationFrame(perfLoop);
 }
 
+function perfSyncWithServer(serverStates) {
+    /**
+     * Sync client UI with server's computed ADSR envelope states.
+     * Server is the source of truth for envelope phase + computed opacity.
+     * Client keeps mute/solo state locally.
+     */
+    for (const ss of serverStates) {
+        const state = perfLayerStates[ss.layer_id];
+        if (!state) continue;
+
+        // Update active state from server (ADSR may have auto-released)
+        state.active = ss.active;
+        state.serverOpacity = ss.current_opacity;
+        state.envelopePhase = ss.phase;
+        state.envelopeLevel = ss.envelope_level;
+
+        // Update strip visuals with envelope info
+        const strip = document.querySelector(`.channel-strip[data-layer-id="${ss.layer_id}"]`);
+        if (!strip) continue;
+
+        // Update active indicator
+        if (ss.active || ss.current_opacity > 0.001) {
+            strip.classList.add('active-strip');
+            strip.querySelector('.strip-trigger')?.classList.add('lit');
+        } else {
+            strip.classList.remove('active-strip');
+            strip.querySelector('.strip-trigger')?.classList.remove('lit');
+        }
+
+        // Update envelope phase indicator on ADSR ring (if present)
+        const ring = strip.querySelector('.adsr-ring');
+        if (ring) {
+            ring.dataset.phase = ss.phase;
+            ring.style.setProperty('--env-level', ss.envelope_level);
+        }
+
+        // Update fader readout with server-computed opacity
+        const faderVal = strip.querySelector('.strip-fader-val');
+        if (faderVal) {
+            faderVal.textContent = Math.round(ss.current_opacity * 100) + '%';
+        }
+    }
+}
+
 // --- Transport Controls ---
 function perfUpdateTransport() {
     const timeEl = document.getElementById('perf-time');
@@ -2593,6 +2900,14 @@ function perfUpdateTransport() {
     if (frameEl) frameEl.textContent = `F:${perfFrameIndex}`;
     if (eventEl) eventEl.textContent = `${perfEventCount} events`;
     if (scrubber) scrubber.value = perfFrameIndex;
+
+    // Update HUD overlay
+    const hudRec = document.getElementById('perf-hud-rec');
+    const hudTime = document.getElementById('perf-hud-time');
+    const hudEvents = document.getElementById('perf-hud-events');
+    if (hudRec) hudRec.textContent = perfReviewing ? '[REVIEW]' : (perfRecording ? '[REC]' : '[BUF]');
+    if (hudTime) hudTime.textContent = formatTime(perfFrameIndex / 30);
+    if (hudEvents) hudEvents.textContent = `${perfEventCount} ev`;
 }
 
 function perfScrub(value) {
@@ -2625,7 +2940,15 @@ function perfToggleRecord() {
             showToast(`Recording stopped: ${perfEventCount} events`, 'success', {
                 label: 'Save',
                 fn: 'perfSaveSession',
-            }, 6000);
+            }, 10000);
+            showToast('Review your performance', 'info', {
+                label: 'Review',
+                fn: 'perfReviewStart',
+            }, 10000);
+            showToast('Or discard this take', 'info', {
+                label: 'Discard',
+                fn: 'perfDiscardSession',
+            }, 10000);
         } else {
             showToast('Recording stopped (no events)', 'info', null, 2000);
         }
@@ -2670,7 +2993,7 @@ function perfRecordEvent(layerId, param, value) {
 
 // --- Panic ---
 function perfPanic() {
-    // Reset all layer states
+    // Reset all layer states (client)
     for (const l of perfLayers) {
         const state = perfLayerStates[l.layer_id];
         if (state) {
@@ -2678,6 +3001,8 @@ function perfPanic() {
             state.muted = false;
             state.soloed = false;
         }
+        // Queue panic for each layer on server
+        perfTriggerQueue.push({ layer_id: l.layer_id, event: 'panic' });
     }
     renderMixer();
     showToast('ALL LAYERS RESET', 'info', null, 1000);
@@ -2753,6 +3078,146 @@ async function perfRender() {
         showErrorToast(`Render error: ${err.message}`);
     } finally {
         if (btn) { btn.textContent = origText; btn.disabled = false; }
+    }
+}
+
+// --- Loop Toggle ---
+let perfLooping = true; // Default: loop on
+
+function perfToggleLoop() {
+    perfLooping = !perfLooping;
+    const btn = document.getElementById('perf-loop-btn');
+    if (btn) {
+        btn.style.background = perfLooping ? 'var(--accent-secondary)' : '';
+        btn.style.color = perfLooping ? '#000' : '';
+    }
+    showToast(perfLooping ? 'Loop: ON' : 'Loop: OFF', 'info', null, 1500);
+}
+
+// --- Discard Session ---
+function perfDiscardSession() {
+    perfSession = { type: 'performance', lanes: [] };
+    perfEventCount = 0;
+    perfUpdateTransport();
+    showToast('Performance discarded', 'info', null, 2000);
+}
+
+// --- Review Mode ---
+function perfReviewStart() {
+    if (perfEventCount === 0) {
+        showToast('No performance to review', 'info');
+        return;
+    }
+
+    // Build frame->events map from perfSession
+    perfReviewFrameMap = {};
+    for (const lane of perfSession.lanes) {
+        const layerId = lane.layer_id;
+        const param = lane.param;
+        for (const [frame, value] of lane.keyframes) {
+            if (!perfReviewFrameMap[frame]) {
+                perfReviewFrameMap[frame] = [];
+            }
+            perfReviewFrameMap[frame].push({ layer_id: layerId, param, value });
+        }
+    }
+
+    // Reset to start
+    perfFrameIndex = 0;
+    perfReviewing = true;
+    perfPlaying = true;
+
+    // Render event density timeline
+    perfRenderEventDensity();
+
+    // Start playback
+    perfUpdateTransport();
+    showToast('Review playback started', 'info', null, 2000);
+    perfLoop();
+}
+
+function perfReviewStop() {
+    perfReviewing = false;
+    perfPlaying = false;
+    if (perfAnimFrame) {
+        cancelAnimationFrame(perfAnimFrame);
+        perfAnimFrame = null;
+    }
+    showToast('Review stopped', 'info', null, 1500);
+}
+
+function perfRenderEventDensity() {
+    // Create or get canvas for event density timeline
+    let canvas = document.getElementById('perf-event-density');
+    if (!canvas) {
+        // Insert canvas after scrubber
+        const scrubber = document.getElementById('perf-scrubber');
+        if (!scrubber) return;
+
+        canvas = document.createElement('canvas');
+        canvas.id = 'perf-event-density';
+        canvas.width = scrubber.offsetWidth || 600;
+        canvas.height = 20;
+        scrubber.parentNode.insertBefore(canvas, scrubber.nextSibling);
+    }
+
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear canvas
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, width, height);
+
+    // Compute event density per time bucket
+    const buckets = new Array(width).fill(0);
+    const framesPerPixel = Math.max(1, totalFrames / width);
+
+    for (const frame in perfReviewFrameMap) {
+        const pixelX = Math.floor(parseInt(frame) / framesPerPixel);
+        if (pixelX >= 0 && pixelX < width) {
+            buckets[pixelX] += perfReviewFrameMap[frame].length;
+        }
+    }
+
+    const maxDensity = Math.max(...buckets, 1);
+
+    // Draw density bars
+    for (let x = 0; x < width; x++) {
+        const density = buckets[x];
+        if (density > 0) {
+            const intensity = density / maxDensity;
+            const alpha = 0.3 + intensity * 0.7;
+            ctx.fillStyle = `rgba(255, 107, 53, ${alpha})`;
+            const barHeight = Math.max(2, height * intensity);
+            ctx.fillRect(x, height - barHeight, 1, barHeight);
+        }
+    }
+
+    // Update playback position in timeline during review
+    canvas.dataset.active = 'true';
+}
+
+function perfUpdateEventDensityPosition() {
+    const canvas = document.getElementById('perf-event-density');
+    if (!canvas || canvas.dataset.active !== 'true') return;
+
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Redraw base timeline
+    perfRenderEventDensity();
+
+    // Draw playback position line
+    if (totalFrames > 0) {
+        const x = Math.floor((perfFrameIndex / totalFrames) * width);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
     }
 }
 

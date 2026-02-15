@@ -1390,6 +1390,28 @@ h3 .count {
 .perform-mode #mode-badge { display: block; color: #ff6b35; }
 .quick-mode #mode-badge { display: none; }
 
+#perf-hud {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: rgba(10,10,11,0.7);
+    padding: 4px 10px;
+    border-radius: 3px;
+    z-index: 5;
+    display: flex;
+    gap: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.perform-mode #perf-hud { display: flex; }
+
+#perf-hud-rec {
+    color: var(--accent);
+    font-weight: 700;
+}
+
 /* Perform grid — add transport + mixer rows */
 #app.perform-mode {
     grid-template-rows: 44px 1fr auto auto 160px;
@@ -1458,6 +1480,8 @@ h3 .count {
 
 #perf-scrubber {
     flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 #perf-scrubber input[type="range"] {
@@ -1476,6 +1500,22 @@ h3 .count {
     background: #ff6b35;
     border-radius: 50%;
     cursor: pointer;
+}
+
+#perf-event-density {
+    display: block;
+    width: 100%;
+    height: 20px;
+    margin-top: 4px;
+    border-radius: 2px;
+    background: #1a1a1a;
+    border: 1px solid var(--border);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+#perf-event-density[data-active="true"] {
+    opacity: 1;
 }
 
 .transport-right {
@@ -1792,6 +1832,19 @@ h3 .count {
     background: #4caf50;
     color: #000;
     border-color: #4caf50;
+}
+
+/* Drag-to-reorder states */
+.channel-strip[draggable="true"] {
+    cursor: grab;
+}
+
+.channel-strip.dragging {
+    opacity: 0.4;
+}
+
+.channel-strip.drag-over {
+    border-left: 3px solid var(--accent);
 }
 
 /* Master channel strip */

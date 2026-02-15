@@ -236,3 +236,101 @@ def infrared(frame: np.ndarray, vegetation_glow: float = 1.0) -> np.ndarray:
     g = np.clip(f[:, :, 0] * 0.8, 0, 255)
     b = np.clip(f[:, :, 2] * 0.3, 0, 255)
     return np.stack([r, g, b], axis=2).astype(np.uint8)
+
+
+def chroma_key(frame: np.ndarray, hue: float = 120.0, tolerance: float = 30.0,
+               softness: float = 10.0, replace_color: str = "black") -> np.ndarray:
+    """Green screen / chroma key — makes a specific color range transparent (black).
+
+    Converts to HSV, creates a mask for the target hue range, then replaces
+    those pixels. Use with blend modes and layer opacity for real transparency.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB.
+        hue: Target hue to key out in degrees (0-360). 120 = green, 0 = red, 240 = blue.
+        tolerance: Hue range to key (degrees). Higher = wider key.
+        softness: Edge feathering (0 = hard edge, 50 = very soft).
+        replace_color: What to put where keyed pixels were. "black" or "white".
+
+    Returns:
+        Frame with keyed areas replaced.
+    """
+    import cv2
+
+    hue = float(hue) % 360
+    tolerance = max(1.0, min(180.0, float(tolerance)))
+    softness = max(0.0, min(50.0, float(softness)))
+
+    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+    # OpenCV HSV: H is 0-179 (half degrees), S and V are 0-255
+    h_center = hue / 2.0  # Convert 360-scale to 180-scale
+    h_low = (h_center - tolerance / 2.0) % 180
+    h_high = (h_center + tolerance / 2.0) % 180
+
+    h = hsv[:, :, 0].astype(np.float32)
+    s = hsv[:, :, 1].astype(np.float32)
+
+    # Create hue mask (handle wraparound)
+    if h_low < h_high:
+        hue_mask = (h >= h_low) & (h <= h_high)
+    else:
+        hue_mask = (h >= h_low) | (h <= h_high)
+
+    # Require minimum saturation (don't key grays)
+    sat_mask = s > 30
+
+    mask = (hue_mask & sat_mask).astype(np.float32)
+
+    # Soften edges with blur
+    if softness > 0:
+        ksize = int(softness * 2) | 1  # Ensure odd
+        mask = cv2.GaussianBlur(mask, (ksize, ksize), 0)
+
+    # Apply mask: keyed areas become replace color
+    mask_3ch = mask[:, :, np.newaxis]
+    fill = 0.0 if replace_color == "black" else 255.0
+    result = frame.astype(np.float32) * (1.0 - mask_3ch) + fill * mask_3ch
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def luma_key(frame: np.ndarray, threshold: float = 0.3, mode: str = "dark",
+             softness: float = 10.0) -> np.ndarray:
+    """Luminance key — makes dark or bright areas transparent (black).
+
+    Keys out pixels based on their brightness. Use "dark" to remove shadows/dark
+    areas (so bright content shows through), or "light" to remove bright areas.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB.
+        threshold: Brightness cutoff (0-1). Pixels beyond this threshold are keyed.
+        mode: "dark" = key out dark areas, "light" = key out bright areas.
+        softness: Edge feathering (0 = hard, 50 = very soft).
+
+    Returns:
+        Frame with keyed areas replaced with black.
+    """
+    import cv2
+
+    threshold = max(0.0, min(1.0, float(threshold)))
+    softness = max(0.0, min(50.0, float(softness)))
+
+    # Convert to grayscale for luminance
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+
+    # Create mask based on mode
+    if mode == "dark":
+        # Key out dark areas: pixels darker than threshold become transparent
+        mask = (gray < threshold).astype(np.float32)
+    else:
+        # Key out light areas: pixels brighter than threshold become transparent
+        mask = (gray > threshold).astype(np.float32)
+
+    # Soften edges
+    if softness > 0:
+        ksize = int(softness * 2) | 1
+        mask = cv2.GaussianBlur(mask, (ksize, ksize), 0)
+
+    # Apply mask: keyed areas become black
+    mask_3ch = mask[:, :, np.newaxis]
+    result = frame.astype(np.float32) * (1.0 - mask_3ch)
+    return np.clip(result, 0, 255).astype(np.uint8)

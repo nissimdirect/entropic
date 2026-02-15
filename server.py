@@ -1108,7 +1108,19 @@ class PerformInitRequest(BaseModel):
 
 class PerformFrameRequest(BaseModel):
     frame_number: int
-    layer_states: list[dict]  # [{layer_id, active, opacity}]
+    layer_states: list[dict] | None = None  # Legacy: [{layer_id, active, opacity}]
+    trigger_events: list[dict] | None = None  # [{layer_id, event: "on"|"off"|"opacity", value?}]
+
+
+class PerformUpdateLayerRequest(BaseModel):
+    layer_id: int
+    trigger_mode: str | None = None
+    adsr_preset: str | None = None
+    blend_mode: str | None = None
+    effects: list[dict] | None = None
+    choke_group: int | None = -1  # -1 = don't change, None = remove, 0+ = set
+    opacity: float | None = None
+    z_order: int | None = None
 
 
 class PerformSaveRequest(BaseModel):
@@ -1137,7 +1149,7 @@ _PERFORM_DEFAULTS = [
     {
         "name": "VHS+Glitch",
         "effects": [
-            {"name": "vhs", "params": {"tracking": 0.4, "noise": 0.3}},
+            {"name": "vhs", "params": {"tracking": 0.4, "noise_amount": 0.3}},
         ],
         "trigger_mode": "toggle",
         "adsr_preset": "sustain",
@@ -1166,7 +1178,7 @@ _PERFORM_DEFAULTS = [
 
 @app.post("/api/perform/init")
 async def perform_init(req: PerformInitRequest):
-    """Initialize perform mode layers. Creates LayerStack from config or auto-defaults."""
+    """Initialize perform mode layers. Creates persistent LayerStack with ADSR envelopes."""
     if _state["video_path"] is None:
         raise HTTPException(status_code=400, detail="No video loaded. Upload a file first.")
 
@@ -1188,8 +1200,12 @@ async def perform_init(req: PerformInitRequest):
                 **preset,
             })
 
-    # Store layer configs in state (not Layer objects — those are per-request)
+    # Create actual Layer objects with ADSR envelopes (persistent across frames)
+    layers = [Layer.from_dict(ld) for ld in layer_dicts]
+    stack = LayerStack(layers)
+    _state["perf_stack"] = stack
     _state["perf_layers"] = layer_dicts
+    _state["perf_frame_count"] = 0
 
     return {
         "status": "ok",
@@ -1200,20 +1216,53 @@ async def perform_init(req: PerformInitRequest):
 
 @app.post("/api/perform/frame")
 async def perform_frame(req: PerformFrameRequest):
-    """Composite a single perform-mode frame with layer states applied.
+    """Composite a perform-mode frame with stateful ADSR envelope processing.
 
-    Receives which layers are active and at what opacity, returns composited preview.
+    Accepts trigger events (on/off/opacity), advances all envelopes one frame,
+    composites layers using computed ADSR opacity, and returns both the preview
+    and current envelope states for client UI sync.
     """
     if _state["video_path"] is None:
         raise HTTPException(status_code=400, detail="No video loaded")
-    if "perf_layers" not in _state or not _state["perf_layers"]:
+
+    stack: LayerStack | None = _state.get("perf_stack")
+    if stack is None:
         raise HTTPException(status_code=400, detail="Perform mode not initialized. Call /api/perform/init first.")
 
     try:
-        # Extract the base frame
+        # --- 1. Process trigger events from client ---
+        if req.trigger_events:
+            for evt in req.trigger_events:
+                layer = stack.get_layer(evt.get("layer_id", -1))
+                if layer is None:
+                    continue
+                event_type = evt.get("event", "")
+                if event_type == "on":
+                    stack.handle_choke(layer)
+                    layer.trigger_on()
+                elif event_type == "off":
+                    layer.trigger_off()
+                elif event_type == "opacity":
+                    layer.set_opacity(evt.get("value", 1.0))
+                elif event_type == "panic":
+                    layer.reset()
+
+        # Legacy fallback: if client sends layer_states instead of trigger_events,
+        # apply raw active/opacity (no ADSR envelope)
+        elif req.layer_states:
+            for s in req.layer_states:
+                layer = stack.get_layer(s.get("layer_id", -1))
+                if layer is None:
+                    continue
+                layer.set_opacity(s.get("opacity", layer.opacity))
+
+        # --- 2. Advance all ADSR envelopes one frame ---
+        stack.advance_all()
+        _state["perf_frame_count"] = _state.get("perf_frame_count", 0) + 1
+
+        # --- 3. Extract base frame ---
         frame = extract_single_frame(_state["video_path"], req.frame_number)
 
-        # Cap resolution for preview
         MAX_PREVIEW_PIXELS = 1920 * 1080
         h, w = frame.shape[:2]
         if h * w > MAX_PREVIEW_PIXELS:
@@ -1221,61 +1270,90 @@ async def perform_frame(req: PerformFrameRequest):
             new_h, new_w = int(h * scale), int(w * scale)
             frame = np.array(Image.fromarray(frame).resize((new_w, new_h)))
 
-        # Build a lookup of layer_id -> state from request
-        states = {s["layer_id"]: s for s in req.layer_states}
-
-        # Process each layer and composite
-        layer_frames = {}
-        for lc in _state["perf_layers"]:
-            lid = lc["layer_id"]
-            state = states.get(lid, {})
-            is_active = state.get("active", lc.get("trigger_mode") == "always_on")
-            opacity = state.get("opacity", lc.get("opacity", 1.0))
-
-            if not is_active and opacity <= 0:
+        # --- 4. Build per-layer frames (apply effects) ---
+        frame_dict = {}
+        for layer in stack.layers:
+            if not layer.is_visible:
                 continue
-
-            # Start with base frame copy for this layer
             layer_frame = frame.copy()
+            if layer.effects:
+                layer_frame = apply_chain(layer_frame, layer.effects, watermark=False)
+            frame_dict[layer.layer_id] = layer_frame
 
-            # Apply layer's effects
-            effects = lc.get("effects", [])
-            if effects:
-                layer_frame = apply_chain(layer_frame, effects, watermark=False)
+        # --- 5. Composite using LayerStack (respects z-order + computed opacity) ---
+        result = stack.composite(frame_dict)
 
-            # Store with effective opacity
-            layer_frames[lid] = (layer_frame, opacity if is_active else 0.0)
+        # --- 6. Build envelope state for client UI sync ---
+        layer_info = []
+        for layer in stack.layers:
+            layer_info.append({
+                "layer_id": layer.layer_id,
+                "active": layer._active,
+                "current_opacity": round(layer._current_opacity, 4),
+                "phase": layer._adsr_envelope.phase,
+                "envelope_level": round(layer._adsr_envelope.level, 4),
+            })
 
-        # Manual composite (sorted by z_order)
-        sorted_layers = sorted(_state["perf_layers"], key=lambda l: l.get("z_order", 0))
-        result = None
-        for lc in sorted_layers:
-            lid = lc["layer_id"]
-            if lid not in layer_frames:
-                continue
-            layer_frame, alpha = layer_frames[lid]
-            if alpha <= 0:
-                continue
-
-            if result is None:
-                if alpha >= 1.0:
-                    result = layer_frame.copy()
-                else:
-                    result = (layer_frame.astype(np.float32) * alpha).astype(np.uint8)
-            else:
-                if alpha >= 1.0:
-                    result = layer_frame.copy()
-                elif alpha > 0:
-                    r = result.astype(np.float32)
-                    f = layer_frame.astype(np.float32)
-                    result = np.clip(r * (1.0 - alpha) + f * alpha, 0, 255).astype(np.uint8)
-
-        if result is None:
-            result = frame  # Fallback to raw frame
-
-        return {"preview": _frame_to_data_url(result)}
+        return {
+            "preview": _frame_to_data_url(result),
+            "layer_states": layer_info,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/perform/update_layer")
+async def perform_update_layer(req: PerformUpdateLayerRequest):
+    """Update a layer's config on the persistent LayerStack (trigger mode, ADSR, effects, etc)."""
+    stack: LayerStack | None = _state.get("perf_stack")
+    if stack is None:
+        raise HTTPException(status_code=400, detail="Perform mode not initialized.")
+
+    layer = stack.get_layer(req.layer_id)
+    if layer is None:
+        raise HTTPException(status_code=404, detail=f"Layer {req.layer_id} not found")
+
+    # Update trigger mode (resets envelope)
+    if req.trigger_mode is not None:
+        layer.trigger_mode = req.trigger_mode
+        layer.reset()
+
+    # Update ADSR preset (recreates envelope)
+    if req.adsr_preset is not None:
+        layer.adsr_preset = req.adsr_preset
+        layer._adsr_envelope = layer._create_envelope()
+
+    # Update blend mode
+    if req.blend_mode is not None:
+        from core.layer import BLEND_MODES
+        if req.blend_mode in BLEND_MODES:
+            layer.blend_mode = req.blend_mode
+
+    # Update effects
+    if req.effects is not None:
+        layer.effects = req.effects
+
+    # Update choke group (-1 = don't change)
+    if req.choke_group != -1:
+        layer.choke_group = req.choke_group
+
+    # Update base opacity
+    if req.opacity is not None:
+        layer.set_opacity(req.opacity)
+
+    # Update z_order
+    if req.z_order is not None:
+        layer.z_order = req.z_order
+        # Re-sort stack by z_order
+        stack.layers.sort(key=lambda l: l.z_order)
+
+    # Sync back to perf_layers config list
+    for lc in _state.get("perf_layers", []):
+        if lc["layer_id"] == req.layer_id:
+            lc.update(layer.to_dict())
+            break
+
+    return {"status": "ok", "layer": layer.to_dict()}
 
 
 @app.post("/api/perform/save")
