@@ -653,6 +653,8 @@ async function uploadVideo(file) {
 
         showPreview(data.preview);
         updateFrameInfo(data.info);
+        // Fetch histogram for color analysis (fires even if panel is collapsed — data is cached)
+        fetchHistogram();
         showToast(`Loaded: ${file.name}`, 'success');
 
         // Suggest perform toggle (toast with action)
@@ -994,6 +996,7 @@ function addToChain(effectName, overrideParams) {
         name: effectName,
         params: {},
         bypassed: false,
+        mix: 1.0,
     };
 
     // Copy defaults, then apply overrides (from recipe/package)
@@ -1047,6 +1050,19 @@ function toggleBypass(deviceId) {
     }
 }
 
+function updateDeviceMix(deviceId, value) {
+    const device = chain.find(d => d.id === deviceId);
+    if (device) {
+        device.mix = parseInt(value) / 100;
+        const span = document.querySelector(`.mix-slider[data-device="${deviceId}"]`);
+        if (span) {
+            const valSpan = span.parentElement.querySelector('.mix-value');
+            if (valSpan) valSpan.textContent = `${parseInt(value)}%`;
+        }
+        schedulePreview();
+    }
+}
+
 function duplicateSelected() {
     if (selectedLayerId === null) return;
     const device = chain.find(d => d.id === selectedLayerId);
@@ -1056,6 +1072,7 @@ function duplicateSelected() {
         name: device.name,
         params: JSON.parse(JSON.stringify(device.params)),
         bypassed: device.bypassed,
+        mix: device.mix ?? 1.0,
     };
     // Insert after the selected device
     const idx = chain.findIndex(d => d.id === selectedLayerId);
@@ -1099,6 +1116,8 @@ function renderChain() {
             }
         }
 
+        const mixPct = Math.round((device.mix ?? 1.0) * 100);
+
         return `
             <div class="device ${bypassClass}" data-device-id="${device.id}" draggable="true"
                  oncontextmenu="deviceContextMenu(event, ${device.id})">
@@ -1106,6 +1125,14 @@ function renderChain() {
                     ${gripHTML()}
                     <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                     <span class="device-name">${esc(device.name)}</span>
+                    <span class="device-mix" title="Dry/Wet Mix: ${mixPct}%">
+                        <label>Mix</label>
+                        <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
+                               data-device="${device.id}"
+                               oninput="updateDeviceMix(${device.id}, this.value)"
+                               onclick="event.stopPropagation()">
+                        <span class="mix-value">${mixPct}%</span>
+                    </span>
                     <button class="more-btn" onclick="event.stopPropagation(); deviceContextMenu(event, ${device.id})" title="More options">&#8943;</button>
                 </div>
                 <div class="device-params">
@@ -2028,7 +2055,7 @@ async function previewChain() {
             // Flat chain behavior (Quick mode legacy / fallback)
             const activeEffects = chain
                 .filter(d => !d.bypassed)
-                .map(d => ({ name: d.name, params: d.params }));
+                .map(d => ({ name: d.name, params: { ...d.params, mix: d.mix ?? 1.0 } }));
             res = await fetch(`${API}/api/preview`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2553,7 +2580,7 @@ function getProjectState() {
         name: document.getElementById('file-name').textContent || 'Untitled',
         mode: appMode,
         timeline: window.timelineEditor ? timelineEditor.serialize() : null,
-        chain: chain.map(d => ({ name: d.name, params: d.params, bypassed: d.bypassed })),
+        chain: chain.map(d => ({ name: d.name, params: d.params, bypassed: d.bypassed, mix: d.mix ?? 1.0 })),
         mixLevel,
         currentFrame,
         totalFrames,
@@ -2634,6 +2661,7 @@ async function loadProject() {
                     name: d.name,
                     params: JSON.parse(JSON.stringify(d.params || {})),
                     bypassed: d.bypassed || false,
+                    mix: d.mix ?? 1.0,
                 }));
                 selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
                 renderChain();
@@ -4412,6 +4440,8 @@ renderChain = function() {
             }
         }
 
+        const mixPct = Math.round((device.mix ?? 1.0) * 100);
+
         return `
             <div class="device ${bypassClass}" data-device-id="${device.id}" draggable="true"
                  oncontextmenu="deviceContextMenu(event, ${device.id})">
@@ -4419,6 +4449,14 @@ renderChain = function() {
                     ${gripHTML()}
                     <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                     <span class="device-name">${esc(device.name)}</span>
+                    <span class="device-mix" title="Dry/Wet Mix: ${mixPct}%">
+                        <label>Mix</label>
+                        <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
+                               data-device="${device.id}"
+                               oninput="updateDeviceMix(${device.id}, this.value)"
+                               onclick="event.stopPropagation()">
+                        <span class="mix-value">${mixPct}%</span>
+                    </span>
                     <button class="more-btn" onclick="event.stopPropagation(); deviceContextMenu(event, ${device.id})" title="More options">&#8943;</button>
                 </div>
                 <div class="device-params">

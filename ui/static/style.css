@@ -1019,6 +1019,46 @@ h3 .count {
     white-space: nowrap;
 }
 
+.device-mix {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    color: var(--text-dim);
+    margin-left: 4px;
+    flex-shrink: 0;
+}
+
+.device-mix label {
+    font-size: 9px;
+    color: var(--text-dim);
+}
+
+.device-mix .mix-slider {
+    width: 50px;
+    height: 3px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--bg-darkest);
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.device-mix .mix-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+}
+
+.device-mix .mix-value {
+    min-width: 26px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
 /* remove-btn kept for backwards compat but hidden — use three-dots menu */
 
 .device-params {

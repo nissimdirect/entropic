@@ -1068,10 +1068,15 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
         params = effect.get("params", {})
         envelope = effect.get("envelope")
 
+        # Extract per-effect mix (dry/wet blend)
+        mix = float(params.pop("mix", 1.0))
+        mix = max(0.0, min(1.0, mix))
+
         if envelope is not None:
             # Wrap effect with ADSR envelope
             fn, defaults = get_effect(name)
             merged_params = {**defaults, **params}
+            original = frame.copy() if mix < 1.0 else None
             frame = adsr_wrap(
                 frame, fn, merged_params,
                 attack=envelope.get("attack", 0),
@@ -1084,8 +1089,16 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
                 frame_index=frame_index,
                 total_frames=total_frames,
             )
+            # Apply per-effect dry/wet blend
+            if original is not None:
+                if mix <= 0.0:
+                    frame = original
+                else:
+                    blended = (original.astype(np.float32) * (1.0 - mix) +
+                               frame.astype(np.float32) * mix)
+                    frame = np.clip(blended, 0, 255).astype(np.uint8)
         else:
-            frame = apply_effect(frame, name, frame_index=frame_index, total_frames=total_frames, **params)
+            frame = apply_effect(frame, name, frame_index=frame_index, total_frames=total_frames, mix=mix, **params)
 
     # Burn watermark on free tier (only for exports, not previews)
     if watermark and not _check_license():
