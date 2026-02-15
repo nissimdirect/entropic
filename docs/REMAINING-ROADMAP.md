@@ -34,15 +34,15 @@
 
 | # | Item | Source | Effort | Status | Files |
 |---|------|--------|--------|--------|-------|
-| P1-1 | **Knob sensitivity zone indicator** — arc gradient showing dead zone (gray), active zone (colored), blown-out zone (red). Visualization of useful range around the circle. | User request + UAT S2 | Medium | [ ] | app.js, style.css |
+| P1-1 | **Knob sensitivity zone indicator** — arc gradient showing dead zone (gray), active zone (colored), blown-out zone (red). Visualization of useful range around the circle. | User request + UAT S2 | Medium | [x] | app.js, style.css (arc-track/arc-zone/arc-danger) |
 | P1-2 | **Parameter range recalibration** — per-effect sweet spot mapping. Full slider width = useful range, not mathematical domain. | UAT systemic | Large | [ ] | effects/*.py, control-map.json |
-| P1-3 | **Tooltips on everything** — effect descriptions, parameter explanations, mode descriptions in UI. | Don Norman audit (6/10 recognition) | Medium | [ ] | app.js |
+| P1-3 | **Tooltips on everything** — effect descriptions, parameter explanations, mode descriptions in UI. | Don Norman audit (6/10 recognition) | Medium | [x] | app.js (data-tooltip + hover preview system) |
 | P1-4 | **Frame diff tool** — change a param, see pixel diff heatmap. If seed changes and nothing on screen changes = bug. | UAT S4 | Medium | [x] | app.js (diffCapture/diffShow/diffClear + toolbar) |
-| P1-5 | **Mix slider labeling** — clear "Dry/Wet" label + tooltip explaining what mix does. | UAT U3 | Small | [ ] | app.js |
+| P1-5 | **Mix slider labeling** — clear "Dry/Wet" label + tooltip explaining what mix does. | UAT U3 | Small | [x] | app.js (renamed Mix→Dry/Wet in 3 locations) |
 | P1-6 | **Sidechain crossfeed mapping** — B14 design flaw. Effect not mapped to any output. | UAT B14 | Medium | [x] | effects/__init__.py (registered crossfeed + interference) |
-| P1-7 | **Pixel elastic range fix** — works at low mass, nothing at high mass. Recalibrate. | UAT P4 | Small | [ ] | effects/physics.py |
-| P1-8 | **Pixel magnetic params** — poles, damping, rotation, seed all non-functional. Only center pull works. | UAT P2 | Medium | [ ] | effects/physics.py |
-| P1-9 | **Pixel quantum params** — uncertainty, superposition, decoherence sliders dead. | UAT P3 | Medium | [ ] | effects/physics.py |
+| P1-7 | **Pixel elastic range fix** — works at low mass, nothing at high mass. Recalibrate. | UAT P4 | Small | [x] | effects/physics.py (mass damping scaled, force normalized) |
+| P1-8 | **Pixel magnetic params** — poles, damping, rotation, seed all non-functional. Only center pull works. | UAT P2 | Medium | [x] | effects/physics.py (overflow guard, params wired) |
+| P1-9 | **Pixel quantum params** — uncertainty, superposition, decoherence sliders dead. | UAT P3 | Medium | [x] | effects/physics.py (visibility boost, params functional) |
 
 ---
 
@@ -66,7 +66,7 @@
 |---|--------|-------------|--------|
 | F1 | **Smear** | More directions, animated motion, shifting vectors | [~] Already has 4 directions + animate |
 | F2 | **Wave** | More directions, amplitude/frequency modulation, bouncing wave | [x] Added diagonal + circular directions |
-| F3 | **ASCII art** | All character modes, expand color modes. "INSANE!" | [ ] |
+| F3 | **ASCII art** | All character modes, expand color modes. "INSANE!" | [x] Added palette + tint color modes, custom_chars param |
 | F4 | **Blur** | More types: Gaussian, radial, motion, lens | [x] All 6 types built (box/gaussian/motion/radial/median/lens) |
 | F5 | **Contours** | Outline-only mode without affecting interior color | [x] outline_only already built |
 | F6 | **Edges** | Color palette control, fix threshold sensitivity | [x] edge_color + mode already built |
@@ -91,7 +91,7 @@
 | F25 | **Parallel compress** | Compress on dimensions beyond black-white | [x] Added mode (luminance/per_channel/saturation) |
 | F26 | **Solarize** | Own brightness/black-gray-white control | [x] Added target (all/shadows/midtones/highlights) + brightness |
 | F27 | **Wavefold** | Brightness control, histogram for luminosity | [x] Added brightness param |
-| F28 | **Tapesaturation** | Reconceptualize. Currently "just makes it more white." | [ ] |
+| F28 | **Tapesaturation** | Reconceptualize. Currently "just makes it more white." | [x] Reworked: HF rolloff, soft-clip harmonics, compression, flutter |
 
 ---
 
@@ -162,6 +162,6 @@
 
 ---
 
-*Total remaining items: 0 P0 + 7 P1 + 7 P2 + 4 P3 + 2 P4 + 278 P5 + 10 UX = 308 items*
-*P3 done this session: 23/28 (F1-F2,F4-F9,F11-F20,F22-F27). Remaining: F3 ASCII, F10 elastic, F21 xerox, F28 tapesaturation.*
-*P4 done this session: 3/5 (AM radio CUT, pixel annihilate CUT, cyanotype/infrared → presets). Remaining: xerox rework.*
+*Total remaining items: 0 P0 + 1 P1 + 7 P2 + 2 P3 + 1 P4 + 278 P5 + 10 UX = 299 items*
+*P1 done: 8/9 (all except P1-2 param recalibration). P3 done: 26/28 (remaining: F10 elastic, F21 xerox).*
+*P4 remaining: xerox rework (1/5).*
