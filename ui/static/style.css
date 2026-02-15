@@ -964,12 +964,13 @@ h3 .count {
     flex-wrap: wrap;
     gap: 8px;
     justify-content: center;
-    max-height: 120px;
+    max-height: 140px;
     overflow-y: hidden;
     position: relative;
 }
 .device-params:hover {
     overflow-y: auto;
+    max-height: 300px;
 }
 .device-params:hover::-webkit-scrollbar { width: 3px; }
 .device-params:hover::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 2px; }
@@ -979,17 +980,34 @@ h3 .count {
     bottom: 0;
     left: 0;
     right: 0;
-    height: 28px;
-    background: linear-gradient(transparent, var(--bg-mid));
+    height: 36px;
+    background: linear-gradient(transparent 0%, var(--bg-mid) 60%);
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    font-size: 9px;
-    color: var(--text-dim);
-    padding-bottom: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent);
+    padding-bottom: 5px;
+    pointer-events: none;
+    letter-spacing: 0.5px;
+}
+.device-params.has-overflow::before {
+    content: '';
+    position: absolute;
+    bottom: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60px;
+    height: 18px;
+    background: var(--bg-darkest);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    z-index: 1;
     pointer-events: none;
 }
-.device-params:hover.has-overflow::after { display: none; }
+.device-params:hover.has-overflow::after,
+.device-params:hover.has-overflow::before { display: none; }
 
 /* --- KNOB (Moog-inspired) --- */
 /* Control types: knob, dropdown, toggle */
