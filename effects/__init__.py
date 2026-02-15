@@ -108,7 +108,7 @@ EFFECTS = {
         "fn": displacement,
         "category": "glitch",
         "params": {"block_size": 16, "intensity": 10.0, "seed": 42},
-        "param_ranges": {"block_size": {"min": 8, "max": 128}, "intensity": {"min": 0.0, "max": 1.0}},
+        "param_ranges": {"block_size": {"min": 8, "max": 128}, "intensity": {"min": 0.0, "max": 50.0}},
         "description": "Randomly displace image blocks",
     },
     "bitcrush": {
@@ -553,7 +553,7 @@ EFFECTS = {
         "fn": byte_corrupt,
         "category": "destruction",
         "params": {"amount": 100, "jpeg_quality": 40, "seed": 42},
-        "param_ranges": {"amount": {"min": 0.0, "max": 1.0}, "jpeg_quality": {"min": 1, "max": 95}},
+        "param_ranges": {"amount": {"min": 1, "max": 500}, "jpeg_quality": {"min": 1, "max": 95}},
         "description": "JPEG data bending — corrupt compressed bytes for authentic glitch",
     },
     "blockcorrupt": {
@@ -567,7 +567,7 @@ EFFECTS = {
         "fn": row_shift,
         "category": "destruction",
         "params": {"max_shift": 30, "density": 0.3, "direction": "horizontal", "seed": 42},
-        "param_ranges": {"max_shift": {"min": 1, "max": 100}, "density": {"min": 1, "max": 8}},
+        "param_ranges": {"max_shift": {"min": 1, "max": 100}, "density": {"min": 0.0, "max": 1.0}},
         "description": "Scanline tearing — rows/columns displaced (horizontal/vertical/both)",
     },
     "jpegdamage": {
@@ -595,7 +595,7 @@ EFFECTS = {
         "fn": flow_distort,
         "category": "destruction",
         "params": {"strength": 3.0, "direction": "forward"},
-        "param_ranges": {"strength": {"min": 0.0, "max": 1.0}},
+        "param_ranges": {"strength": {"min": 0.5, "max": 10.0}},
         "description": "Warp frame using optical flow as displacement map",
     },
     "filmgrain": {
@@ -877,7 +877,7 @@ EFFECTS = {
         "fn": video_flanger,
         "category": "modulation",
         "params": {"rate": 0.5, "depth": 10, "feedback": 0.4, "wet": 0.5},
-        "param_ranges": {"rate": {"min": 0.05, "max": 5.0}, "depth": {"min": 0.0, "max": 5.0}, "feedback": {"min": 0.0, "max": 0.95}, "wet": {"min": 0.0, "max": 1.0}},
+        "param_ranges": {"rate": {"min": 0.05, "max": 5.0}, "depth": {"min": 1, "max": 30}, "feedback": {"min": 0.0, "max": 0.95}, "wet": {"min": 0.0, "max": 1.0}},
         "param_descriptions": {"rate": "Sweep speed in Hz", "depth": "Max delay offset in frames", "feedback": "Recirculated signal (0=clean, 0.9=resonant)", "wet": "Effect mix amount"},
         "description": "Flanger — sharp, evenly-spaced interference bands that sweep up and down (comb filter from oscillating frame delay)",
     },
@@ -893,7 +893,7 @@ EFFECTS = {
         "fn": spatial_flanger,
         "category": "modulation",
         "params": {"rate": 0.8, "depth": 20, "feedback": 0.3},
-        "param_ranges": {"rate": {"min": 0.05, "max": 5.0}, "depth": {"min": 0.0, "max": 5.0}, "feedback": {"min": 0.0, "max": 0.95}},
+        "param_ranges": {"rate": {"min": 0.05, "max": 5.0}, "depth": {"min": 1, "max": 50}, "feedback": {"min": 0.0, "max": 0.95}},
         "description": "Per-row horizontal shift with LFO — diagonal sweep flanging",
     },
     "channelphaser": {
@@ -914,7 +914,7 @@ EFFECTS = {
         "fn": hue_flanger,
         "category": "color",
         "params": {"rate": 0.3, "depth": 60.0, "sat_depth": 0.0},
-        "param_ranges": {"rate": {"min": 0.05, "max": 5.0}, "depth": {"min": 0.0, "max": 5.0}, "sat_depth": {"min": 0.0, "max": 1.0}},
+        "param_ranges": {"rate": {"min": 0.05, "max": 5.0}, "depth": {"min": 0.0, "max": 180.0}, "sat_depth": {"min": 0.0, "max": 1.0}},
         "description": "Blend with hue-rotated copy, rotation oscillates — color interference",
     },
     "resonantfilter": {
@@ -956,7 +956,7 @@ EFFECTS = {
         "fn": freq_flanger,
         "category": "modulation",
         "params": {"rate": 0.5, "depth": 10, "mag_blend": 0.4, "phase_blend": 0.15},
-        "param_ranges": {"rate": {"min": 0.05, "max": 5.0}, "depth": {"min": 0.0, "max": 5.0}, "mag_blend": {"min": 0.0, "max": 1.0}, "phase_blend": {"min": 0.0, "max": 1.0}},
+        "param_ranges": {"rate": {"min": 0.05, "max": 5.0}, "depth": {"min": 1, "max": 30}, "mag_blend": {"min": 0.0, "max": 1.0}, "phase_blend": {"min": 0.0, "max": 1.0}},
         "description": "2D FFT magnitude+phase blend with delayed frame — spectral ghosting",
     },
 

@@ -108,3 +108,66 @@ class TestTaxonomy:
         assert isinstance(CATEGORY_ORDER, list)
         assert CATEGORY_ORDER[0] == "tools", "Tools should be first in order"
         assert len(CATEGORY_ORDER) == len(CATEGORIES)
+
+
+class TestParamRanges:
+    """Every numeric parameter must have a corresponding param_range entry."""
+
+    def test_every_numeric_param_has_range(self):
+        """Every numeric (int/float, non-seed, non-bool) param must have a param_range."""
+        missing = []
+        for name, entry in EFFECTS.items():
+            params = entry.get('params', {})
+            ranges = entry.get('param_ranges', {})
+            for pname, default in params.items():
+                if pname == 'seed':
+                    continue
+                if isinstance(default, bool):
+                    continue
+                if isinstance(default, (int, float)) and pname not in ranges:
+                    missing.append(f"{name}.{pname}")
+        assert missing == [], f"Numeric params missing param_ranges: {missing}"
+
+    def test_param_ranges_have_min_and_max(self):
+        """Every param_range entry must have both 'min' and 'max' keys."""
+        bad = []
+        for name, entry in EFFECTS.items():
+            ranges = entry.get('param_ranges', {})
+            for pname, r in ranges.items():
+                if 'min' not in r or 'max' not in r:
+                    bad.append(f"{name}.{pname}")
+        assert bad == [], f"param_ranges missing min/max: {bad}"
+
+    def test_param_ranges_min_less_than_max(self):
+        """Every param_range min must be <= max."""
+        bad = []
+        for name, entry in EFFECTS.items():
+            ranges = entry.get('param_ranges', {})
+            for pname, r in ranges.items():
+                if r.get('min', 0) > r.get('max', 0):
+                    bad.append(f"{name}.{pname} (min={r['min']}, max={r['max']})")
+        assert bad == [], f"param_ranges with min > max: {bad}"
+
+    def test_default_within_range(self):
+        """Every numeric param's default must be within its param_range."""
+        bad = []
+        for name, entry in EFFECTS.items():
+            params = entry.get('params', {})
+            ranges = entry.get('param_ranges', {})
+            for pname, default in params.items():
+                if pname in ranges and isinstance(default, (int, float)) and not isinstance(default, bool):
+                    r = ranges[pname]
+                    if default < r['min'] or default > r['max']:
+                        bad.append(f"{name}.{pname} (default={default}, range={r['min']}-{r['max']})")
+        assert bad == [], f"Defaults outside param_ranges: {bad}"
+
+    def test_no_orphaned_param_ranges(self):
+        """Every param_range key must correspond to an actual param."""
+        orphans = []
+        for name, entry in EFFECTS.items():
+            params = entry.get('params', {})
+            ranges = entry.get('param_ranges', {})
+            for pname in ranges:
+                if pname not in params:
+                    orphans.append(f"{name}.{pname}")
+        assert orphans == [], f"param_ranges for non-existent params: {orphans}"
