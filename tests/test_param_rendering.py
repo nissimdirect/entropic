@@ -291,7 +291,8 @@ class TestBoolParams:
         result, err = render_effect(effect_name, param_overrides)
         assert err is None, f"{test_id} crashed: {err}"
         assert result is not None, f"{test_id} returned None"
-        assert result.shape == (120, 160, 3), f"{test_id} shape: {result.shape}"
+        assert result.shape[:2] == (120, 160), f"{test_id} spatial shape: {result.shape}"
+        assert result.shape[2] in (3, 4), f"{test_id} channels: {result.shape[2]}"
 
 
 # ─── Test 5: String/mode params ───

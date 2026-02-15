@@ -109,9 +109,13 @@
             <button class="browser-tab" data-btab="presets" onclick="switchBrowserTab('presets')">Presets</button>
         </div>
         <div id="effects-panel" class="browser-panel active">
+            <div id="browser-search-bar">
+                <input type="text" id="browser-search" placeholder="Search effects..." oninput="onBrowserSearch(this.value)" autocomplete="off" spellcheck="false">
+            </div>
             <div id="browser-view-toggle">
                 <button class="view-btn active" data-view="category" onclick="switchBrowserView('category')">Category</button>
                 <button class="view-btn" data-view="package" onclick="switchBrowserView('package')">Package</button>
+                <button class="view-btn" data-view="favorites" onclick="switchBrowserView('favorites')">&#9733;</button>
             </div>
             <div id="effect-list"></div>
         </div>
@@ -137,6 +141,13 @@
             <span id="perf-hud-events"></span>
         </div>
         <div id="frame-info"></div>
+        <div id="diff-toolbar" style="display:none">
+            <button onclick="diffCapture()" data-tooltip="Save current frame as reference">Capture</button>
+            <button onclick="diffShow('diff')" data-tooltip="Show pixel difference heatmap">Diff</button>
+            <button onclick="diffShow('split')" data-tooltip="Left=reference, Right=current">Split</button>
+            <button onclick="diffClear()" data-tooltip="Clear reference frame">Clear</button>
+        </div>
+        <canvas id="diff-canvas" style="display:none"></canvas>
         <!-- Frame scrubber hidden: timeline handles all scrubbing -->
         <div id="frame-scrubber" style="display:none">
             <input type="range" id="frame-slider" min="0" max="100" value="0">
@@ -203,11 +214,18 @@
         <div id="mixer"><!-- Rendered by JS: renderMixer() --></div>
     </div>
 
+    <!-- INFO VIEW: Ableton-style hover info (bottom-left) -->
+    <div id="info-view">
+        <div class="info-view-label">Info</div>
+        <div id="info-view-content">Hover over any control, effect, or panel element to see details here.</div>
+    </div>
+
     <!-- BOTTOM: Effect Chain Rack -->
     <div id="chain-area">
         <div id="chain-header">
             <span>Effect Chain</span>
             <span class="count" id="chain-count">0 devices</span>
+            <span id="chain-complexity" title="Click to clear frame cache" onclick="clearFrameCache();updateChainComplexity(_countDevices(chain));showToast('Frame cache cleared','info',null,1500)" style="cursor:pointer"></span>
             <span id="histogram-toggle" onclick="toggleHistogramPanel()" style="margin-left:auto;cursor:pointer;font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;" title="Toggle Histogram">Histogram</span>
         </div>
         <div id="histogram-panel" class="collapsed">

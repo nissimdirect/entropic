@@ -301,35 +301,50 @@ class LayerStack:
 
             alpha = layer._current_opacity
 
+            # Handle RGBA frames: extract per-pixel alpha from 4th channel
+            pixel_alpha = None
+            if frame.ndim == 3 and frame.shape[2] == 4:
+                pixel_alpha = frame[:, :, 3].astype(np.float32) / 255.0
+                frame = frame[:, :, :3]
+
             if result is None:
                 # First visible layer becomes the base
-                if alpha >= 1.0:
+                if pixel_alpha is not None:
+                    pa = (pixel_alpha * alpha)[:, :, np.newaxis]
+                    result = np.clip(frame.astype(np.float32) * pa, 0, 255).astype(np.uint8)
+                elif alpha >= 1.0:
                     result = frame.copy()
                 else:
                     result = np.clip(frame.astype(np.float32) * alpha, 0, 255).astype(np.uint8)
                 continue
 
             # Ensure same size (resize if needed)
-            if result.shape != frame.shape:
+            if result.shape[:2] != frame.shape[:2]:
                 from PIL import Image
                 h, w = result.shape[:2]
                 img = Image.fromarray(frame)
                 frame = np.array(img.resize((w, h), Image.LANCZOS))
+                if pixel_alpha is not None:
+                    pa_img = Image.fromarray((pixel_alpha * 255).astype(np.uint8))
+                    pixel_alpha = np.array(pa_img.resize((w, h), Image.LANCZOS)).astype(np.float32) / 255.0
 
             if alpha <= 0:
                 continue
+
+            # Compute effective alpha (layer opacity * per-pixel alpha)
+            if pixel_alpha is not None:
+                eff_alpha = (pixel_alpha * alpha)[:, :, np.newaxis]
+            else:
+                eff_alpha = alpha
 
             # Get blend function
             blend_fn = _BLEND_FNS.get(layer.blend_mode)
 
             if blend_fn is None:
                 # Normal blend: result = bottom * (1-a) + top * a
-                if alpha >= 1.0:
-                    result = frame.copy()
-                else:
-                    r = result.astype(np.float32)
-                    f = frame.astype(np.float32)
-                    result = np.clip(r * (1.0 - alpha) + f * alpha, 0, 255).astype(np.uint8)
+                r = result.astype(np.float32)
+                f = frame.astype(np.float32)
+                result = np.clip(r * (1.0 - eff_alpha) + f * eff_alpha, 0, 255).astype(np.uint8)
             else:
                 # Non-normal blend mode:
                 # 1. Compute blended = blend_fn(bottom, top)
@@ -337,10 +352,7 @@ class LayerStack:
                 r = result.astype(np.float32)
                 f = frame.astype(np.float32)
                 blended = blend_fn(r, f)
-                if alpha >= 1.0:
-                    result = np.clip(blended, 0, 255).astype(np.uint8)
-                else:
-                    result = np.clip(r * (1.0 - alpha) + blended * alpha, 0, 255).astype(np.uint8)
+                result = np.clip(r * (1.0 - eff_alpha) + blended * eff_alpha, 0, 255).astype(np.uint8)
 
         # If no layers visible, return black frame
         if result is None:

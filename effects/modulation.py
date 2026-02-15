@@ -10,48 +10,106 @@ def ring_mod(
     frame: np.ndarray,
     frequency: float = 4.0,
     direction: str = "horizontal",
+    mode: str = "am",
+    depth: float = 1.0,
+    source: str = "internal",
     frame_index: int = 0,
     total_frames: int = 1,
 ) -> np.ndarray:
-    """Multiply frame by a sine wave carrier, like audio ring modulation.
+    """Ring modulation — multiply frame by a carrier signal.
 
-    Creates alternating bright/dark bands that shift over time.
+    Modes:
+        am: Classic amplitude modulation (sine carrier on brightness).
+        fm: Frequency modulation — brightness modulates carrier frequency.
+        phase: Luminance shifts carrier phase per-pixel.
+        multi: 3 harmonic carriers per RGB channel (rich color splitting).
 
     Args:
         frame: Input frame (H, W, 3) uint8.
         frequency: Carrier frequency (cycles across frame width/height).
         direction: "horizontal", "vertical", or "radial".
+        mode: Modulation mode — "am", "fm", "phase", "multi".
+        depth: Modulation depth (0.0-1.0). 0 = no effect, 1 = full.
+        source: Carrier source — "internal" (sine) or "luminance" (self-mod).
         frame_index: Current frame number (shifts the pattern over time).
         total_frames: Total frame count.
 
     Returns:
-        Frame modulated by sine carrier.
+        Modulated frame.
     """
     frequency = max(0.5, min(50.0, float(frequency)))
+    depth = max(0.0, min(1.0, float(depth)))
     h, w = frame.shape[:2]
+    f = frame.astype(np.float32)
 
-    # Phase shifts with frame_index for animation
     phase = frame_index * 0.1
 
-    if direction == "vertical":
-        coords = np.arange(h).reshape(-1, 1)
-        carrier = 0.5 + 0.5 * np.sin(2.0 * np.pi * frequency * coords / h + phase)
-        carrier = carrier[:, :, np.newaxis]  # (H, 1, 1)
-    elif direction == "radial":
-        cy, cx = h / 2, w / 2
-        y = np.arange(h).reshape(-1, 1) - cy
-        x = np.arange(w).reshape(1, -1) - cx
-        dist = np.sqrt(x**2 + y**2)
-        max_dist = np.sqrt(cx**2 + cy**2)
-        carrier = 0.5 + 0.5 * np.sin(2.0 * np.pi * frequency * dist / max_dist + phase)
-        carrier = carrier[:, :, np.newaxis]  # (H, W, 1)
-    else:  # horizontal
-        coords = np.arange(w).reshape(1, -1)
-        carrier = 0.5 + 0.5 * np.sin(2.0 * np.pi * frequency * coords / w + phase)
-        carrier = carrier[:, :, np.newaxis]  # (1, W, 1)
+    def _make_coords(freq, ph):
+        if direction == "vertical":
+            coords = np.arange(h, dtype=np.float32).reshape(-1, 1)
+            return 2.0 * np.pi * freq * coords / h + ph
+        elif direction == "radial":
+            cy, cx = h / 2, w / 2
+            y = np.arange(h, dtype=np.float32).reshape(-1, 1) - cy
+            x = np.arange(w, dtype=np.float32).reshape(1, -1) - cx
+            dist = np.sqrt(x**2 + y**2)
+            max_dist = np.sqrt(cx**2 + cy**2) + 0.01
+            return 2.0 * np.pi * freq * dist / max_dist + ph
+        else:
+            coords = np.arange(w, dtype=np.float32).reshape(1, -1)
+            return 2.0 * np.pi * freq * coords / w + ph
 
-    result = np.clip(frame.astype(np.float32) * carrier, 0, 255).astype(np.uint8)
-    return result
+    if mode == "fm":
+        # Brightness modulates carrier frequency
+        lum = np.mean(f, axis=2) / 255.0
+        if source == "luminance":
+            freq_mod = frequency * (1.0 + lum * depth * 2.0)
+        else:
+            freq_mod = frequency
+        theta = _make_coords(1.0, phase)
+        if theta.ndim == 2:
+            carrier = 0.5 + 0.5 * np.sin(theta * freq_mod)
+        else:
+            carrier = 0.5 + 0.5 * np.sin(theta * freq_mod)
+        carrier = carrier[:, :, np.newaxis] if carrier.ndim == 2 else carrier[:, :, np.newaxis]
+        carrier = (1.0 - depth) + depth * carrier
+        return np.clip(f * carrier, 0, 255).astype(np.uint8)
+
+    elif mode == "phase":
+        # Luminance shifts the phase per-pixel
+        lum = np.mean(f, axis=2) / 255.0
+        base_theta = _make_coords(frequency, phase)
+        if base_theta.ndim == 1:
+            base_theta = base_theta.reshape(1, -1) if direction != "vertical" else base_theta.reshape(-1, 1)
+        phase_shift = lum * np.pi * 2.0 * depth
+        carrier = 0.5 + 0.5 * np.sin(base_theta + phase_shift)
+        carrier = carrier[:, :, np.newaxis]
+        return np.clip(f * carrier, 0, 255).astype(np.uint8)
+
+    elif mode == "multi":
+        # 3 harmonic carriers per RGB channel
+        result = np.zeros_like(f)
+        for c, harmonic in enumerate([1.0, 1.5, 2.0]):
+            theta = _make_coords(frequency * harmonic, phase + c * 0.7)
+            if theta.ndim == 1:
+                theta = theta.reshape(1, -1) if direction != "vertical" else theta.reshape(-1, 1)
+            carrier = (1.0 - depth) + depth * (0.5 + 0.5 * np.sin(theta))
+            result[:, :, c] = f[:, :, c] * carrier
+        return np.clip(result, 0, 255).astype(np.uint8)
+
+    else:  # am (default)
+        theta = _make_coords(frequency, phase)
+        if source == "luminance":
+            lum = np.mean(f, axis=2) / 255.0
+            carrier = 0.5 + 0.5 * np.sin(theta.reshape(theta.shape[0] if theta.ndim > 1 else 1, -1) * (1.0 + lum))
+            carrier = carrier[:, :, np.newaxis]
+        else:
+            carrier = 0.5 + 0.5 * np.sin(theta)
+            if carrier.ndim == 1:
+                carrier = carrier.reshape(1, -1) if direction != "vertical" else carrier.reshape(-1, 1)
+            carrier = carrier[:, :, np.newaxis]
+        carrier = (1.0 - depth) + depth * carrier
+        return np.clip(f * carrier, 0, 255).astype(np.uint8)
 
 
 def gate(

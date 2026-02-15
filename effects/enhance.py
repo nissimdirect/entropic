@@ -127,22 +127,22 @@ def emboss(
     embossed_arr = np.array(embossed)
 
     if transparent_bg:
-        # Make gray areas (neutral emboss background) transparent/black
+        # Return RGBA: gray areas (neutral emboss background) → alpha=0
         # Emboss filter produces gray (~128) for flat areas, bright/dark for edges
         gray_threshold = 30  # Distance from 128 to consider "gray"
         luminance = np.mean(embossed_arr.astype(np.float32), axis=2)
-        gray_mask = np.abs(luminance - 128) < gray_threshold
-        # Set gray areas to black (simulates transparency in RGB-only system)
-        result_arr = embossed_arr.copy()
-        result_arr[gray_mask] = 0
+        edge_strength = np.clip(np.abs(luminance - 128) / gray_threshold, 0, 1)
+        alpha_channel = (edge_strength * 255).astype(np.uint8)
 
         if amount < 1.0:
-            # Blend with original
-            result_arr = np.clip(
-                frame.astype(np.float32) * (1.0 - amount) + result_arr.astype(np.float32) * amount,
+            embossed_arr = np.clip(
+                frame.astype(np.float32) * (1.0 - amount) + embossed_arr.astype(np.float32) * amount,
                 0, 255,
             ).astype(np.uint8)
-        return result_arr
+            alpha_channel = np.clip(alpha_channel.astype(np.float32) * amount, 0, 255).astype(np.uint8)
+
+        # Return RGBA (H, W, 4)
+        return np.dstack([embossed_arr, alpha_channel])
 
     if amount >= 1.0:
         return embossed_arr

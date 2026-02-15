@@ -169,12 +169,32 @@ async def list_effects():
                 params[k] = {"type": "list", "default": v}
             elif isinstance(v, str):
                 params[k] = {"type": "string", "default": v}
-        effects.append({
+        # Add per-param descriptions and ui ranges
+        param_descs = entry.get("param_descriptions", {})
+        for k in params:
+            if k in param_descs:
+                params[k]["description"] = param_descs[k]
+            # Sweet spot zone and UI range from param_ranges
+            r = ranges.get(k, {})
+            if params[k].get("type") in ("float", "int"):
+                ui_min = r.get("ui_min")
+                ui_max = r.get("ui_max")
+                if ui_min is not None:
+                    params[k]["sweet_min"] = ui_min
+                    params[k]["ui_min"] = ui_min
+                if ui_max is not None:
+                    params[k]["sweet_max"] = ui_max
+                    params[k]["ui_max"] = ui_max
+
+        eff_entry = {
             "name": name,
             "category": entry.get("category", "other"),
             "description": entry["description"],
             "params": params,
-        })
+        }
+        if entry.get("alias_of"):
+            eff_entry["alias_of"] = entry["alias_of"]
+        effects.append(eff_entry)
     return {
         "effects": effects,
         "categories": CATEGORIES,
@@ -899,6 +919,33 @@ async def get_frame(frame_number: int):
     return {"preview": _frame_to_data_url(frame)}
 
 
+class ThumbnailRequest(BaseModel):
+    effect_name: str
+    frame_number: int = 0
+
+
+@app.post("/api/preview/thumbnail")
+async def preview_thumbnail(req: ThumbnailRequest):
+    """Render a small thumbnail of a single effect for hover preview."""
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail="No video loaded")
+    try:
+        frame = extract_single_frame(_state["video_path"], req.frame_number)
+        # Downscale to 160px wide for speed
+        h, w = frame.shape[:2]
+        thumb_w = 160
+        thumb_h = int(h * thumb_w / max(w, 1))
+        frame = np.array(Image.fromarray(frame).resize((thumb_w, thumb_h)))
+
+        frame = apply_chain(frame, [{"name": req.effect_name, "params": {}}],
+                            frame_index=req.frame_number,
+                            total_frames=_state["video_info"].get("total_frames", 1),
+                            watermark=False)
+        return {"preview": _frame_to_data_url(frame)}
+    except Exception:
+        raise HTTPException(status_code=400, detail="Thumbnail generation failed")
+
+
 # ============ PROJECT SAVE/LOAD ============
 
 PROJECTS_DIR = Path.home() / "Documents" / "Entropic Projects"
@@ -1099,6 +1146,21 @@ async def render_video(req: RenderRequest):
         if len(frame_files) > MAX_FRAMES_PER_RENDER:
             raise HTTPException(status_code=400, detail=f"Video too long ({len(frame_files)} frames, max {MAX_FRAMES_PER_RENDER})")
 
+        # Disk space estimation: 2× frame PNGs (input + output) ~= 2× frames × resolution × 3 bytes
+        w, h = int(info["width"] * scale), int(info["height"] * scale)
+        est_png_bytes = w * h * 3  # Uncompressed; PNGs compress ~40-60%
+        est_total_gb = (len(frame_files) * est_png_bytes * 2) / (1024 ** 3)
+        try:
+            disk_stat = os.statvfs(tmpdir)
+            free_gb = (disk_stat.f_bavail * disk_stat.f_frsize) / (1024 ** 3)
+            if est_total_gb > free_gb * 0.8:  # Leave 20% headroom
+                raise HTTPException(status_code=400, detail=(
+                    f"Render needs ~{est_total_gb:.1f}GB temp space but only {free_gb:.1f}GB free. "
+                    f"Use lower quality or shorter clip."
+                ))
+        except OSError:
+            pass  # Can't check — proceed with caution
+
         # Process each frame
         for i, fp in enumerate(frame_files):
             frame = load_frame(fp)
@@ -1115,10 +1177,15 @@ async def render_video(req: RenderRequest):
                                     watermark=True)
                 if original is not None:
                     mix = max(0.0, min(1.0, req.mix))
+                    # Normalize channels for blend (RGBA → strip alpha)
+                    blend_frame = frame[:, :, :3] if frame.ndim == 3 and frame.shape[2] == 4 else frame
                     frame = np.clip(
-                        original.astype(float) * (1 - mix) + frame.astype(float) * mix,
+                        original.astype(float) * (1 - mix) + blend_frame.astype(float) * mix,
                         0, 255
                     ).astype(np.uint8)
+            # Ensure RGB for output (strip any RGBA alpha channel)
+            if frame.ndim == 3 and frame.shape[2] == 4:
+                frame = frame[:, :, :3]
             save_frame(frame, str(processed_dir / f"frame_{i+1:06d}.png"))
 
         # Reassemble
@@ -1205,6 +1272,20 @@ async def export_video(export: ExportSettings):
         if len(frame_files) > MAX_FRAMES_PER_RENDER:
             raise HTTPException(status_code=400, detail=_error_detail("video_too_long", f"Video too long ({len(frame_files)} frames, max {MAX_FRAMES_PER_RENDER})"))
 
+        # Disk space estimation guard
+        est_png_bytes = target_w * target_h * 3
+        est_total_gb = (len(frame_files) * est_png_bytes * 2) / (1024 ** 3)
+        try:
+            disk_stat = os.statvfs(tmpdir)
+            free_gb = (disk_stat.f_bavail * disk_stat.f_frsize) / (1024 ** 3)
+            if est_total_gb > free_gb * 0.8:
+                raise HTTPException(status_code=400, detail=_error_detail(
+                    "disk_space", f"Export needs ~{est_total_gb:.1f}GB temp space but only {free_gb:.1f}GB free. "
+                    f"Use lower resolution or shorter clip."
+                ))
+        except OSError:
+            pass
+
         # Apply trim if specified
         start_idx = 0
         end_idx = len(frame_files)
@@ -1236,10 +1317,16 @@ async def export_video(export: ExportSettings):
                                     watermark=True)
                 if original is not None:
                     mix = max(0.0, min(1.0, export.mix))
+                    # Normalize channels for blend (RGBA → strip alpha)
+                    blend_frame = frame[:, :, :3] if frame.ndim == 3 and frame.shape[2] == 4 else frame
                     frame = np.clip(
-                        original.astype(float) * (1 - mix) + frame.astype(float) * mix,
+                        original.astype(float) * (1 - mix) + blend_frame.astype(float) * mix,
                         0, 255
                     ).astype(np.uint8)
+
+            # Ensure RGB for output (strip any RGBA alpha channel)
+            if frame.ndim == 3 and frame.shape[2] == 4:
+                frame = frame[:, :, :3]
 
             # Resize to target dimensions if different from extracted
             h_now, w_now = frame.shape[:2]
@@ -1368,6 +1455,9 @@ MAX_PREVIEW_DIMENSION = 1280  # Cap preview size to limit data URL bloat
 def _frame_to_data_url(frame: np.ndarray) -> str:
     """Convert numpy frame to base64 data URL for <img> tag.
     Downscales large frames to keep data URLs under ~500KB."""
+    # Strip alpha channel — JPEG doesn't support RGBA
+    if frame.ndim == 3 and frame.shape[2] == 4:
+        frame = frame[:, :, :3]
     img = Image.fromarray(frame)
 
     # Downscale if larger than preview limit

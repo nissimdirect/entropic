@@ -14,6 +14,8 @@ import cv2
 
 # ─── State buffers ───
 _physics_state = {}
+_physics_access_order = []  # LRU tracking: most recent at end
+_MAX_PHYSICS_ENTRIES = 8    # Cap: ~250MB at 1080p (8 × 31.6MB)
 
 # Number of warm-up iterations for single-frame preview.
 # This lets physics effects show visible displacement even on frame 0.
@@ -21,14 +23,30 @@ _PREVIEW_WARMUP_FRAMES = 8
 
 
 def _get_state(key, h, w):
-    """Get or create physics state for this effect instance."""
-    if key not in _physics_state:
-        _physics_state[key] = {
-            "dx": np.zeros((h, w), dtype=np.float32),  # x displacement
-            "dy": np.zeros((h, w), dtype=np.float32),  # y displacement
-            "vx": np.zeros((h, w), dtype=np.float32),  # x velocity
-            "vy": np.zeros((h, w), dtype=np.float32),  # y velocity
-        }
+    """Get or create physics state for this effect instance.
+
+    Enforces LRU eviction when state entries exceed _MAX_PHYSICS_ENTRIES.
+    Each entry holds 4 float32 fields of shape (H, W) = ~31.6MB at 1080p.
+    """
+    if key in _physics_state:
+        # Move to end (most recently used)
+        if key in _physics_access_order:
+            _physics_access_order.remove(key)
+        _physics_access_order.append(key)
+        return _physics_state[key]
+
+    # Evict LRU entries if at capacity
+    while len(_physics_state) >= _MAX_PHYSICS_ENTRIES and _physics_access_order:
+        evict_key = _physics_access_order.pop(0)
+        _physics_state.pop(evict_key, None)
+
+    _physics_state[key] = {
+        "dx": np.zeros((h, w), dtype=np.float32),  # x displacement
+        "dy": np.zeros((h, w), dtype=np.float32),  # y displacement
+        "vx": np.zeros((h, w), dtype=np.float32),  # x velocity
+        "vy": np.zeros((h, w), dtype=np.float32),  # y velocity
+    }
+    _physics_access_order.append(key)
     return _physics_state[key]
 
 
@@ -501,11 +519,11 @@ def pixel_elastic(
         spring_fy = -stiffness * state["dy"]
 
         # F_total = F_external + F_spring
-        # Non-linear mass scaling: mass=1 → divisor 1.0, mass=3 → divisor 1.6, mass=5 → divisor 2.2
-        # Keeps high-mass visible instead of dividing linearly
-        mass_divisor = 0.4 + mass * 0.6
-        ax = (fx * 0.1 + spring_fx) / mass_divisor
-        ay = (fy * 0.1 + spring_fy) / mass_divisor
+        # Exponential mass scaling: mass=1 → factor 0.61, mass=3 → 0.22, mass=5 → 0.08
+        # High mass still moves visibly (exponential decay instead of dead zone)
+        mass_factor = np.exp(-mass * 0.5)
+        ax = (fx * 0.1 + spring_fx) * mass_factor
+        ay = (fy * 0.1 + spring_fy) * mass_factor
 
         # Update velocity and position (Euler integration)
         state["vx"] = (state["vx"] + ax) * damping
@@ -808,6 +826,10 @@ def pixel_magnetic(
     key = f"magnetic_{seed}"
     state = _get_state(key, h, w)
 
+    # Enforce minimum poles for field types that need them
+    if field_type in ("quadrupole", "toroidal") and poles < 2:
+        poles = 2
+
     rng = np.random.default_rng(seed)
     # Seed-based field variation: offset center and tilt angle
     seed_offset_x = (rng.random() - 0.5) * 0.15
@@ -854,8 +876,8 @@ def pixel_magnetic(
                 ddy = rny - py
                 r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
                 sign = (-1) ** p
-                bx += sign * ddx / (r ** 3) * strength * 0.3
-                by += sign * ddy / (r ** 3) * strength * 0.3
+                bx += sign * ddx / (r ** 3) * strength
+                by += sign * ddy / (r ** 3) * strength
 
         elif field_type == "toroidal":
             r = np.sqrt(rnx * rnx + rny * rny) + 0.01
@@ -1243,10 +1265,10 @@ def pixel_quantum(
             tunnel_push = in_barrier * tunnel_mask * np.sign(dist_to_barrier) * barrier_width_px * 2
             fx_total += tunnel_push * 0.3
 
-        # Heisenberg uncertainty: minimum 20% even at frame 0 so params are visible in preview
+        # Heisenberg uncertainty: ramps up over time (no artificial floor)
         sim_frame = frame_index + step
         sim_total = max(total_frames, iterations * 2) if _is_preview(frame_index, total_frames) else total_frames
-        uncertainty_t = uncertainty * max(0.2, min(1.0, sim_frame / max(sim_total * 0.3, 1)))
+        uncertainty_t = uncertainty * min(1.0, sim_frame / max(sim_total * 0.3, 1))
         unc_rng = np.random.default_rng(seed + sim_frame * 7)
         fx_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.2
         fy_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.2
@@ -1264,7 +1286,9 @@ def pixel_quantum(
 
     # Superposition: ghost copies at offset positions
     if superposition > 0:
-        ghost_strength = superposition * max(0, 1.0 - decoherence * frame_index)
+        # Scale decoherence by total_frames so ghosts persist through full render
+        effective_decoherence = decoherence * (100.0 / max(total_frames, 1))
+        ghost_strength = superposition * max(0, 1.0 - effective_decoherence * frame_index)
         if ghost_strength > 0.01:
             result = result.astype(np.float32)
             for copy_i in range(2):
@@ -2176,3 +2200,103 @@ def pixel_risograph(
             result[:, :, c] *= (1.0 - layer_mask * (1.0 - ink_value))
 
     return np.clip(result, 0, 255).astype(np.uint8)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# MEGA-EFFECTS — Unified wrappers that dispatch to original functions
+# ══════════════════════════════════════════════════════════════════════
+
+import inspect as _inspect
+
+_DYNAMICS_MODES = {
+    "liquify": pixel_liquify,
+    "gravity": pixel_gravity,
+    "vortex": pixel_vortex,
+    "explode": pixel_explode,
+    "elastic": pixel_elastic,
+    "melt": pixel_melt,
+}
+
+_COSMOS_MODES = {
+    "blackhole": pixel_blackhole,
+    "antigravity": pixel_antigravity,
+    "magnetic": pixel_magnetic,
+    "timewarp": pixel_timewarp,
+    "dimensionfold": pixel_dimensionfold,
+    "wormhole": pixel_wormhole,
+    "quantum": pixel_quantum,
+    "darkenergy": pixel_darkenergy,
+    "superfluid": pixel_superfluid,
+}
+
+_ORGANIC_MODES = {
+    "bubbles": pixel_bubbles,
+    "inkdrop": pixel_inkdrop,
+    "haunt": pixel_haunt,
+}
+
+_DECAY_MODES = {
+    "xerox": pixel_xerox,
+    "fax": pixel_fax,
+    "risograph": pixel_risograph,
+}
+
+
+def _dispatch(mode_map, mode, frame, **kwargs):
+    """Dispatch to a specific effect function, passing only matching kwargs."""
+    fn = mode_map.get(mode)
+    if fn is None:
+        raise ValueError(f"Unknown mode: {mode}. Available: {', '.join(mode_map.keys())}")
+    sig = _inspect.signature(fn)
+    valid = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    return fn(frame, **valid)
+
+
+def pixel_dynamics(
+    frame: np.ndarray,
+    mode: str = "liquify",
+    **kwargs,
+) -> np.ndarray:
+    """Unified pixel dynamics — 6 modes of physical motion.
+
+    Modes: liquify, gravity, vortex, explode, elastic, melt.
+    Pass any parameter from the underlying effect; unrecognized params are ignored.
+    """
+    return _dispatch(_DYNAMICS_MODES, mode, frame, **kwargs)
+
+
+def pixel_cosmos(
+    frame: np.ndarray,
+    mode: str = "blackhole",
+    **kwargs,
+) -> np.ndarray:
+    """Unified pixel cosmos — 9 modes of impossible physics.
+
+    Modes: blackhole, antigravity, magnetic, timewarp, dimensionfold,
+           wormhole, quantum, darkenergy, superfluid.
+    """
+    return _dispatch(_COSMOS_MODES, mode, frame, **kwargs)
+
+
+def pixel_organic(
+    frame: np.ndarray,
+    mode: str = "bubbles",
+    **kwargs,
+) -> np.ndarray:
+    """Unified pixel organic — 3 modes of oracle-inspired effects.
+
+    Modes: bubbles, inkdrop, haunt.
+    """
+    return _dispatch(_ORGANIC_MODES, mode, frame, **kwargs)
+
+
+def pixel_decay(
+    frame: np.ndarray,
+    mode: str = "xerox",
+    **kwargs,
+) -> np.ndarray:
+    """Unified pixel decay — 3 modes of print degradation.
+
+    Modes: xerox, fax, risograph.
+    """
+    return _dispatch(_DECAY_MODES, mode, frame, **kwargs)

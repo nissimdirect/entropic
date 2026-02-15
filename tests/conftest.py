@@ -15,6 +15,7 @@ def _reset_effect_state():
     from effects import physics, temporal, destruction, sidechain, dsp_filters
 
     physics._physics_state.clear()
+    physics._physics_access_order.clear()
     temporal._temporal_state.clear()
     destruction._destruction_state.clear()
     sidechain._sidechain_state.clear()
@@ -28,6 +29,7 @@ def _reset_effect_state():
 
     # Also clear after test to prevent leaks in other direction
     physics._physics_state.clear()
+    physics._physics_access_order.clear()
     temporal._temporal_state.clear()
     destruction._destruction_state.clear()
     sidechain._sidechain_state.clear()

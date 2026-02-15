@@ -1318,6 +1318,73 @@ PACKAGES = {
             },
         },
     },
+
+    # =========================================================================
+    # WHIMSY — Retro, fantastical, soft, playful
+    # =========================================================================
+    "whimsy": {
+        "name": "Whimsy",
+        "description": "Retro, fantastical, and soft effects. Shapes floating, "
+                       "flares drifting, watercolor washes — less hard edges, more magic.",
+        "effects_used": ["kaleidoscope", "softbloom", "shapeoverlay", "lensflare",
+                         "watercolor", "rainbowshift", "sparkle", "filmgrainwarm"],
+        "recipes": {
+            "fairy-tale": {
+                "name": "Fairy Tale",
+                "description": "Soft bloom + sparkle + warm grain. Ethereal storybook look.",
+                "effects": [
+                    {"name": "softbloom", "params": {"radius": 20, "intensity": 0.5, "threshold": 160, "mood": "dreamy"}},
+                    {"name": "sparkle", "params": {"density": 0.003, "size": 4, "mood": "fairy", "spread": "highlights", "seed": 42}},
+                    {"name": "filmgrainwarm", "params": {"amount": 0.1, "warmth": 0.4, "mood": "vintage", "seed": 42}},
+                ],
+            },
+            "retro-prism": {
+                "name": "Retro Prism",
+                "description": "Rainbow shift + lens flare + film grain. 70s psychedelic.",
+                "effects": [
+                    {"name": "rainbowshift", "params": {"speed": 0.8, "direction": "diagonal", "opacity": 0.3, "mood": "prismatic"}},
+                    {"name": "lensflare", "params": {"position_x": 0.2, "position_y": 0.25, "intensity": 0.5, "mood": "retro", "streaks": 8}},
+                    {"name": "filmgrainwarm", "params": {"amount": 0.2, "size": 2.0, "warmth": 0.5, "mood": "kodak", "seed": 42}},
+                ],
+            },
+            "shape-dance": {
+                "name": "Shape Dance",
+                "description": "Animated shapes + kaleidoscope + sparkle. Playful motion graphics.",
+                "effects": [
+                    {"name": "shapeoverlay", "params": {"shape": "triangle", "count": 8, "size": 0.08, "opacity": 0.3, "orientation": "spiral", "mood": "playful", "seed": 42}},
+                    {"name": "kaleidoscope", "params": {"segments": 4, "rotation": 15, "mood": "soft"}},
+                    {"name": "sparkle", "params": {"density": 0.001, "size": 2, "mood": "glitter", "seed": 42}},
+                ],
+            },
+            "watercolor-dream": {
+                "name": "Watercolor Dream",
+                "description": "Watercolor paint + soft bloom + warm grain. Fine art feel.",
+                "effects": [
+                    {"name": "watercolor", "params": {"edge_strength": 0.6, "blur_radius": 5, "paper_texture": 0.4, "mood": "vibrant", "seed": 42}},
+                    {"name": "softbloom", "params": {"radius": 10, "intensity": 0.3, "threshold": 200, "mood": "ethereal"}},
+                    {"name": "filmgrainwarm", "params": {"amount": 0.08, "warmth": 0.2, "mood": "vintage", "seed": 42}},
+                ],
+            },
+            "cosmic-frost": {
+                "name": "Cosmic Frost",
+                "description": "Frost sparkle + lens flare + rainbow. Sci-fi winter wonderland.",
+                "effects": [
+                    {"name": "sparkle", "params": {"density": 0.005, "size": 5, "mood": "frost", "spread": "edges", "seed": 42}},
+                    {"name": "lensflare", "params": {"position_x": 0.5, "position_y": 0.2, "intensity": 0.8, "mood": "sci_fi", "streaks": 4, "size": 0.2}},
+                    {"name": "rainbowshift", "params": {"speed": 0.3, "direction": "radial", "opacity": 0.15, "mood": "smooth"}},
+                ],
+            },
+            "expired-memory": {
+                "name": "Expired Memory",
+                "description": "Expired film + watercolor + soft bloom. Faded nostalgic dream.",
+                "effects": [
+                    {"name": "filmgrainwarm", "params": {"amount": 0.25, "size": 2.5, "warmth": 0.6, "mood": "expired", "seed": 42}},
+                    {"name": "watercolor", "params": {"edge_strength": 0.3, "blur_radius": 10, "paper_texture": 0.2, "mood": "faded", "seed": 42}},
+                    {"name": "softbloom", "params": {"radius": 25, "intensity": 0.4, "threshold": 150, "mood": "dreamy"}},
+                ],
+            },
+        },
+    },
 }
 
 

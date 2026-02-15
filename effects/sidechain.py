@@ -658,3 +658,32 @@ def sidechain_interference(
         frame, mode=mode, strength=strength, seed=seed,
         frame_index=frame_index, total_frames=total_frames, key_frame=key_frame,
     )
+
+
+# ─── Unified Sidechain Operator ───
+
+import inspect as _inspect
+
+_SIDECHAIN_MODES = {
+    "duck": sidechain_duck,
+    "pump": sidechain_pump,
+    "gate": sidechain_gate,
+    "cross": sidechain_cross,
+}
+
+
+def sidechain_operator(
+    frame: np.ndarray,
+    mode: str = "duck",
+    **kwargs,
+) -> np.ndarray:
+    """Unified sidechain operator — 4 modes: duck, pump, gate, cross.
+
+    Pass any parameter from the underlying effect; unrecognized params are ignored.
+    """
+    fn = _SIDECHAIN_MODES.get(mode)
+    if fn is None:
+        raise ValueError(f"Unknown sidechain mode: {mode}. Available: {', '.join(_SIDECHAIN_MODES.keys())}")
+    sig = _inspect.signature(fn)
+    valid = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    return fn(frame, **valid)

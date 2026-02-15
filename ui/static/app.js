@@ -461,6 +461,100 @@ let lfoAnimFrame = null;
 let lfoPhase = 0;
 let lfoLastTime = 0;
 
+// ============ INFO VIEW (Ableton-style) ============
+
+function showInfoView(name, desc) {
+    const el = document.getElementById('info-view-content');
+    if (!el) return;
+    const def = effectDefs.find(e => e.name === name);
+    const cat = def?.category || '';
+    el.textContent = `${name} [${cat}] — ${desc}`;
+}
+
+// ============ EFFECT HOVER PREVIEW (thumbnail tooltip) ============
+
+let _hoverPreviewTimer = null;
+const _hoverPreviewCache = {};  // effectName -> dataUrl
+
+function showEffectHoverPreview(effectName, event) {
+    clearTimeout(_hoverPreviewTimer);
+    if (!videoLoaded) return;
+
+    // Position the tooltip near the mouse
+    let tooltip = document.getElementById('effect-hover-preview');
+    if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'effect-hover-preview';
+        document.body.appendChild(tooltip);
+    }
+    tooltip.style.left = (event.clientX + 16) + 'px';
+    tooltip.style.top = (event.clientY - 50) + 'px';
+
+    // Show cached immediately if available
+    if (_hoverPreviewCache[effectName]) {
+        tooltip.innerHTML = `<img src="${_hoverPreviewCache[effectName]}" alt="preview">`;
+        tooltip.style.display = 'block';
+        return;
+    }
+
+    // Debounced fetch
+    _hoverPreviewTimer = setTimeout(async () => {
+        try {
+            tooltip.innerHTML = '<div class="hover-loading">...</div>';
+            tooltip.style.display = 'block';
+            const res = await fetch(`${API}/api/preview/thumbnail`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ effect_name: effectName, frame_number: currentFrame }),
+            });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            _hoverPreviewCache[effectName] = data.preview;
+            tooltip.innerHTML = `<img src="${data.preview}" alt="preview">`;
+        } catch {
+            tooltip.style.display = 'none';
+        }
+    }, 400);
+}
+
+function hideEffectHoverPreview() {
+    clearTimeout(_hoverPreviewTimer);
+    const tooltip = document.getElementById('effect-hover-preview');
+    if (tooltip) tooltip.style.display = 'none';
+}
+
+function showInfoViewText(text) {
+    const el = document.getElementById('info-view-content');
+    if (el) el.textContent = text;
+}
+
+// ============ CHAIN COMPLEXITY METER ============
+
+function updateChainComplexity(deviceCount) {
+    const el = document.getElementById('chain-complexity');
+    if (!el) return;
+    if (deviceCount === 0) {
+        el.textContent = '';
+        el.className = '';
+        return;
+    }
+    let label, cls;
+    if (deviceCount <= 4) {
+        label = 'Light';
+        cls = 'low';
+    } else if (deviceCount <= 8) {
+        label = 'Medium';
+        cls = 'medium';
+    } else {
+        label = 'Heavy';
+        cls = 'high';
+    }
+    const cacheSize = frameCache.size;
+    const bufferInfo = cacheSize > 0 ? ` | Buf: ${cacheSize}/${FRAME_CACHE_MAX}` : '';
+    el.textContent = `${label} (${deviceCount})${bufferInfo}`;
+    el.className = cls;
+}
+
 // ============ PERFORM MODE STATE ============
 
 let perfLayers = [];              // Layer configs from server [{layer_id, name, effects, trigger_mode, ...}]
@@ -636,8 +730,26 @@ async function init() {
 
 // ============ EFFECT BROWSER ============
 
-let browserView = 'category';  // 'category' or 'package'
+let browserView = 'category';  // 'category' | 'package' | 'favorites'
 let packageDefs = null;        // Loaded on first package view
+let browserSearchQuery = '';   // Current search filter
+
+// Favorites (persisted in localStorage)
+const _favorites = new Set(JSON.parse(localStorage.getItem('entropic_favorites') || '[]'));
+function _saveFavorites() {
+    localStorage.setItem('entropic_favorites', JSON.stringify([..._favorites]));
+}
+function toggleFavorite(name) {
+    if (_favorites.has(name)) _favorites.delete(name);
+    else _favorites.add(name);
+    _saveFavorites();
+    renderBrowser();
+}
+
+function onBrowserSearch(query) {
+    browserSearchQuery = query.trim().toLowerCase();
+    renderBrowser();
+}
 
 function switchBrowserView(view) {
     browserView = view;
@@ -650,9 +762,34 @@ function switchBrowserView(view) {
 function renderBrowser() {
     if (browserView === 'package') {
         renderBrowserPackages();
+    } else if (browserView === 'favorites') {
+        renderBrowserFavorites();
     } else {
         renderBrowserCategories();
     }
+}
+
+function renderBrowserFavorites() {
+    const list = document.getElementById('effect-list');
+    const favNames = [..._favorites].filter(n => effectDefs.some(e => e.name === n));
+    if (favNames.length === 0) {
+        list.innerHTML = '<div style="padding:20px 12px;color:var(--text-dim);font-size:11px;text-align:center">No favorites yet.<br>Right-click any effect &rarr; Add to Favorites</div>';
+        return;
+    }
+    let html = '';
+    for (const name of favNames.sort()) {
+        const def = effectDefs.find(e => e.name === name);
+        const desc = def?.description || '';
+        html += `<div class="effect-item" draggable="true" data-effect="${esc(name)}"
+                     ondragstart="onBrowserDragStart(event, '${esc(name)}')"
+                     data-tooltip="${esc(desc)}">
+                    ${gripHTML()}
+                    <span class="name">${esc(name)}</span>
+                    <span class="fav-star active" onclick="event.stopPropagation();toggleFavorite('${esc(name)}')" title="Remove from favorites">&#9733;</span>
+                    <span class="effect-desc">${esc(desc.slice(0, 60))}</span>
+                </div>`;
+    }
+    list.innerHTML = html;
 }
 
 // Collapsed state: all folders start collapsed, toggling is tracked here
@@ -668,12 +805,50 @@ function toggleCategory(cat) {
     renderBrowserCategories();
 }
 
+function _effectMatchesSearch(name, desc) {
+    if (!browserSearchQuery) return true;
+    return name.toLowerCase().includes(browserSearchQuery) ||
+           desc.toLowerCase().includes(browserSearchQuery);
+}
+
+function _effectItemHTML(name, desc) {
+    const shortDesc = desc.split(' — ')[1] || desc;
+    const isFav = _favorites.has(name);
+    return `<div class="effect-item" draggable="true" data-effect="${esc(name)}"
+                 ondragstart="onBrowserDragStart(event, '${esc(name)}')"
+                 onmouseenter="showInfoView('${esc(name)}','${esc(desc.replace(/'/g, "\\'"))}');showEffectHoverPreview('${esc(name)}',event)"
+                 onmouseleave="hideEffectHoverPreview()"
+                 oncontextmenu="event.preventDefault();showEffectContextMenu(event,'${esc(name)}')"
+                 data-tooltip="${esc(desc)}">
+                ${gripHTML()}
+                <span class="name">${esc(name)}</span>
+                <span class="fav-star${isFav ? ' active' : ''}" onclick="event.stopPropagation();toggleFavorite('${esc(name)}')" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${isFav ? '&#9733;' : '&#9734;'}</span>
+                <span class="effect-desc">${esc(shortDesc.slice(0, 60))}</span>
+            </div>`;
+}
+
+function showEffectContextMenu(event, name) {
+    const isFav = _favorites.has(name);
+    const menu = document.getElementById('ctx-menu');
+    menu.innerHTML = `
+        <div class="ctx-item" onclick="toggleFavorite('${esc(name)}');document.getElementById('ctx-menu').style.display='none'">
+            ${isFav ? '&#9733; Remove from Favorites' : '&#9734; Add to Favorites'}
+        </div>
+        <div class="ctx-item" onclick="addEffect('${esc(name)}');document.getElementById('ctx-menu').style.display='none'">
+            Add to Chain
+        </div>`;
+    menu.style.display = 'block';
+    menu.style.left = event.clientX + 'px';
+    menu.style.top = event.clientY + 'px';
+}
+
 function renderBrowserCategories() {
     const list = document.getElementById('effect-list');
 
     // Build categories dynamically from effectDefs
     const groups = {};
     for (const def of effectDefs) {
+        if (!_effectMatchesSearch(def.name, def.description || '')) continue;
         const cat = (def.category || 'other').toUpperCase();
         if (!groups[cat]) groups[cat] = [];
         groups[cat].push(def.name);
@@ -695,11 +870,11 @@ function renderBrowserCategories() {
         }
     }
 
-    // On first render, collapse all folders by default
+    // On first render, open top 3 categories, collapse the rest
     if (!_categoriesInitialized) {
         _categoriesInitialized = true;
-        for (const cat of sorted) {
-            _collapsedCategories.add(cat);
+        for (let i = 0; i < sorted.length; i++) {
+            if (i >= 3) _collapsedCategories.add(sorted[i]);
         }
     }
 
@@ -710,11 +885,14 @@ function renderBrowserCategories() {
         return cat;
     }
 
+    // If search is active, expand all matching categories
+    const forceExpand = !!browserSearchQuery;
+
     let html = '';
     for (const cat of sorted) {
         const names = groups[cat];
         if (!names || names.length === 0) continue;
-        const collapsed = _collapsedCategories.has(cat);
+        const collapsed = forceExpand ? false : _collapsedCategories.has(cat);
         const arrow = collapsed ? '&#9654;' : '&#9660;';
         html += `<div class="cat-folder${collapsed ? ' collapsed' : ''}" data-cat="${esc(cat)}">
             <div class="cat-header" onclick="toggleCategory('${esc(cat)}')">
@@ -724,15 +902,13 @@ function renderBrowserCategories() {
             </div>
             <div class="cat-items">`;
         for (const name of names.sort()) {
-            html += `
-                <div class="effect-item" draggable="true" data-effect="${esc(name)}"
-                     ondragstart="onBrowserDragStart(event, '${esc(name)}')"
-                     title="${esc(effectDefs.find(e => e.name === name)?.description || '')}">
-                    ${gripHTML()}
-                    <span class="name">${esc(name)}</span>
-                </div>`;
+            const desc = effectDefs.find(e => e.name === name)?.description || '';
+            html += _effectItemHTML(name, desc);
         }
         html += `</div></div>`;
+    }
+    if (!html && browserSearchQuery) {
+        html = '<div style="padding:20px 12px;color:var(--text-dim);font-size:11px;text-align:center">No effects matching "' + esc(browserSearchQuery) + '"</div>';
     }
     list.innerHTML = html;
 }
@@ -821,6 +997,28 @@ function setupDragDrop() {
         if (files.length > 0) {
             uploadVideo(files[0]);
         }
+    });
+
+    // Alt+Click on preview to place spatial concentration point on selected device
+    canvas.addEventListener('click', e => {
+        if (!e.altKey) return;
+        const img = document.getElementById('preview-img');
+        if (!img || img.style.display === 'none') return;
+        const rect = img.getBoundingClientRect();
+        const nx = (e.clientX - rect.left) / rect.width;
+        const ny = (e.clientY - rect.top) / rect.height;
+        if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return;
+        // Find selected device
+        const sel = document.querySelector('.device.selected');
+        if (!sel) return;
+        const deviceId = parseInt(sel.dataset.id);
+        const device = chain.find(d => d.id === deviceId);
+        if (!device) return;
+        device.params.concentrate_x = parseFloat(nx.toFixed(3));
+        device.params.concentrate_y = parseFloat(ny.toFixed(3));
+        if (!device.params.concentrate_radius) device.params.concentrate_radius = 0.2;
+        if (!device.params.concentrate_strength) device.params.concentrate_strength = 1.0;
+        schedulePreview();
     });
 }
 
@@ -1389,6 +1587,90 @@ function flattenChain() {
     schedulePreview();
 }
 
+// ============ PARAMETER PRESETS PER EFFECT ============
+// Stored in localStorage: { effectName: { presetName: {params} } }
+const _paramPresets = JSON.parse(localStorage.getItem('entropic_param_presets') || '{}');
+function _saveParamPresets() {
+    localStorage.setItem('entropic_param_presets', JSON.stringify(_paramPresets));
+}
+
+function _buildPresetDropdown(device) {
+    const presets = _paramPresets[device.name] || {};
+    const presetNames = Object.keys(presets);
+    if (presetNames.length === 0) {
+        return `<select class="device-preset-select" onchange="loadDevicePreset(${device.id}, this.value); this.selectedIndex=0" onclick="event.stopPropagation()">
+            <option value="">Presets</option>
+            <option value="__save__">Save Current...</option>
+            <option value="__default__">Reset to Default</option>
+        </select>`;
+    }
+    let opts = '<option value="">Presets</option>';
+    for (const name of presetNames) {
+        opts += `<option value="${esc(name)}">${esc(name)}</option>`;
+    }
+    opts += '<option disabled>---</option>';
+    opts += '<option value="__save__">Save Current...</option>';
+    opts += '<option value="__default__">Reset to Default</option>';
+    if (presetNames.length > 0) {
+        opts += '<option value="__delete__">Delete Preset...</option>';
+    }
+    return `<select class="device-preset-select" onchange="loadDevicePreset(${device.id}, this.value); this.selectedIndex=0" onclick="event.stopPropagation()">${opts}</select>`;
+}
+
+function loadDevicePreset(deviceId, presetName) {
+    const device = _findItemInChain(chain, deviceId);
+    if (!device) return;
+
+    if (presetName === '__save__') {
+        const name = prompt('Preset name:');
+        if (!name) return;
+        if (!_paramPresets[device.name]) _paramPresets[device.name] = {};
+        _paramPresets[device.name][name] = JSON.parse(JSON.stringify(device.params));
+        _saveParamPresets();
+        showToast(`Saved preset: ${name}`, 'success');
+        renderChain();
+        return;
+    }
+
+    if (presetName === '__default__') {
+        const def = effectDefs.find(e => e.name === device.name);
+        if (def) {
+            device.params = JSON.parse(JSON.stringify(def.params));
+            pushHistory(`Reset ${device.name} to default`);
+            renderChain();
+            renderLayers();
+            schedulePreview();
+            showToast('Reset to default parameters', 'info');
+        }
+        return;
+    }
+
+    if (presetName === '__delete__') {
+        const presets = _paramPresets[device.name] || {};
+        const names = Object.keys(presets);
+        if (names.length === 0) return;
+        const name = prompt(`Delete preset (${names.join(', ')}):`);
+        if (name && presets[name]) {
+            delete presets[name];
+            _saveParamPresets();
+            showToast(`Deleted preset: ${name}`, 'info');
+            renderChain();
+        }
+        return;
+    }
+
+    // Load named preset
+    const presets = _paramPresets[device.name] || {};
+    if (presets[presetName]) {
+        device.params = JSON.parse(JSON.stringify(presets[presetName]));
+        pushHistory(`Load preset: ${presetName}`);
+        renderChain();
+        renderLayers();
+        schedulePreview();
+        showToast(`Loaded preset: ${presetName}`, 'success');
+    }
+}
+
 function _renderDeviceHTML(device) {
     // Render a group item
     if (device.type === 'group') {
@@ -1407,7 +1689,7 @@ function _renderDeviceHTML(device) {
                     <button class="device-power ${powerClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                     <span class="group-name" ondblclick="event.stopPropagation(); renameGroup(${device.id})">${esc(device.name)}</span>
                     <span class="group-badge">${childCount} fx</span>
-                    <span class="device-mix" title="Group Mix: ${mixPct}%">
+                    <span class="device-mix" title="Group Mix: ${mixPct}% — 0% = bypass group, 100% = full effect chain">
                         <label>Mix</label>
                         <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
                                data-device="${device.id}"
@@ -1448,10 +1730,11 @@ function _renderDeviceHTML(device) {
 
     const advancedCount = advancedHtml ? (advancedHtml.match(/class="(param-control|knob-container|dropdown-container|toggle-container)/g) || []).length : 0;
     const advancedToggle = advancedCount > 0
-        ? `<button class="params-toggle" onclick="this.nextElementSibling.classList.toggle('open'); this.classList.toggle('open')">+ ${advancedCount} more</button><div class="params-advanced">${advancedHtml}</div>`
+        ? `<button class="params-toggle" onclick="this.nextElementSibling.classList.toggle('open'); this.classList.toggle('open')">All Parameters (${advancedCount})</button><div class="params-advanced">${advancedHtml}</div>`
         : '';
 
     const mixPct = Math.round((device.mix ?? 1.0) * 100);
+    const presetDropdown = _buildPresetDropdown(device);
 
     return `
         <div class="device ${bypassClass}" data-device-id="${device.id}" draggable="true"
@@ -1460,7 +1743,8 @@ function _renderDeviceHTML(device) {
                 ${gripHTML()}
                 <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                 <span class="device-name">${esc(device.name)}</span>
-                <span class="device-mix" title="Dry/Wet Mix: ${mixPct}%">
+                ${presetDropdown}
+                <span class="device-mix" title="Mix: ${mixPct}% — 0% = original frame, 100% = full effect">
                     <label>Mix</label>
                     <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
                            data-device="${device.id}"
@@ -1480,6 +1764,7 @@ function renderChain() {
     const rack = document.getElementById('chain-rack');
     const totalDevices = _countDevices(chain);
     document.getElementById('chain-count').textContent = `${totalDevices} device${totalDevices !== 1 ? 's' : ''}`;
+    updateChainComplexity(totalDevices);
 
     rack.innerHTML = chain.map(device => _renderDeviceHTML(device)).join('');
 
@@ -1538,17 +1823,16 @@ function renderLayers() {
             const opacity = Math.round((state.opacity ?? l.opacity) * 100);
             const color = PERF_LAYER_COLORS[i] || '#888';
             const modeTag = l.trigger_mode.replace('_', ' ');
-            const eyeIcon = state.muted ? '&#9675;' : '&#9679;';
-            const eyeClass = state.muted ? 'hidden' : '';
+            const powerClass = state.muted ? 'off' : 'on';
             const activeClass = isActive ? 'selected' : '';
             const mutedClass = state.muted ? 'bypassed-layer' : '';
 
             return `
                 <div class="layer-item ${activeClass} ${mutedClass}"
                      onclick="perfSelectLayerForEdit(${l.layer_id})">
-                    <span class="layer-eye ${eyeClass}"
+                    <button class="layer-power ${powerClass}"
                           onclick="event.stopPropagation(); perfToggleMute(${l.layer_id})"
-                          title="${state.muted ? 'Unmute' : 'Mute'}">${eyeIcon}</span>
+                          title="${state.muted ? 'Unmute' : 'Mute'}">${state.muted ? 'OFF' : 'ON'}</button>
                     <span class="layer-color-dot" style="background:${color};width:8px;height:8px;border-radius:50%;flex-shrink:0;"></span>
                     <span class="layer-name">${l.name}</span>
                     <span class="layer-index" style="min-width:32px;">${opacity}%</span>
@@ -1565,8 +1849,7 @@ function renderLayers() {
         const layerNum = chain.length - i;
         const selectedClass = device.id === selectedLayerId ? 'selected' : '';
         const bypassedClass = device.bypassed ? 'bypassed-layer' : '';
-        const eyeClass = device.bypassed ? 'hidden' : '';
-        const eyeIcon = device.bypassed ? '&#9675;' : '&#9679;'; // hollow vs filled circle
+        const powerClass = device.bypassed ? 'off' : 'on';
 
         return `
             <div class="layer-item ${selectedClass} ${bypassedClass}"
@@ -1574,7 +1857,7 @@ function renderLayers() {
                  onclick="selectLayer(${device.id})"
                  oncontextmenu="layerContextMenu(event, ${device.id})"
                  draggable="true">
-                <span class="layer-eye ${eyeClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Show' : 'Hide'}">${eyeIcon}</span>
+                <button class="layer-power ${powerClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                 ${gripHTML()}
                 <span class="layer-name">${esc(device.name)}</span>
                 <span class="layer-index">${layerNum}</span>
@@ -1764,18 +2047,31 @@ function createKnob(deviceId, paramName, spec, value, label) {
         ? (Number.isInteger(value) ? value : value.toFixed(2))
         : value;
 
-    const tooltip = `${label}: ${displayVal} (range: ${spec.min}–${spec.max})`;
+    const tooltipDesc = spec.description ? ` — ${spec.description}` : '';
+    const tooltip = `${label}: ${displayVal} (range: ${spec.min}–${spec.max})${tooltipDesc}`;
+
+    // Sweet spot zone arc (subtle green indicator)
+    const sweetMin = spec.sweet_min !== undefined ? (spec.sweet_min - spec.min) / (spec.max - spec.min) : 0.1;
+    const sweetMax = spec.sweet_max !== undefined ? (spec.sweet_max - spec.min) / (spec.max - spec.min) : 0.9;
+    const zoneStart = sweetMin * arcLen * 0.75;
+    const zoneLen = (sweetMax - sweetMin) * arcLen * 0.75;
+    const zoneOffset = -arcLen * 0.125 - zoneStart;
 
     return `
-        <div class="knob-container" title="${tooltip}">
+        <div class="knob-container" data-tooltip="${tooltip}">
             <label>${label}</label>
             <div class="knob" data-device="${deviceId}" data-param="${paramName}"
                  data-min="${spec.min}" data-max="${spec.max}" data-type="${spec.type}"
+                 data-ui-min="${spec.ui_min !== undefined ? spec.ui_min : spec.min}" data-ui-max="${spec.ui_max !== undefined ? spec.ui_max : spec.max}"
                  data-value="${typeof value === 'object' ? value[0] : value}">
                 <svg viewBox="0 0 48 48">
                     <circle class="arc-track" cx="24" cy="24" r="20"
                         stroke-dasharray="${arcLen * 0.75} ${arcLen}"
                         stroke-dashoffset="${-arcLen * 0.125}"
+                        transform="rotate(135 24 24)"/>
+                    <circle class="arc-zone" cx="24" cy="24" r="20"
+                        stroke-dasharray="${zoneLen} ${arcLen}"
+                        stroke-dashoffset="${zoneOffset}"
                         transform="rotate(135 24 24)"/>
                     <circle class="arc-fill" cx="24" cy="24" r="20"
                         stroke-dasharray="${dashLen} ${arcLen}"
@@ -1794,8 +2090,10 @@ function setupKnobInteraction(knobEl) {
     const onMove = (e) => {
         const dy = startY - (e.clientY || e.touches?.[0]?.clientY || startY);
         const sensitivity = e.shiftKey ? 0.001 : 0.005;
-        const min = parseFloat(knobEl.dataset.min);
-        const max = parseFloat(knobEl.dataset.max);
+        const min = parseFloat(knobEl.dataset.uiMin || knobEl.dataset.min);
+        const max = parseFloat(knobEl.dataset.uiMax || knobEl.dataset.max);
+        const fullMin = parseFloat(knobEl.dataset.min);
+        const fullMax = parseFloat(knobEl.dataset.max);
         const range = max - min;
         const type = knobEl.dataset.type;
 
@@ -1812,12 +2110,12 @@ function setupKnobInteraction(knobEl) {
         } else {
             newValue = startValue + dy * sensitivity * range;
         }
-        newValue = Math.max(min, Math.min(max, newValue));
+        newValue = Math.max(fullMin, Math.min(fullMax, newValue));
 
         if (type === 'int') newValue = Math.round(newValue);
 
         knobEl.dataset.value = newValue;
-        updateKnobVisual(knobEl, newValue, min, max, type);
+        updateKnobVisual(knobEl, newValue, fullMin, fullMax, type);
 
         // Update chain data
         const deviceId = parseInt(knobEl.dataset.device);
@@ -2566,7 +2864,7 @@ function schedulePreview(fromPlayhead) {
     }
     // Non-playback call: invalidate cache (params/chain may have changed)
     if (frameCache.size > 0) clearFrameCache();
-    previewDebounce = setTimeout(previewChain, 150);
+    previewDebounce = setTimeout(previewChain, 50);
 }
 
 async function previewChain() {
@@ -2708,6 +3006,82 @@ function showPreview(dataUrl) {
     img.src = dataUrl;
     img.style.display = 'block';
     document.getElementById('empty-state').style.display = 'none';
+    // Show diff toolbar when we have a preview
+    const dt = document.getElementById('diff-toolbar');
+    if (dt) dt.style.display = 'flex';
+    // Auto-update diff if active
+    if (_diffMode && _diffRef) diffShow(_diffMode);
+}
+
+// ============ FRAME DIFF COMPARISON TOOL ============
+let _diffRef = null;   // reference ImageData
+let _diffMode = null;  // 'diff' | 'split' | null
+
+function diffCapture() {
+    const img = document.getElementById('preview-img');
+    if (!img.src || img.style.display === 'none') return;
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    _diffRef = ctx.getImageData(0, 0, c.width, c.height);
+}
+
+function diffShow(mode) {
+    if (!_diffRef) { diffCapture(); return; }
+    const img = document.getElementById('preview-img');
+    const dc = document.getElementById('diff-canvas');
+    if (!img.src || img.style.display === 'none' || !dc) return;
+    dc.width = img.naturalWidth;
+    dc.height = img.naturalHeight;
+    dc.style.display = 'block';
+    const ctx = dc.getContext('2d');
+    // Draw current frame
+    const tc = document.createElement('canvas');
+    tc.width = dc.width; tc.height = dc.height;
+    const tctx = tc.getContext('2d');
+    tctx.drawImage(img, 0, 0);
+    const cur = tctx.getImageData(0, 0, dc.width, dc.height);
+    _diffMode = mode;
+    if (mode === 'diff') {
+        // R/B heatmap of absolute pixel difference
+        const out = ctx.createImageData(dc.width, dc.height);
+        for (let i = 0; i < cur.data.length; i += 4) {
+            const dr = Math.abs(cur.data[i] - _diffRef.data[i]);
+            const dg = Math.abs(cur.data[i+1] - _diffRef.data[i+1]);
+            const db = Math.abs(cur.data[i+2] - _diffRef.data[i+2]);
+            const d = (dr + dg + db) / 3;
+            out.data[i] = Math.min(255, d * 4);     // Red = difference
+            out.data[i+1] = 0;
+            out.data[i+2] = Math.min(255, (255 - d * 4));  // Blue = similarity
+            out.data[i+3] = 255;
+        }
+        ctx.putImageData(out, 0, 0);
+    } else if (mode === 'split') {
+        // Left = reference, Right = current
+        const half = Math.floor(dc.width / 2);
+        const refCanvas = document.createElement('canvas');
+        refCanvas.width = dc.width; refCanvas.height = dc.height;
+        const rctx = refCanvas.getContext('2d');
+        rctx.putImageData(_diffRef, 0, 0);
+        ctx.drawImage(refCanvas, 0, 0, half, dc.height, 0, 0, half, dc.height);
+        ctx.drawImage(img, half, 0, dc.width - half, dc.height, half, 0, dc.width - half, dc.height);
+        // Divider line
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(half, 0);
+        ctx.lineTo(half, dc.height);
+        ctx.stroke();
+    }
+}
+
+function diffClear() {
+    _diffRef = null;
+    _diffMode = null;
+    const dc = document.getElementById('diff-canvas');
+    if (dc) { dc.style.display = 'none'; }
 }
 
 // ============ CONTEXT MENU ============
@@ -2856,6 +3230,16 @@ function ctxAction(action, itemIdx) {
             handleKnobCtxAction(action, itemData);
             break;
         default:
+            // Handle parameter switching on automation lanes
+            if (action.startsWith('switchParam_') && window.timelineEditor && window._laneCtxData) {
+                const newParam = action.replace('switchParam_', '');
+                const lane = window._laneCtxData.lane;
+                lane.paramName = newParam;
+                lane.keyframes = [];  // Clear keyframes since param changed
+                window.timelineEditor.draw();
+                showToast(`Lane switched to: ${newParam}`, 'info');
+                break;
+            }
             // Handle shape insertion
             if (action.startsWith('shape_') && window.timelineEditor && window._laneCtxData) {
                 const shapeName = action.replace('shape_', '');
@@ -3154,13 +3538,16 @@ async function startExport() {
         const data = await res.json();
         if (data.status === 'ok') {
             closeExportDialog();
-            const info = data.size_mb
-                ? `${data.size_mb}MB | ${data.format}`
-                : `${data.format} | ${data.frames} frames`;
-            showToast(`Exported: ${info}`, 'success', {
+            const sizeMB = data.size_mb ? `${data.size_mb}MB` : '';
+            const frames = data.frames ? `${data.frames} frames` : '';
+            const dims = data.width && data.height ? `${data.width}x${data.height}` : '';
+            const parts = [data.format?.toUpperCase(), dims, frames, sizeMB].filter(Boolean);
+            const safePath = (data.path || '').replace(/'/g, "\\'");
+            const fileName = safePath.split('/').pop();
+            showToast(`Export complete: ${fileName}\n${parts.join(' | ')}`, 'success', {
                 label: 'Reveal in Finder',
-                fn: `function(){revealInFinder('${(data.path || '').replace(/'/g, "\\'")}')}`
-            }, 8000);
+                fn: `function(){revealInFinder('${safePath}')}`
+            }, 12000);
         } else {
             handleApiError(data, 'Export failed');
         }
@@ -4639,6 +5026,10 @@ function perfToggleRecord() {
                 label: 'Review',
                 fn: 'perfReviewStart',
             }, 10000);
+            showToast('Bake triggers into timeline automation', 'info', {
+                label: 'Bake to Timeline',
+                fn: 'perfBakeToTimeline',
+            }, 10000);
             showToast('Or discard this take', 'info', {
                 label: 'Discard',
                 fn: 'perfDiscardSession',
@@ -4789,6 +5180,53 @@ function perfToggleLoop() {
         btn.style.color = perfLooping ? '#000' : '';
     }
     showToast(perfLooping ? 'Loop: ON' : 'Loop: OFF', 'info', null, 1500);
+}
+
+// --- Bake Perform to Timeline ---
+function perfBakeToTimeline() {
+    if (perfEventCount === 0) {
+        showToast('No performance data to bake', 'info');
+        return;
+    }
+    if (!window.timelineEditor) {
+        showToast('Timeline not initialized', 'error');
+        return;
+    }
+
+    const te = window.timelineEditor;
+    // Find the first region (or selected region) to attach automation to
+    const region = te.findRegion(te.selectedRegionId) || (te.tracks[0]?.regions?.[0]);
+    if (!region) {
+        showToast('No timeline region to bake into — create a region first', 'error');
+        return;
+    }
+
+    let lanesCreated = 0;
+    for (const perfLane of perfSession.lanes) {
+        // Map perform layer_id to effect index in the region's chain
+        const effectIdx = perfLane.effect_idx;
+        if (effectIdx >= (region.effects || []).length) continue;
+
+        // Create automation lane
+        const paramName = perfLane.param || 'mix';
+        const lane = te.addAutomationLane(region.id, effectIdx, paramName);
+
+        // Convert perform keyframes (absolute frame, value) to automation breakpoints
+        for (const [frame, value] of perfLane.keyframes) {
+            // Normalize value to 0-1 range (perform values may vary)
+            const normValue = typeof value === 'number' ? Math.max(0, Math.min(1, value)) : (value ? 1 : 0);
+            lane.keyframes.push({
+                frame: region.startFrame + frame,
+                value: normValue,
+                curve: perfLane.curve || 'step',
+            });
+        }
+        lane.keyframes.sort((a, b) => a.frame - b.frame);
+        lanesCreated++;
+    }
+
+    te.draw();
+    showToast(`Baked ${lanesCreated} perform lane${lanesCreated !== 1 ? 's' : ''} to timeline`, 'success');
 }
 
 // --- Discard Session ---
@@ -5354,7 +5792,7 @@ renderChain = function() {
                     ${gripHTML()}
                     <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                     <span class="device-name">${esc(device.name)}</span>
-                    <span class="device-mix" title="Dry/Wet Mix: ${mixPct}%">
+                    <span class="device-mix" title="Mix: ${mixPct}% — 0% = original frame, 100% = full effect">
                         <label>Mix</label>
                         <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
                                data-device="${device.id}"

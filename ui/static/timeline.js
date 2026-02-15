@@ -660,11 +660,20 @@ class TimelineEditor {
         ctx.fillStyle = '#1a1a20';
         ctx.fillRect(0, y, this.trackHeaderWidth, h);
 
-        // Lane label
+        // Lane label with dropdown indicator
         ctx.fillStyle = lane.color;
         ctx.font = '9px Menlo, Monaco, monospace';
         ctx.textBaseline = 'middle';
         ctx.fillText(lane.paramName, 8, y + h / 2);
+        // Small dropdown triangle after label
+        const textW = ctx.measureText(lane.paramName).width;
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        ctx.moveTo(12 + textW, y + h / 2 - 2);
+        ctx.lineTo(16 + textW, y + h / 2 - 2);
+        ctx.lineTo(14 + textW, y + h / 2 + 1);
+        ctx.closePath();
+        ctx.fill();
 
         // Color indicator bar
         ctx.fillStyle = lane.color;
@@ -1061,7 +1070,27 @@ class TimelineEditor {
 
         if (typeof showContextMenu === 'function') {
             window._laneCtxData = { lane, shapeStart, shapeEnd };
-            showContextMenu(e, [
+
+            // Build "Switch Parameter" submenu from effect params
+            const paramItems = [];
+            if (typeof chain !== 'undefined' && chain[lane.effectIndex]) {
+                const device = chain[lane.effectIndex];
+                const def = typeof effectDefs !== 'undefined' ? effectDefs.find(e => e.name === device.name) : null;
+                if (def && def.params) {
+                    for (const pName of Object.keys(def.params)) {
+                        if (pName === lane.paramName) continue;
+                        const val = typeof def.params[pName];
+                        if (val === 'number') {
+                            paramItems.push({
+                                label: `  ${pName}`,
+                                action: `switchParam_${pName}`,
+                            });
+                        }
+                    }
+                }
+            }
+
+            const items = [
                 { label: 'Insert: Ramp Up', action: 'shape_ramp_up' },
                 { label: 'Insert: Ramp Down', action: 'shape_ramp_down' },
                 { label: 'Insert: Sine', action: 'shape_sine' },
@@ -1072,9 +1101,17 @@ class TimelineEditor {
                 '---',
                 { label: 'Simplify', action: 'simplifyLane' },
                 { label: 'Flatten to Static', action: 'flattenLaneToStatic' },
-                '---',
-                { label: 'Delete Lane', action: 'deleteLane', danger: true },
-            ]);
+            ];
+
+            if (paramItems.length > 0) {
+                items.push('---');
+                items.push({ label: `Parameter: ${lane.paramName}`, action: 'noop', disabled: true });
+                items.push(...paramItems);
+            }
+
+            items.push('---');
+            items.push({ label: 'Delete Lane', action: 'deleteLane', danger: true });
+            showContextMenu(e, items);
         }
     }
 
