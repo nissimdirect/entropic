@@ -138,15 +138,60 @@ Would log sliders alone solve the "sweet spot" problem?
 
 ---
 
-## Decisions Needed From User
+## Decisions Made (2026-02-15 Interactive Session)
 
-1. Operators: Dropdown or cables?
-2. Taxonomy: Tags, tabs, or headers?
-3. Kill Quick mode?
-4. Fix and test physics before consolidating?
-5. Color correction workflow — in Entropic or before import?
-6. Log sliders alone, or full sensitivity system?
+### 1. Operators: Ableton "Map" Model
+- Click "Map" on the LFO → it blinks → click target parameter → mapped
+- Parameter enters locked state (you watch it move but can't manually override)
+- Multiple params mapped to same LFO
+- Waveforms: sine, saw, square, triangle, ramp up, ramp down, noise, random, bin
+- One LFO with multiple poles (multi-output) preferred over 10 separate LFOs
+- **NOT dropdown. NOT cables. Ableton's direct "Map" interaction.**
+
+### 2. Taxonomy: Collapsible Folders (Photoshop Model)
+- Effects dropdown has collapsible folder sections:
+  - modulation, operators, temporal, pixel, physics, color
+  - "creative" needs a better, more descriptive name (TBD)
+- Photoshop-style menu bar organization at top (View, Window, etc.)
+- Folders start collapsed, click to expand
+
+### 3. Quick Mode: Flagged Off
+- User is "pretty apathetic toward it"
+- Timeline = primary mode, Perform = toggle panel within Timeline
+- May revisit later, but not a priority
+
+### 4. Physics: Fix First, Then Decide Together
+- Fix server.py:377 → test all 21 effects → user evaluates visuals
+- **User does NOT trust Claude's visual taste for keep/cut decisions**
+- Need to define evaluation criteria together before any consolidation
+- This is a USER decision, not a data-driven-by-Claude decision
+
+### 5. Color Tools: Full Photoshop-Level Suite
+- Levels, Curves, HSL, Color Balance, live histogram
+- No compromise — this is table stakes for being taken seriously
+- ~3 sessions of work
+
+### 6. Sensitivity: Log Scaling Now + Auto-Detect Later
+- Step 1 (NOW): Logarithmic/exponential slider scaling (30 min)
+- Step 2 (LATER sprint): Full auto-detection system
+- Phased approach — instant UX win first
 
 ---
 
-*Brainstorm by Claude Code | Session 65 | 2026-02-15*
+## Revised Effort Estimate (Post-Decisions)
+
+| Proposal | Approach | Sessions |
+|----------|----------|----------|
+| Bug fixes (P0) | server.py + app.js + cleanup guards | 1 |
+| Log scaling | Exponential slider mapping | 0.1 |
+| Taxonomy | Collapsible folders + menu bar | 1 |
+| Kill Quick mode | Flag off + Perform toggle | 0.5 |
+| Operators | Ableton Map model, 1 LFO first | 2 |
+| Color tools | Full suite (Levels/Curves/HSL/Balance/histogram) | 3 |
+| Physics consolidation | Deferred until after fix + user evaluation | TBD |
+| Auto-detection | Deferred to later sprint | TBD |
+| **TOTAL COMMITTED** | | **~7.5 sessions** |
+
+---
+
+*Decisions captured by Claude Code | Interactive session | 2026-02-15*
