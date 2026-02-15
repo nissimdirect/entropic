@@ -390,7 +390,9 @@ async def preview_effect(chain: EffectChain):
                 ).astype(np.uint8)
         return {"preview": _frame_to_data_url(frame)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.exception("Preview failed")
+        raise HTTPException(status_code=500, detail="Effect processing failed")
 
 
 class TimelinePreviewRequest(BaseModel):
@@ -463,7 +465,9 @@ async def preview_timeline(req: TimelinePreviewRequest):
 
         return {"preview": _frame_to_data_url(processed)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.exception("Timeline preview failed")
+        raise HTTPException(status_code=500, detail="Timeline processing failed")
 
 
 class TimelineExportRequest(BaseModel):

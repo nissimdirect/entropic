@@ -306,7 +306,7 @@ class LayerStack:
                 if alpha >= 1.0:
                     result = frame.copy()
                 else:
-                    result = (frame.astype(np.float32) * alpha).astype(np.uint8)
+                    result = np.clip(frame.astype(np.float32) * alpha, 0, 255).astype(np.uint8)
                 continue
 
             # Ensure same size (resize if needed)
