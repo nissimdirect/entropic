@@ -1362,7 +1362,8 @@ h3 .count {
 
 /* Mode accent colors — Norman: make mode SCREAMINGLY obvious */
 .perform-mode #topbar {
-    border-bottom: 2px solid #ff6b35;
+    border-bottom: 3px solid #ff6b35;
+    box-shadow: 0 2px 8px rgba(255, 107, 53, 0.3);
 }
 
 .perform-mode .mode-btn[data-mode="perform"] {
@@ -1576,6 +1577,15 @@ h3 .count {
     background: var(--bg-mid);
 }
 
+.channel-strip.choked-flash {
+    animation: choke-flash 0.3s ease-out;
+}
+
+@keyframes choke-flash {
+    0% { background: rgba(255, 60, 60, 0.3); }
+    100% { background: var(--bg-dark); }
+}
+
 .channel-strip-header {
     display: flex;
     align-items: center;
@@ -1597,9 +1607,10 @@ h3 .count {
     background: var(--bg-light);
     border: 1px solid var(--border);
     border-radius: 2px;
-    padding: 1px 5px;
-    font-size: 9px;
-    color: var(--text-dim);
+    padding: 2px 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
     flex-shrink: 0;
 }
 
@@ -1664,6 +1675,8 @@ h3 .count {
     display: flex;
     align-items: center;
     justify-content: center;
+    border-width: 3px;
+    border-style: double;
 }
 
 .strip-trigger.mode-one_shot {

@@ -1,10 +1,10 @@
 # Entropic Alpha v2 — User Acceptance Testing Plan
 
-> **Date:** 2026-02-09
-> **Version:** Alpha v2 (109 effects, desktop app, timeline editor, spatial masks, **live performance mode**)
+> **Date:** 2026-02-09 (updated 2026-02-14)
+> **Version:** v0.6.0 (111 effects, desktop app, timeline editor, spatial masks, **CLI performance mode**, **Web UI Perform Mode**)
 > **Tester:** nissimdirect
 > **Prepared by:** CTO, Red Team, Mad Scientist, Lenny, Don Norman
-> **Updated:** Added Sections 22-27 for Live Performance Mode (MIDI, layers, recording, render, safety, stability)
+> **Updated:** Sections 22-27 for CLI Performance Mode. **Sections 28-34 for Web UI Perform Mode (v0.6.0).**
 
 ---
 
@@ -201,7 +201,7 @@ Each command processes your video and opens the result automatically.
 
 #### Mode C: Desktop App (Sections 18-21) — Web-Based UI
 
-A browser-based DAW-style interface.
+A browser-based DAW-style interface with Quick, Timeline, and Perform modes.
 
 **To start:**
 ```bash
@@ -212,6 +212,15 @@ Then open your web browser (Safari or Chrome) and go to:
 http://localhost:7860
 ```
 The interface should load with 4 panels (browser, canvas, chain, layers).
+
+#### Mode D: Web UI Perform Mode (Sections 28-34) — NEW in v0.6.0
+
+The full live performance workflow inside the browser. 4 channel strips, keyboard triggers, ADSR envelopes, choke groups, recording, review, render.
+
+**To start:** Same as Mode C — run `python3 server.py`, open http://localhost:7860
+**Then:** Upload a video, click the **Perform** button in the top bar.
+
+**This is the primary mode to test for live performance readiness.**
 
 ---
 
@@ -704,12 +713,14 @@ If you're short on time, test in this order:
 
 1. **Section 1** (Smoke) — if this fails, stop here
 2. **Section 18** (Desktop App) — app must boot
-3. **Section 9** (Safety) — security issues are blockers
-4. **Section 20A-20B** (Timeline renders) — new feature core
-5. **Section 19A-19C** (Video, Browser, Chain) — existing UI works
-6. **Section 7B** (One recipe per package) — validates packages work
-7. **Section 3** (Individual effects) — the core product
-8. Everything else
+3. **Section 28** (Web Perform: Launch + Mixer) — new v0.6.0 feature
+4. **Section 29** (Web Perform: Keyboard Triggers) — core interaction
+5. **Section 30** (Web Perform: Transport + Recording) — capture performance
+6. **Section 31** (Web Perform: Layer Config) — configure effects/modes
+7. **Section 33** (Web Perform: Save + Render) — export
+8. **Section 9** (Safety) — security
+9. **Section 19** (UI Core) — existing features
+10. Everything else
 
 ---
 
@@ -1107,6 +1118,320 @@ If you're short on time, test in this order:
 
 ---
 
+## SECTION 28: WEB UI PERFORM MODE — LAUNCH & MIXER (v0.6.0)
+
+> **Goal:** Perform mode activates from the web UI, mixer panel renders with 4 channel strips + master.
+> **Time:** ~10 minutes
+> **Setup:** `cd ~/Development/entropic && python3 server.py` → open http://localhost:7860
+> **Prereq:** Upload a video first (any MP4, drag onto canvas or click upload area)
+
+### 28A. Mode Switch
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 28.1 | Perform button exists | Look at top bar | Three mode buttons: Quick, Timeline, Perform | [ ] | |
+| 28.2 | Switch to Perform | Click "Perform" button | Mixer panel appears below preview, transport bar visible | [ ] | |
+| 28.3 | Mode accent | Check top bar border | Orange/red border + glow on top bar (not blue/default) | [ ] | |
+| 28.4 | Mode badge | Check preview area | `[PERFORM]` badge visible on preview | [ ] | |
+| 28.5 | Switch back to Quick | Click "Quick" button | Mixer + transport hide, normal layout returns | [ ] | |
+| 28.6 | No video = blocked | Try Perform without uploading video | Toast: "Load a video first" — stays in current mode | [ ] | |
+| 28.7 | Quick→Perform handoff | Set up effects in Quick mode, then switch to Perform | L2 inherits your Quick mode chain (check L2 strip label) | [ ] | |
+
+### 28B. Mixer Panel
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 28.8 | 4 strips + master | Count channel strips in mixer | L1, L2, L3, L4, MASTER — 5 columns | [ ] | |
+| 28.9 | Strip colors | Check strip headers | L1=red, L2=blue, L3=green, L4=yellow (colored dots) | [ ] | |
+| 28.10 | Key labels visible | Check each strip header | [1], [2], [3], [4] labels readable at arm's length | [ ] | |
+| 28.11 | Layer names | Check strip headers | L1="Base (Clean)", L2="VHS + Glitch", L3="Pixel Sort", L4="Feedback" | [ ] | |
+| 28.12 | Trigger buttons | Check each strip | Each has a trigger button with mode-specific shape | [ ] | |
+| 28.13 | Vertical faders | Check each strip | Vertical opacity slider (0-100%) in each strip | [ ] | |
+| 28.14 | Mute/Solo buttons | Check strip bottoms | M and S buttons on each strip | [ ] | |
+| 28.15 | Master strip | Check rightmost column | Shows "MASTER" with output opacity control | [ ] | |
+
+### 28C. Right Panel (Layers Tab)
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 28.16 | Layers tab in Perform | Click "Layers" tab in right panel | Shows perform layer overview (not Quick mode layers) | [ ] | |
+| 28.17 | Layer rows | Check layer list | Each layer: visibility eye, name, opacity %, trigger mode icon | [ ] | |
+| 28.18 | Click selects layer | Click a layer row | That layer's effects show in the left sidebar browser | [ ] | |
+
+---
+
+## SECTION 29: WEB UI PERFORM MODE — KEYBOARD TRIGGERS
+
+> **Goal:** Keys 1-4 trigger layers with instant visual feedback (3-tier: instant → server → confirmed).
+> **Time:** ~10 minutes
+> **Prereq:** In Perform mode with video loaded
+
+### 29A. Basic Triggers
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 29.1 | Key 1 triggers L1 | Press **1** | L1 strip lights up INSTANTLY (before server responds) | [ ] | |
+| 29.2 | Key 2 triggers L2 | Press **2** | L2 strip lights up, preview shows VHS+Glitch effect | [ ] | |
+| 29.3 | Key 3 triggers L3 | Press **3** | L3 strip lights up, preview shows PixelSort | [ ] | |
+| 29.4 | Key 4 triggers L4 | Press **4** | L4 strip lights up, preview shows Feedback | [ ] | |
+| 29.5 | Invalid key ignored | Press **5**, **6**, **7**, **8**, **9** | Nothing happens, no error | [ ] | |
+| 29.6 | Keys outside perform | Switch to Quick mode, press **1-4** | Nothing happens (keys only active in Perform mode) | [ ] | |
+
+### 29B. Toggle Mode
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 29.7 | Toggle ON | Press **2** once | L2 active (strip lit, trigger button lit) | [ ] | |
+| 29.8 | Toggle OFF | Press **2** again | L2 inactive (strip dim, trigger button dim) | [ ] | |
+| 29.9 | Multiple toggle | Toggle L2, L3, L4 all ON | All three strips lit, preview shows composited effects | [ ] | |
+
+### 29C. Gate Mode (Hold-to-activate)
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 29.10 | Set gate mode | Change L2's trigger mode dropdown to "gate" | Trigger button shape changes to circle | [ ] | |
+| 29.11 | Hold = active | Press and HOLD **2** | L2 active while key held | [ ] | |
+| 29.12 | Release = inactive | Release **2** | L2 deactivates immediately | [ ] | |
+
+### 29D. ADSR Mode
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 29.13 | Set ADSR mode | Change L2's trigger mode to "adsr" | Trigger button gets double-border ring shape | [ ] | |
+| 29.14 | ADSR trigger | Press **2** during playback | L2 fades in (attack), holds (sustain) | [ ] | |
+| 29.15 | ADSR release | Release **2** | L2 fades out (release phase) | [ ] | |
+| 29.16 | ADSR preset change | Change ADSR preset dropdown to "stab" | Different envelope shape (faster attack/decay) | [ ] | |
+
+### 29E. One-Shot Mode
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 29.17 | Set one-shot mode | Change L2's trigger mode to "one_shot" | Trigger button shows flash icon | [ ] | |
+| 29.18 | One-shot trigger | Press **2** | L2 fires once and auto-fades (release handles itself) | [ ] | |
+
+### 29F. Mouse Triggers
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 29.19 | Click trigger button | Click L2's trigger button with mouse | Same behavior as keyboard (toggles/gates depending on mode) | [ ] | |
+| 29.20 | Mouse gate | Set gate mode, mousedown on trigger button | Active while held. Release = off | [ ] | |
+
+---
+
+## SECTION 30: WEB UI PERFORM MODE — TRANSPORT & RECORDING
+
+> **Goal:** Play, record, review, panic controls work. Scrubber, timer, frame counter update.
+> **Time:** ~10 minutes
+
+### 30A. Transport Bar
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 30.1 | Transport visible | In Perform mode | Transport bar between preview and mixer: Play, Rec, Loop, Panic buttons | [ ] | |
+| 30.2 | Timer shows | Check transport | `0:00:00 / [duration]` and `F:0` frame counter | [ ] | |
+| 30.3 | Scrubber works | Drag scrubber slider | Frame counter and preview update | [ ] | |
+| 30.4 | Event counter | Check transport right side | "0 events" counter visible | [ ] | |
+
+### 30B. Playback
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 30.5 | Space = play | Press **Space** | Preview advances at ~15fps, timer counts up, scrubber moves | [ ] | |
+| 30.6 | Space = pause | Press **Space** again | Preview freezes, timer stops | [ ] | |
+| 30.7 | Triggers during play | Play video, press **2** | Layer activates, preview shows effect in real-time | [ ] | |
+| 30.8 | Mode buttons locked | During playback, check mode buttons | Quick/Timeline buttons disabled (can't switch mid-play) | [ ] | |
+
+### 30C. Recording
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 30.9 | R = arm recording | Press **R** | REC button pulses red, toast "Recording armed — buffer cleared" | [ ] | |
+| 30.10 | Scrubber disabled | While recording | Scrubber grayed out (opacity 0.3), dragging does nothing | [ ] | |
+| 30.11 | Perform while recording | Play + trigger layers | Event counter increments with each trigger | [ ] | |
+| 30.12 | R = stop recording | Press **R** again | REC stops pulsing, 3 toasts: Save / Review / Discard | [ ] | |
+| 30.13 | Scrubber re-enabled | After stopping recording | Scrubber back to full opacity, draggable again | [ ] | |
+
+### 30D. Panic
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 30.14 | Shift+P = panic | Turn on L2, L3, L4, then press **Shift+P** | ALL layers reset, all strips go dim, toast "All layers reset" | [ ] | |
+| 30.15 | P alone = nothing | Press **P** without Shift | Nothing happens (modifier required) | [ ] | |
+
+### 30E. HUD Overlay
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 30.16 | HUD shows during play | Start playback | Timer and event count overlay on preview | [ ] | |
+| 30.17 | REC indicator in HUD | Arm recording | Red "REC" text visible in HUD | [ ] | |
+| 30.18 | H toggles HUD | Press **H** | HUD overlay toggles on/off | [ ] | |
+
+---
+
+## SECTION 31: WEB UI PERFORM MODE — LAYER CONFIGURATION
+
+> **Goal:** All layer settings (trigger mode, ADSR, blend, effects, choke, opacity) configurable via mixer dropdowns.
+> **Time:** ~10 minutes
+
+### 31A. Dropdowns
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 31.1 | Trigger mode dropdown | Click trigger mode selector on any strip | Options: toggle, gate, adsr, one_shot, always_on | [ ] | |
+| 31.2 | Change trigger mode | Switch L2 from toggle to gate | Trigger button shape changes, behavior changes | [ ] | |
+| 31.3 | ADSR preset dropdown | With ADSR mode selected | Options: pluck, sustain, stab, pad | [ ] | |
+| 31.4 | Blend mode dropdown | Click blend mode selector | Options: normal, multiply, screen, overlay, add, subtract, difference | [ ] | |
+| 31.5 | Change blend mode | Switch L2 to "multiply" | Preview compositing changes visually | [ ] | |
+
+### 31B. Opacity Faders
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 31.6 | Fader moves | Drag L2's vertical fader | Opacity % label updates in real time | [ ] | |
+| 31.7 | Preview updates | Move fader with playback on | Effect intensity changes in preview | [ ] | |
+| 31.8 | Fader at 0% | Drag to bottom | Layer invisible in preview | [ ] | |
+| 31.9 | Fader at 100% | Drag to top | Layer at full strength | [ ] | |
+
+### 31C. Choke Groups
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 31.10 | Choke dropdown | Click choke group selector | Options: No choke, Choke A, Choke B, Choke C | [ ] | |
+| 31.11 | Set same choke group | Put L2 and L3 both on "Choke A" | Both show Choke A | [ ] | |
+| 31.12 | Choke behavior | Toggle L2 ON, then toggle L3 ON | L2 deactivates (choked by L3), L2 strip flashes red briefly | [ ] | |
+| 31.13 | Choke flash visible | Watch L2's strip when L3 activates | Red flash animation (0.3s) on choked strip | [ ] | |
+
+### 31D. Mute/Solo
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 31.14 | Mute layer | Click M on L2 strip | L2 muted — key 2 does nothing, strip dimmed | [ ] | |
+| 31.15 | Unmute | Click M again | L2 active again | [ ] | |
+| 31.16 | Solo layer | Click S on L2 | Only L2 audible/visible (others suppressed) | [ ] | |
+
+### 31E. Effects (Per-Layer)
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 31.17 | Click effect chain area | Click the effect summary on L2's strip | Left sidebar shows L2's effects for editing | [ ] | |
+| 31.18 | Add effect to layer | Add effect from browser while L2 selected | Effect appears on L2 (not global chain) | [ ] | |
+| 31.19 | Layer keeps effects | Switch layer selection back and forth | Each layer retains its own effect chain | [ ] | |
+
+---
+
+## SECTION 32: WEB UI PERFORM MODE — REVIEW & VISUAL QUALITY
+
+> **Goal:** After recording, user can review the performance with event density visualization.
+> **Time:** ~10 minutes
+
+### 32A. Review Mode
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 32.1 | Enter review | After recording, click "Review" toast | Playback starts from frame 0 with recorded automation | [ ] | |
+| 32.2 | Layer states replay | Watch during review | Channel strips light up at the moments you triggered them | [ ] | |
+| 32.3 | Event density | Check below preview | Mini-timeline shows event density (bars/waveform) | [ ] | |
+| 32.4 | Scrubbing in review | Drag scrubber during review | Preview + strip states update to match recorded state | [ ] | |
+| 32.5 | Exit review | Click play or trigger a layer | Exits review mode, back to live perform | [ ] | |
+
+### 32B. Visual Quality
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 32.6 | 15fps preview | Watch preview during playback | ~15fps, smooth enough for performance | [ ] | |
+| 32.7 | Trigger shape: toggle | Check L1 trigger button (toggle mode) | Square shape (4px radius) | [ ] | |
+| 32.8 | Trigger shape: gate | Set gate mode, check trigger | Circle shape (50% radius, solid) | [ ] | |
+| 32.9 | Trigger shape: ADSR | Set ADSR mode, check trigger | Circle with double border (ring/donut — distinct from gate) | [ ] | |
+| 32.10 | Trigger shape: one-shot | Set one_shot mode, check trigger | Square with flash icon | [ ] | |
+| 32.11 | Trigger shape: always-on | Check L1 (always_on) | Green dot indicator, non-clickable | [ ] | |
+| 32.12 | Active strip glow | Trigger a layer ON | Entire strip background lightens | [ ] | |
+| 32.13 | REC button pulse | Arm recording | REC button has red pulsing CSS animation | [ ] | |
+
+---
+
+## SECTION 33: WEB UI PERFORM MODE — SAVE, RENDER, PROJECT
+
+> **Goal:** Performance data saves, renders at full quality, integrates with project system.
+> **Time:** ~10 minutes
+
+### 33A. Save
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 33.1 | Save after recording | Record a performance, click Save toast | Toast with file path + "Reveal in Finder" | [ ] | |
+| 33.2 | File created | Check exported folder | `.json` automation file exists | [ ] | |
+| 33.3 | Discard | Record, click "Discard" toast | Buffer cleared, event counter resets to 0 | [ ] | |
+
+### 33B. Render
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 33.4 | Render button | Click "Render" in transport | Export dialog opens (or render starts) | [ ] | |
+| 33.5 | Progress indicator | During render | Progress shown (not a blocking modal) | [ ] | |
+| 33.6 | Render complete | Wait for finish | Toast: "Rendered: XXmb @ 30fps" + "Reveal in Finder" | [ ] | |
+| 33.7 | Output plays | Open rendered file in QuickTime/VLC | Video shows your triggered effects at correct times | [ ] | |
+| 33.8 | Audio passthrough | Check rendered file has audio | Audio from source video present in output | [ ] | |
+
+### 33C. Project Integration
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 33.9 | Cmd+S saves project | Press **Cmd+S** in Perform mode | Project saves (same as Quick/Timeline mode) | [ ] | |
+| 33.10 | Project includes perform | Save, reload page, load project | Perform layer config restored | [ ] | |
+| 33.11 | beforeunload warning | Trigger layers (unsaved), try closing tab | Browser warns: "You have unsaved performance data" | [ ] | |
+
+---
+
+## SECTION 34: WEB UI PERFORM MODE — SAFETY & EDGE CASES
+
+> **Goal:** Error prevention, graceful failures, no data loss during live use.
+> **Time:** ~10 minutes
+
+### 34A. Error Prevention (Don Norman)
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 34.1 | Mode switch during play | Start playback, try clicking Quick/Timeline | Mode buttons disabled (grayed out) | [ ] | |
+| 34.2 | Scrub during recording | Arm recording, try dragging scrubber | Scrubber disabled + toast "Cannot scrub while recording" | [ ] | |
+| 34.3 | No video = no perform | Click Perform without uploading video | Toast: "Load a video first", stays in current mode | [ ] | |
+| 34.4 | Shift+P required | Press P alone during performance | Nothing happens (no panic without modifier) | [ ] | |
+
+### 34B. Drag-to-Reorder
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 34.5 | Drag strip | Drag L2's strip header to L4's position | Strips reorder visually | [ ] | |
+| 34.6 | Z-order updated | After drag | Layer compositing order changes in preview | [ ] | |
+| 34.7 | Keys still match | After reorder, press original key numbers | Keys still trigger the correct layer (not position) | [ ] | |
+
+### 34C. New Effects (v0.6.0)
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 34.8 | Chroma key | Add `chroma_key` effect to a layer | Green/blue screen removal — key color removed | [ ] | |
+| 34.9 | Chroma key params | Adjust `hue_center`, `hue_range`, `softness` | Key color and edge quality change | [ ] | |
+| 34.10 | Luma key | Add `luma_key` effect to a layer | Dark or light areas become transparent | [ ] | |
+| 34.11 | Luma key params | Adjust `threshold`, `softness`, `invert` | Key range and behavior change | [ ] | |
+
+### 34D. Input Validation (Red Team)
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 34.12 | Invalid trigger mode | (DevTools) POST invalid trigger_mode to API | 422 error (pydantic validation) | [ ] | |
+| 34.13 | Invalid ADSR preset | (DevTools) POST unknown adsr_preset | 400 error: "Unknown ADSR preset" | [ ] | |
+| 34.14 | Too many effects | (DevTools) POST 25+ effects to update_layer | 400 error: "Max 20 effects per layer" | [ ] | |
+| 34.15 | Invalid blend mode | (DevTools) POST unknown blend_mode | 400 error: "Unknown blend mode" | [ ] | |
+
+### 34E. Stability
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 34.16 | 5-min continuous play | Play + trigger layers for 5 minutes | No crash, no memory leak, consistent ~15fps | [ ] | |
+| 34.17 | Rapid triggers | Rapidly press 1-2-3-4 for 30 seconds | No crash, triggers queue correctly | [ ] | |
+| 34.18 | Server restart recovery | Stop server (Ctrl+C), restart | "Engine disconnected" banner, reconnects on restart | [ ] | |
+
+---
+
 ## UPDATED SCORING SUMMARY
 
 | Section | Tests | Pass | Fail | Skip |
@@ -1132,13 +1457,20 @@ If you're short on time, test in this order:
 | 19. UI Core | 33 | | | |
 | 20. Timeline Editor | 56 | | | |
 | 21. Timeline Export/Projects | 15 | | | |
-| **22. Perform: Launch** | **6** | | | |
-| **23. Perform: Keyboard** | **14** | | | |
-| **24. Perform: Recording** | **8** | | | |
-| **25. Perform: MIDI** | **6** | | | |
-| **26. Perform: Triggers/Visuals** | **10** | | | |
-| **27. Perform: Render/Stability** | **15** | | | |
-| **TOTAL** | **355** | | | |
+| 22. CLI Perform: Launch | 6 | | | |
+| 23. CLI Perform: Keyboard | 14 | | | |
+| 24. CLI Perform: Recording | 8 | | | |
+| 25. CLI Perform: MIDI | 6 | | | |
+| 26. CLI Perform: Triggers/Visuals | 10 | | | |
+| 27. CLI Perform: Render/Stability | 15 | | | |
+| **28. Web Perform: Launch + Mixer** | **18** | | | |
+| **29. Web Perform: Keyboard Triggers** | **20** | | | |
+| **30. Web Perform: Transport + Recording** | **18** | | | |
+| **31. Web Perform: Layer Config** | **19** | | | |
+| **32. Web Perform: Review + Visual** | **13** | | | |
+| **33. Web Perform: Save + Render** | **11** | | | |
+| **34. Web Perform: Safety + Edge Cases** | **18** | | | |
+| **TOTAL** | **472** | | | |
 
 **Ship criteria:**
 - **CLI (Sections 1-17):** 90%+ pass rate (167+ of 185), zero critical failures in Sections 1, 2, 9
@@ -1146,4 +1478,5 @@ If you're short on time, test in this order:
 - **UI Core (Section 19):** 90%+ pass rate (30+ of 33)
 - **Timeline (Section 20):** 85%+ pass rate (48+ of 56) — new feature, some polish acceptable
 - **Timeline Export/Projects (Section 21):** 90%+ pass rate (14+ of 15)
-- **Performance Mode (Sections 22-27):** 90%+ pass rate (53+ of 59), zero failures in 23B (safety) and 27B (stability)
+- **CLI Performance Mode (Sections 22-27):** 90%+ pass rate (53+ of 59), zero failures in 23B (safety) and 27B (stability)
+- **Web UI Perform Mode (Sections 28-34):** 90%+ pass rate (106+ of 117), zero failures in 34A (safety) and 34E (stability). **Test this first for live performance.**

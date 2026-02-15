@@ -2230,10 +2230,16 @@ async function perfInitLayers() {
         if (data.status === 'ok') {
             perfLayers = data.layers;
 
-            // Handoff: Quick mode chain -> L1 effects
+            // Handoff: Quick mode chain -> L2 effects (L1 is always-on base)
             if (quickChain && quickChain.length > 0 && perfLayers.length > 1) {
                 perfLayers[1].effects = quickChain;
                 perfLayers[1].name = 'Quick Chain';
+                // Sync migrated effects to server LayerStack
+                fetch(`${API}/api/perform/update_layer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ layer_id: perfLayers[1].layer_id, effects: quickChain }),
+                }).catch(() => {});
             }
 
             // Init client-side states
@@ -2420,6 +2426,24 @@ function perfTriggerLayer(layerId, eventType) {
             state.active = !state.active;
         } else if (mode === 'gate' || mode === 'adsr' || mode === 'one_shot') {
             state.active = true;
+        }
+        // Client-side choke group: deactivate other layers in same group
+        if (state.active && layer.choke_group != null && layer.choke_group >= 0) {
+            for (const other of perfLayers) {
+                if (other.layer_id !== layerId && other.choke_group === layer.choke_group) {
+                    const otherState = perfLayerStates[other.layer_id];
+                    if (otherState && otherState.active) {
+                        otherState.active = false;
+                        perfUpdateStripVisuals(other.layer_id);
+                        // Flash the choked strip
+                        const chokedStrip = document.querySelector(`.channel-strip[data-layer-id="${other.layer_id}"]`);
+                        if (chokedStrip) {
+                            chokedStrip.classList.add('choked-flash');
+                            setTimeout(() => chokedStrip.classList.remove('choked-flash'), 300);
+                        }
+                    }
+                }
+            }
         }
         // Queue trigger event for server ADSR processing
         perfTriggerQueue.push({ layer_id: layerId, event: 'on' });
@@ -2911,6 +2935,7 @@ function perfUpdateTransport() {
 }
 
 function perfScrub(value) {
+    if (perfRecording) { showToast('Cannot scrub while recording', 'info', null, 1500); return; }
     perfFrameIndex = parseInt(value);
     perfUpdateTransport();
     if (!perfPlaying) schedulePreview();
@@ -2928,14 +2953,17 @@ function perfToggleRecord() {
     perfRecording = !perfRecording;
     const btn = document.getElementById('perf-rec-btn');
 
+    const scrubber = document.querySelector('#perf-scrubber input');
     if (perfRecording) {
         // Clear buffer for fresh take
         perfSession = { type: 'performance', lanes: [] };
         perfEventCount = 0;
         if (btn) btn.classList.add('recording');
+        if (scrubber) { scrubber.disabled = true; scrubber.style.opacity = '0.3'; }
         showToast('Recording armed — buffer cleared', 'info', null, 2000);
     } else {
         if (btn) btn.classList.remove('recording');
+        if (scrubber) { scrubber.disabled = false; scrubber.style.opacity = '1'; }
         if (perfEventCount > 0) {
             showToast(`Recording stopped: ${perfEventCount} events`, 'success', {
                 label: 'Save',
@@ -3067,9 +3095,10 @@ async function perfRender() {
         });
         const data = await res.json();
         if (data.status === 'ok') {
+            const fullPath = data.dir ? `${data.dir}/${data.path}` : data.path;
             showToast(`Rendered: ${data.size_mb}MB @ ${data.fps}fps`, 'success', {
                 label: 'Reveal in Finder',
-                fn: `function(){revealInFinder('${(data.path || '').replace(/'/g, "\\'")}')}`,
+                fn: `function(){revealInFinder('${(fullPath || '').replace(/'/g, "\\'")}')}`,
             }, 8000);
         } else {
             showErrorToast(`Render failed: ${data.detail || 'Unknown error'}`);
@@ -3122,10 +3151,18 @@ function perfReviewStart() {
         }
     }
 
-    // Reset to start
+    // Reset to start — clear all layer states so review is clean
     perfFrameIndex = 0;
     perfReviewing = true;
     perfPlaying = true;
+    for (const l of perfLayers) {
+        const state = perfLayerStates[l.layer_id];
+        if (state) {
+            state.active = l.trigger_mode === 'always_on';
+        }
+    }
+    // Reset server envelopes too
+    perfTriggerQueue = perfLayers.map(l => ({ layer_id: l.layer_id, event: 'panic' }));
 
     // Render event density timeline
     perfRenderEventDensity();

@@ -1106,35 +1106,50 @@ class PerformInitRequest(BaseModel):
     auto: bool = True                 # Auto-generate defaults
 
 
+from typing import Literal
+from pydantic import Field
+
+
+_VALID_TRIGGER_MODES = ("toggle", "gate", "adsr", "one_shot", "always_on")
+_VALID_EVENTS = ("on", "off", "opacity", "panic")
+_MAX_EFFECTS_PER_LAYER = 20
+
+
+class TriggerEvent(BaseModel):
+    layer_id: int
+    event: Literal["on", "off", "opacity", "panic"]
+    value: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
 class PerformFrameRequest(BaseModel):
-    frame_number: int
+    frame_number: int = Field(ge=0)
     layer_states: list[dict] | None = None  # Legacy: [{layer_id, active, opacity}]
-    trigger_events: list[dict] | None = None  # [{layer_id, event: "on"|"off"|"opacity", value?}]
+    trigger_events: list[TriggerEvent] | None = None
 
 
 class PerformUpdateLayerRequest(BaseModel):
     layer_id: int
-    trigger_mode: str | None = None
+    trigger_mode: Literal["toggle", "gate", "adsr", "one_shot", "always_on"] | None = None
     adsr_preset: str | None = None
     blend_mode: str | None = None
     effects: list[dict] | None = None
     choke_group: int | None = -1  # -1 = don't change, None = remove, 0+ = set
-    opacity: float | None = None
-    z_order: int | None = None
+    opacity: float | None = Field(default=None, ge=0.0, le=1.0)
+    z_order: int | None = Field(default=None, ge=0, le=7)
 
 
 class PerformSaveRequest(BaseModel):
     layers_config: list[dict]
     events: dict              # PerformanceSession dict
-    duration_frames: int = 0
+    duration_frames: int = Field(default=0, ge=0)
 
 
 class PerformRenderRequest(BaseModel):
     layers_config: list[dict]
     events: dict
-    duration_frames: int = 0
-    fps: int = 30
-    crf: int = 18
+    duration_frames: int = Field(default=0, ge=0)
+    fps: int = Field(default=30, ge=1, le=120)
+    crf: int = Field(default=18, ge=0, le=51)
 
 
 # Default layer presets for web perform mode (all use uploaded video)
@@ -1233,18 +1248,17 @@ async def perform_frame(req: PerformFrameRequest):
         # --- 1. Process trigger events from client ---
         if req.trigger_events:
             for evt in req.trigger_events:
-                layer = stack.get_layer(evt.get("layer_id", -1))
+                layer = stack.get_layer(evt.layer_id)
                 if layer is None:
                     continue
-                event_type = evt.get("event", "")
-                if event_type == "on":
+                if evt.event == "on":
                     stack.handle_choke(layer)
                     layer.trigger_on()
-                elif event_type == "off":
+                elif evt.event == "off":
                     layer.trigger_off()
-                elif event_type == "opacity":
-                    layer.set_opacity(evt.get("value", 1.0))
-                elif event_type == "panic":
+                elif evt.event == "opacity":
+                    layer.set_opacity(evt.value)
+                elif evt.event == "panic":
                     layer.reset()
 
         # Legacy fallback: if client sends layer_states instead of trigger_events,
@@ -1299,7 +1313,9 @@ async def perform_frame(req: PerformFrameRequest):
             "layer_states": layer_info,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Frame processing error")
 
 
 @app.post("/api/perform/update_layer")
@@ -1320,17 +1336,23 @@ async def perform_update_layer(req: PerformUpdateLayerRequest):
 
     # Update ADSR preset (recreates envelope)
     if req.adsr_preset is not None:
+        from core.layer import ADSR_PRESETS
+        if req.adsr_preset not in ADSR_PRESETS:
+            raise HTTPException(status_code=400, detail=f"Unknown ADSR preset: {req.adsr_preset}")
         layer.adsr_preset = req.adsr_preset
         layer._adsr_envelope = layer._create_envelope()
 
     # Update blend mode
     if req.blend_mode is not None:
         from core.layer import BLEND_MODES
-        if req.blend_mode in BLEND_MODES:
-            layer.blend_mode = req.blend_mode
+        if req.blend_mode not in BLEND_MODES:
+            raise HTTPException(status_code=400, detail=f"Unknown blend mode: {req.blend_mode}")
+        layer.blend_mode = req.blend_mode
 
-    # Update effects
+    # Update effects (capped at 20 to prevent CPU bombs)
     if req.effects is not None:
+        if len(req.effects) > _MAX_EFFECTS_PER_LAYER:
+            raise HTTPException(status_code=400, detail=f"Max {_MAX_EFFECTS_PER_LAYER} effects per layer")
         layer.effects = req.effects
 
     # Update choke group (-1 = don't change)
@@ -1426,13 +1448,16 @@ async def perform_render(req: PerformRenderRequest):
         size_mb = Path(result_path).stat().st_size / (1024 * 1024)
         return {
             "status": "ok",
-            "path": str(result_path),
+            "path": Path(result_path).name,  # Filename only, no full path leak
+            "dir": str(EXPORT_DIR),
             "size_mb": round(size_mb, 1),
             "format": "mp4",
             "fps": req.fps,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Render failed")
     finally:
         # Clean up temp automation file
         if os.path.exists(automation_path):
