@@ -308,14 +308,14 @@ class TestRGBASafety:
         assert result.shape[:2] == (64, 64)
 
     def test_frame_to_data_url_rgba(self):
-        """RGBA frame should not crash _frame_to_data_url (JPEG conversion)."""
+        """RGBA frame should produce PNG data URL with checkerboard composite."""
         # Import the function from server module
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         try:
             from server import _frame_to_data_url
             rgba = np.random.randint(0, 255, (64, 64, 4), dtype=np.uint8)
             result = _frame_to_data_url(rgba)
-            assert result.startswith("data:image/jpeg;base64,")
+            assert result.startswith("data:image/png;base64,")
         except ImportError:
             pytest.skip("server.py has FastAPI deps not available in test env")
 

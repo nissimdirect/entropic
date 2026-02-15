@@ -72,33 +72,15 @@
     </style>
 </div>
 <div id="app">
-    <!-- TOP BAR -->
+    <!-- TOP BAR (single unified bar: menus + file status + transport + history) -->
     <div id="topbar">
         <span class="logo">Entropic</span>
-        <div id="upload-zone">
-            <label for="file-input">Load File</label>
-            <input type="file" id="file-input" accept="video/*,image/*,.gif,.pdf,.zip,.txt,.csv,.json,.xml,.html,.doc,.docx,.wav,.mp3,.aiff,.flac,.psd,.ai,.svg">
-            <span id="file-name">No file loaded</span>
-        </div>
-        <button onclick="renderVideo()" title="Export video (Cmd+E)" class="topbar-btn">Export</button>
-        <!-- Modes killed — unified timeline is the only view -->
-        <div class="transport-center">
-            <button onclick="undo()" title="Undo (Cmd+Z)" class="icon-btn">&#8630;</button>
-            <button onclick="redo()" title="Redo (Cmd+Shift+Z)" class="icon-btn">&#8631;</button>
-            <button onclick="randomizeChain()" title="Randomize effects" class="icon-btn">&#127922;</button>
-            <button onclick="previewChain()" title="Refresh preview" class="icon-btn">&#8635;</button>
-            <button id="history-btn" onclick="toggleHistoryDropdown()" title="History" class="icon-btn">History &#9662;</button>
-        </div>
-    </div>
-
-    <!-- MENU BAR -->
-    <div id="menubar">
         <div class="menu-item" onclick="openMenu('file-menu')">File
             <div class="menu-dropdown" id="file-menu">
-                <button onclick="menuAction('import')">Import File...</button>
-                <button onclick="menuAction('export')">Export...</button>
+                <button onclick="menuAction('import')">Open File... <span class="menu-shortcut">&#8984;O</span></button>
+                <button onclick="menuAction('export')">Export... <span class="menu-shortcut">&#8984;E</span></button>
                 <hr>
-                <button onclick="menuAction('save-preset')">Save Preset</button>
+                <button onclick="menuAction('save-preset')">Save Preset <span class="menu-shortcut">&#8984;S</span></button>
             </div>
         </div>
         <div class="menu-item" onclick="openMenu('edit-menu')">Edit
@@ -113,11 +95,26 @@
         <div class="menu-item" onclick="openMenu('view-menu')">View
             <div class="menu-dropdown" id="view-menu">
                 <button onclick="menuAction('toggle-histogram')">Toggle Histogram</button>
-                <button onclick="menuAction('toggle-sidebar')">Toggle Sidebar</button>
+                <button onclick="menuAction('toggle-sidebar')">Toggle Sidebar <span class="menu-shortcut">Tab</span></button>
                 <hr>
                 <button onclick="menuAction('shortcuts')">Keyboard Shortcuts</button>
             </div>
         </div>
+        <input type="file" id="file-input" accept="video/*,image/*,.gif,.pdf,.zip,.txt,.csv,.json,.xml,.html,.doc,.docx,.wav,.mp3,.aiff,.flac,.psd,.ai,.svg" style="display:none">
+        <span id="file-name" class="file-status">No file loaded</span>
+        <div class="transport-bar">
+            <button class="transport-btn" id="transport-play" onclick="togglePlayback()" title="Play/Pause (Space)">&#9654;</button>
+            <button class="transport-btn" id="transport-rec" onclick="toggleRecord()" title="Record (R)">&#9679;</button>
+            <button class="transport-btn" id="transport-overdub" onclick="toggleOverdub()" title="Overdub (Shift+R)">&#9678;</button>
+            <button class="transport-btn" id="transport-capture" onclick="capturePerformBuffer()" title="Capture (Cmd+Shift+C)">&#8865;</button>
+            <button class="transport-btn" id="transport-loop" onclick="toggleLoop()" title="Loop (L)">&#8635;</button>
+            <span class="transport-time" id="transport-timecode">0:00:00 / 0:00:00</span>
+            <span class="transport-frames" id="transport-frames">F:0/0</span>
+        </div>
+        <div class="topbar-spacer"></div>
+        <button onclick="randomizeChain()" title="Randomize effects" class="icon-btn">Rand</button>
+        <button onclick="previewChain()" title="Refresh preview (Cmd+R)" class="icon-btn">&#8635;</button>
+        <button id="history-btn" onclick="toggleHistoryDropdown()" title="History" class="icon-btn">History &#9662;</button>
     </div>
 
     <!-- LEFT SIDEBAR: Effect Browser + Presets -->
@@ -173,11 +170,12 @@
             <div class="key-hint"><kbd>F</kbd> L8</div>
         </div>
         <div id="frame-info"></div>
+        <!-- Diff tools hidden — accessible via View menu only -->
         <div id="diff-toolbar" style="display:none">
-            <button onclick="diffCapture()" data-tooltip="Save current frame as reference">Capture</button>
-            <button onclick="diffShow('diff')" data-tooltip="Show pixel difference heatmap">Diff</button>
-            <button onclick="diffShow('split')" data-tooltip="Left=reference, Right=current">Split</button>
-            <button onclick="diffClear()" data-tooltip="Clear reference frame">Clear</button>
+            <button onclick="diffCapture()">Capture</button>
+            <button onclick="diffShow('diff')">Diff</button>
+            <button onclick="diffShow('split')">Split</button>
+            <button onclick="diffClear()">Clear</button>
         </div>
         <canvas id="diff-canvas" style="display:none"></canvas>
         <!-- Frame scrubber hidden: timeline handles all scrubbing -->

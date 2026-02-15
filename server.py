@@ -1460,23 +1460,39 @@ MAX_PREVIEW_DIMENSION = 1280  # Cap preview size to limit data URL bloat
 
 
 def _frame_to_data_url(frame: np.ndarray) -> str:
-    """Convert numpy frame to base64 data URL for <img> tag.
-    Downscales large frames to keep data URLs under ~500KB."""
-    # Strip alpha channel — JPEG doesn't support RGBA
-    if frame.ndim == 3 and frame.shape[2] == 4:
-        frame = frame[:, :, :3]
-    img = Image.fromarray(frame)
+    """Convert numpy frame to base64 data URL for img tag.
+    RGBA frames get composited onto checkerboard and encoded as PNG.
+    RGB frames get encoded as JPEG. Large frames are downscaled."""
+    has_alpha = frame.ndim == 3 and frame.shape[2] == 4
 
-    # Downscale if larger than preview limit
+    if has_alpha:
+        # Composite RGBA onto checkerboard for preview
+        h, w = frame.shape[:2]
+        tile = 8
+        rows = np.arange(h) // tile
+        cols = np.arange(w) // tile
+        pattern = ((rows[:, None] + cols[None, :]) % 2).astype(np.uint8)
+        checker = np.where(pattern[:, :, None], np.uint8(255), np.uint8(200))
+        alpha = frame[:, :, 3:4].astype(np.float32) / 255.0
+        rgb = frame[:, :, :3].astype(np.float32)
+        composited = (rgb * alpha + checker.astype(np.float32) * (1 - alpha))
+        frame = np.clip(composited, 0, 255).astype(np.uint8)
+
+    img = Image.fromarray(frame)
     w, h = img.size
     if max(w, h) > MAX_PREVIEW_DIMENSION:
         ratio = MAX_PREVIEW_DIMENSION / max(w, h)
         img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
 
     buf = BytesIO()
-    img.save(buf, format="JPEG", quality=70)
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    return f"data:image/jpeg;base64,{b64}"
+    if has_alpha:
+        img.save(buf, format="PNG", optimize=True)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        return f"data:image/png;base64,{b64}"
+    else:
+        img.save(buf, format="JPEG", quality=70)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        return f"data:image/jpeg;base64,{b64}"
 
 
 # ============ PERFORM MODE API ============

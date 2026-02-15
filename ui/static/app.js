@@ -421,7 +421,7 @@ let effectDefs = [];      // Effect definitions from server
 let categoryOrder = [];   // Server-provided category ordering
 let categoryLabels = {};  // Server-provided category display names
 let controlMap = null;    // UI control type mapping (loaded from control-map.json)
-let chain = [];           // Current effect chain: [{name, params, bypassed, id}, ...]
+let chain = [];           // Current effect chain: [{name, params, bypassed, id}, ...] — LEGACY, migrated to tracks
 let videoLoaded = false;
 let currentFrame = 0;
 let totalFrames = 100;
@@ -436,6 +436,64 @@ const FRAME_CACHE_MAX = 30;         // max cached frames before eviction
 let selectedLayerId = null;
 let mixLevel = 1.0;              // Wet/dry mix: 0.0 = original, 1.0 = full effect
 let appMode = 'timeline';        // 'quick' | 'timeline' | 'perform'
+
+// ============ MULTI-TRACK SYSTEM ============
+let tracks = [];
+let selectedTrackIdx = 0;
+let trackIdCounter = 1000;
+const MAX_TRACKS = 8;
+const DEFAULT_BLEND_MODES = ['normal','multiply','screen','add','overlay','darken','lighten'];
+const TRACK_COLORS = ['#ff6b6b','#4ecdc4','#45b7d1','#96ceb4','#ffeaa7','#dda0dd','#98d8c8','#f7dc6f'];
+
+function createTrack(name) {
+    const track = {
+        id: trackIdCounter++,
+        name: name || `Track ${tracks.length + 1}`,
+        effects: [],
+        opacity: 1.0,
+        solo: false,
+        mute: false,
+        blendMode: 'normal',
+        color: TRACK_COLORS[tracks.length % TRACK_COLORS.length],
+        collapsed: false
+    };
+    return track;
+}
+
+// Migrate legacy chain to track-based system
+function migrateChainToTracks() {
+    if (tracks.length === 0 && chain.length > 0) {
+        const track1 = createTrack('Track 1');
+        track1.effects = chain;
+        tracks.push(track1);
+        selectedTrackIdx = 0;
+    }
+}
+
+// Get current track's effect chain
+function getCurrentChain() {
+    migrateChainToTracks();
+    if (tracks.length === 0) {
+        const track1 = createTrack('Track 1');
+        tracks.push(track1);
+        selectedTrackIdx = 0;
+    }
+    return tracks[selectedTrackIdx].effects;
+}
+
+// Set current track's effect chain
+function setCurrentChain(newChain) {
+    migrateChainToTracks();
+    if (tracks.length > 0) {
+        tracks[selectedTrackIdx].effects = newChain;
+    }
+}
+
+// Backwards compatibility wrapper for chain access
+Object.defineProperty(window, 'chain', {
+    get: () => getCurrentChain(),
+    set: (val) => setCurrentChain(val)
+});
 
 // Feature flags
 const FEATURE_QUICK_MODE = false; // Quick mode flagged off — Timeline is default. Code preserved.
@@ -721,6 +779,7 @@ async function init() {
     renderChain();
     renderLayers();
     renderHistory();
+    renderTrackList();  // Initialize track strip UI
     startHeartbeat();
     showOnboarding();
 
@@ -1164,6 +1223,14 @@ async function uploadVideo(file) {
             timelineEditor.playhead = 0;
             timelineEditor.fitToWindow();
         }
+
+        // Initialize Track 1 if no tracks exist
+        if (tracks.length === 0) {
+            const track1 = createTrack('Track 1');
+            tracks.push(track1);
+            selectedTrackIdx = 0;
+            renderTrackList();
+        }
     } catch (err) {
         console.error('Upload failed:', err);
         hideLoading();
@@ -1442,6 +1509,11 @@ function setupKeyboard() {
         // P = Toggle Perform panel (in timeline mode)
         if (e.key === 'p' && appMode === 'timeline') {
             e.preventDefault(); togglePerformPanel(); return;
+        }
+
+        // L = Toggle Loop
+        if (e.key === 'l') {
+            e.preventDefault(); toggleLoop(); return;
         }
 
         // Left/Right = Prev/next frame
@@ -2050,6 +2122,220 @@ function setupLayerReorder() {
         });
     });
 }
+
+// ============ TRACK STRIP UI (Multi-track system) ============
+
+function renderTrackList() {
+    const wrapper = document.getElementById('timeline-canvas-wrapper');
+    if (!wrapper) return;
+
+    migrateChainToTracks();
+
+    // Build track list HTML
+    let html = '<div class="track-list">';
+
+    tracks.forEach((track, idx) => {
+        const selected = idx === selectedTrackIdx;
+        const effectCount = track.effects.length;
+        const effectSummary = effectCount > 0
+            ? track.effects.map(e => e.name).slice(0, 3).join(', ') + (effectCount > 3 ? '...' : '')
+            : 'Empty';
+
+        html += `
+            <div class="track-strip ${selected ? 'selected' : ''}" data-track-idx="${idx}"
+                 onclick="selectTrack(${idx})" oncontextmenu="showTrackContextMenu(event, ${idx})">
+                <div class="track-header">
+                    <div class="track-color-strip" style="background: ${track.color};"></div>
+                    <button class="track-collapse" onclick="event.stopPropagation(); toggleTrackCollapse(${idx})"
+                            title="${track.collapsed ? 'Expand' : 'Collapse'}">
+                        ${track.collapsed ? '&#9654;' : '&#9660;'}
+                    </button>
+                    <input type="text" class="track-name" value="${esc(track.name)}"
+                           onclick="event.stopPropagation()"
+                           ondblclick="this.select()"
+                           onchange="renameTrack(${idx}, this.value)"
+                           spellcheck="false">
+                    <input type="range" class="track-opacity-slider" min="0" max="100" value="${Math.round(track.opacity * 100)}"
+                           onclick="event.stopPropagation()"
+                           oninput="updateTrackOpacity(${idx}, this.value)"
+                           title="Opacity: ${Math.round(track.opacity * 100)}%">
+                    <span class="track-opacity-value">${Math.round(track.opacity * 100)}%</span>
+                    <button class="track-solo ${track.solo ? 'active' : ''}" onclick="event.stopPropagation(); toggleTrackSolo(${idx})"
+                            title="Solo">S</button>
+                    <button class="track-mute ${track.mute ? 'active' : ''}" onclick="event.stopPropagation(); toggleTrackMute(${idx})"
+                            title="Mute">M</button>
+                    <select class="track-blend" onclick="event.stopPropagation()" onchange="updateTrackBlend(${idx}, this.value)">
+                        ${DEFAULT_BLEND_MODES.map(mode =>
+                            `<option value="${mode}" ${track.blendMode === mode ? 'selected' : ''}>${mode}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                ${!track.collapsed ? `
+                <div class="track-content">
+                    <div class="track-effects">${effectSummary} (${effectCount})</div>
+                </div>
+                ` : ''}
+            </div>
+        `;
+    });
+
+    html += '<div class="track-add-button" onclick="addTrack()"><span>+</span> Add Track</div>';
+    html += '</div>';
+
+    wrapper.innerHTML = html;
+}
+
+function selectTrack(idx) {
+    if (idx < 0 || idx >= tracks.length) return;
+    selectedTrackIdx = idx;
+    renderTrackList();
+    renderLayers();  // Update chain panel to show selected track's effects
+    renderChain();
+}
+
+function toggleTrackCollapse(idx) {
+    tracks[idx].collapsed = !tracks[idx].collapsed;
+    renderTrackList();
+}
+
+function renameTrack(idx, newName) {
+    if (newName.trim()) {
+        tracks[idx].name = newName.trim();
+        renderTrackList();
+    }
+}
+
+function updateTrackOpacity(idx, value) {
+    tracks[idx].opacity = parseInt(value) / 100;
+    const slider = document.querySelector(`.track-strip[data-track-idx="${idx}"] .track-opacity-slider`);
+    if (slider) slider.title = `Opacity: ${value}%`;
+    schedulePreview();
+}
+
+function toggleTrackSolo(idx) {
+    tracks[idx].solo = !tracks[idx].solo;
+    renderTrackList();
+    schedulePreview();
+}
+
+function toggleTrackMute(idx) {
+    tracks[idx].mute = !tracks[idx].mute;
+    renderTrackList();
+    schedulePreview();
+}
+
+function updateTrackBlend(idx, mode) {
+    tracks[idx].blendMode = mode;
+    schedulePreview();
+}
+
+function addTrack() {
+    if (tracks.length >= MAX_TRACKS) {
+        showToast(`Maximum ${MAX_TRACKS} tracks`, 'warning');
+        return;
+    }
+    const track = createTrack();
+    tracks.push(track);
+    selectedTrackIdx = tracks.length - 1;
+    pushHistory(`Add ${track.name}`);
+    renderTrackList();
+    renderLayers();
+}
+
+function showTrackContextMenu(event, idx) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const menu = document.getElementById('ctx-menu');
+    if (!menu) return;
+
+    menu.innerHTML = `
+        <button onclick="addTrackAt(${idx})">Add Above</button>
+        <button onclick="addTrackAt(${idx + 1})">Add Below</button>
+        <button onclick="duplicateTrack(${idx})">Duplicate</button>
+        <hr>
+        <button onclick="deleteTrack(${idx})" ${tracks.length <= 1 ? 'disabled' : ''}>Delete</button>
+        <button onclick="moveTrack(${idx}, ${idx - 1})" ${idx === 0 ? 'disabled' : ''}>Move Up</button>
+        <button onclick="moveTrack(${idx}, ${idx + 1})" ${idx === tracks.length - 1 ? 'disabled' : ''}>Move Down</button>
+    `;
+
+    menu.style.display = 'block';
+    menu.style.left = event.clientX + 'px';
+    menu.style.top = event.clientY + 'px';
+}
+
+function addTrackAt(position) {
+    hideContextMenu();
+    if (tracks.length >= MAX_TRACKS) {
+        showToast(`Maximum ${MAX_TRACKS} tracks`, 'warning');
+        return;
+    }
+    const track = createTrack();
+    tracks.splice(position, 0, track);
+    selectedTrackIdx = position;
+    pushHistory(`Add ${track.name}`);
+    renderTrackList();
+    renderLayers();
+}
+
+function duplicateTrack(idx) {
+    hideContextMenu();
+    if (tracks.length >= MAX_TRACKS) {
+        showToast(`Maximum ${MAX_TRACKS} tracks`, 'warning');
+        return;
+    }
+    const original = tracks[idx];
+    const duplicate = {
+        ...original,
+        id: trackIdCounter++,
+        name: original.name + ' Copy',
+        effects: JSON.parse(JSON.stringify(original.effects))  // Deep copy
+    };
+    tracks.splice(idx + 1, 0, duplicate);
+    selectedTrackIdx = idx + 1;
+    pushHistory(`Duplicate ${original.name}`);
+    renderTrackList();
+    renderLayers();
+}
+
+function deleteTrack(idx) {
+    hideContextMenu();
+    if (tracks.length <= 1) {
+        showToast('Cannot delete the only track', 'warning');
+        return;
+    }
+    const track = tracks[idx];
+    tracks.splice(idx, 1);
+    if (selectedTrackIdx >= tracks.length) {
+        selectedTrackIdx = tracks.length - 1;
+    }
+    pushHistory(`Delete ${track.name}`);
+    renderTrackList();
+    renderLayers();
+    schedulePreview();
+}
+
+function moveTrack(fromIdx, toIdx) {
+    hideContextMenu();
+    if (toIdx < 0 || toIdx >= tracks.length) return;
+    const track = tracks.splice(fromIdx, 1)[0];
+    tracks.splice(toIdx, 0, track);
+    selectedTrackIdx = toIdx;
+    pushHistory(`Move ${track.name}`);
+    renderTrackList();
+}
+
+function hideContextMenu() {
+    const menu = document.getElementById('ctx-menu');
+    if (menu) menu.style.display = 'none';
+}
+
+// Close context menu on click outside
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('#ctx-menu')) {
+        hideContextMenu();
+    }
+});
 
 // ============ HISTORY PANEL (Photoshop-style) ============
 
@@ -5691,6 +5977,13 @@ function capturePerformBuffer() {
         return;
     }
 
+    // Trigger capture button blink animation
+    const captureBtn = document.getElementById('transport-capture');
+    if (captureBtn) {
+        captureBtn.classList.add('capturing');
+        setTimeout(() => captureBtn.classList.remove('capturing'), 600);
+    }
+
     // Group events by layerId + param → create perfSession-compatible lanes
     const laneMap = {};
     for (const ev of captureBuffer) {
@@ -6629,13 +6922,13 @@ function toggleBrowser() {
             const dy = e.clientY - startY;
             const newTimeline = Math.max(60, Math.min(400, startTimelineH - dy));
             app.style.setProperty('--timeline-h', newTimeline + 'px');
-            app.style.gridTemplateRows = `44px 24px 1fr 4px ${newTimeline}px 4px ${startChainH}px`;
+            app.style.gridTemplateRows = `38px 1fr 4px ${newTimeline}px 4px ${startChainH}px`;
         } else if (resizeType === 'timeline-chain') {
             // Drag between timeline and chain: grow chain = shrink timeline
             const dy = e.clientY - startY;
             const newChain = Math.max(80, Math.min(500, startChainH - dy));
             const newTimeline = Math.max(60, startTimelineH + dy);
-            app.style.gridTemplateRows = `44px 24px 1fr 4px ${newTimeline}px 4px ${newChain}px`;
+            app.style.gridTemplateRows = `38px 1fr 4px ${newTimeline}px 4px ${newChain}px`;
         }
     });
 
@@ -6644,6 +6937,10 @@ function toggleBrowser() {
             active.classList.remove('dragging');
             document.body.classList.remove('dragging-divider');
             active = null;
+            // Save grid state to localStorage
+            const app = document.getElementById('app');
+            localStorage.setItem('entropic-grid-rows', app.style.gridTemplateRows);
+            localStorage.setItem('entropic-grid-cols', app.style.gridTemplateColumns);
         }
     });
 })();
@@ -6651,8 +6948,159 @@ function toggleBrowser() {
 // ============ PANEL COLLAPSE ============
 function togglePanel(panelId) {
     const panel = document.getElementById(panelId);
-    if (panel) panel.classList.toggle('panel-collapsed');
+    if (!panel) return;
+
+    const wasCollapsed = panel.classList.contains('panel-collapsed');
+    panel.classList.toggle('panel-collapsed');
+
+    // Update grid rows when collapsing/expanding
+    const app = document.getElementById('app');
+    const currentRows = app.style.gridTemplateRows || '38px 1fr 4px 140px 4px 250px';
+    const parts = currentRows.split(' ');
+
+    if (panelId === 'timeline-area') {
+        // Timeline is at index 3: 38px 1fr 4px [140px] 4px 250px
+        parts[3] = wasCollapsed ? '140px' : '28px';
+    } else if (panelId === 'chain-area') {
+        // Chain is at index 5: 38px 1fr 4px 140px 4px [250px]
+        parts[5] = wasCollapsed ? '250px' : '28px';
+    }
+
+    app.style.gridTemplateRows = parts.join(' ');
 }
+
+// ============ TRANSPORT CONTROLS (stubs for Phase C) ============
+// ============ TRANSPORT BAR CONTROLS ============
+
+let isLooping = false;
+
+function togglePlayback() {
+    if (!videoLoaded) {
+        showToast('Load a file first', 'info', null, 1500);
+        return;
+    }
+
+    // Route to appropriate playback system based on mode
+    if (appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) {
+        perfTogglePlay();
+    } else if (appMode === 'timeline' && window.timelineEditor) {
+        timelineEditor.togglePlayback();
+    }
+
+    // Update button visual
+    const btn = document.getElementById('transport-play');
+    const isPlaying = (appMode === 'perform' || performToggleActive)
+        ? perfPlaying
+        : window.timelineEditor?.isPlaying;
+
+    if (btn) {
+        btn.classList.toggle('active', isPlaying);
+        btn.textContent = isPlaying ? '▮▮' : '▶';
+    }
+
+    updateTransportTimecode();
+}
+
+function toggleRecord() {
+    if (!videoLoaded) {
+        showToast('Load a file first', 'info', null, 1500);
+        return;
+    }
+
+    // Only available in perform mode
+    if (appMode !== 'perform' && !performToggleActive) {
+        showToast('Record only available in Perform mode', 'info', null, 2000);
+        return;
+    }
+
+    perfToggleRecord();
+
+    const btn = document.getElementById('transport-rec');
+    if (btn) {
+        btn.classList.toggle('active', perfRecording);
+        btn.classList.toggle('recording', perfRecording);
+    }
+}
+
+function toggleOverdub() {
+    if (!videoLoaded) {
+        showToast('Load a file first', 'info', null, 1500);
+        return;
+    }
+
+    // Only available in perform mode
+    if (appMode !== 'perform' && !performToggleActive) {
+        showToast('Overdub only available in Perform mode', 'info', null, 2000);
+        return;
+    }
+
+    toggleAutoRecording();
+
+    const btn = document.getElementById('transport-overdub');
+    if (btn) {
+        btn.classList.toggle('active', autoRecording);
+        btn.classList.toggle('recording', autoRecording);
+    }
+}
+
+function toggleLoop() {
+    isLooping = !isLooping;
+
+    const btn = document.getElementById('transport-loop');
+    if (btn) btn.classList.toggle('active', isLooping);
+
+    // Wire to timeline editor loop
+    if (window.timelineEditor) {
+        timelineEditor.looping = isLooping;
+    }
+
+    showToast(isLooping ? 'Loop enabled' : 'Loop disabled', 'info', null, 1000);
+}
+
+function updateTransportTimecode() {
+    const timecodeEl = document.getElementById('transport-timecode');
+    const framesEl = document.getElementById('transport-frames');
+
+    if (!videoLoaded) {
+        if (timecodeEl) timecodeEl.textContent = '0:00:00 / 0:00:00';
+        if (framesEl) framesEl.textContent = 'F:0/0';
+        return;
+    }
+
+    // Get current frame and total based on mode
+    let currentFrameNum = 0;
+    let totalFrameCount = totalFrames;
+
+    if (appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) {
+        currentFrameNum = perfFrameIndex || 0;
+    } else if (window.timelineEditor) {
+        currentFrameNum = timelineEditor.playhead || currentFrame;
+    } else {
+        currentFrameNum = currentFrame;
+    }
+
+    // Calculate timecode
+    const currentSeconds = currentFrameNum / videoFps;
+    const totalSeconds = totalFrameCount / videoFps;
+
+    const formatTime = (sec) => {
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const s = Math.floor(sec % 60);
+        return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    };
+
+    if (timecodeEl) {
+        timecodeEl.textContent = `${formatTime(currentSeconds)} / ${formatTime(totalSeconds)}`;
+    }
+
+    if (framesEl) {
+        framesEl.textContent = `F:${currentFrameNum}/${totalFrameCount}`;
+    }
+}
+
+// Update transport timecode during playback
+setInterval(updateTransportTimecode, 100);
 
 // ============ HISTORY DROPDOWN ============
 function toggleHistoryDropdown() {
@@ -6671,4 +7119,10 @@ function toggleHistoryDropdown() {
 // ============ BOOT ============
 // Theme: restore from localStorage
 document.documentElement.dataset.theme = localStorage.getItem('entropic-theme') || 'dark';
+// Restore saved grid state from localStorage
+const savedRows = localStorage.getItem('entropic-grid-rows');
+const savedCols = localStorage.getItem('entropic-grid-cols');
+if (savedRows) document.getElementById('app').style.gridTemplateRows = savedRows;
+if (savedCols) document.getElementById('app').style.gridTemplateColumns = savedCols;
+
 init();

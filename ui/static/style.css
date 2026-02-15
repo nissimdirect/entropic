@@ -40,7 +40,7 @@ body {
 #app {
     display: grid;
     grid-template-columns: 220px 1fr;
-    grid-template-rows: 44px 24px 1fr 4px 140px 4px 250px;
+    grid-template-rows: 38px 1fr 4px 140px 4px 250px;
     height: 100vh;
     gap: 1px;
     background: var(--border);
@@ -48,18 +48,21 @@ body {
 
 /* Quick mode: hide timeline row, restore original chain height */
 #app.quick-mode {
-    grid-template-rows: 44px 24px 1fr 4px 250px;
+    grid-template-rows: 38px 1fr 4px 250px;
 }
 #app.quick-mode #timeline-area { display: none; }
 
-/* --- TOP BAR --- */
+/* --- TOP BAR (unified: logo + menus + file status + transport + history) --- */
 #topbar {
     grid-column: 1 / -1;
     background: var(--bg-dark);
     display: flex;
     align-items: center;
-    padding: 0 16px;
-    gap: 16px;
+    padding: 0 10px;
+    gap: 2px;
+    border-bottom: 1px solid var(--border);
+    height: 38px;
+    position: relative;
 }
 
 #topbar .logo {
@@ -221,7 +224,7 @@ body {
     padding: 0;
     display: flex;
     flex-direction: column;
-    grid-row: 3;
+    grid-row: 2;
     grid-column: 1;
 }
 
@@ -516,7 +519,7 @@ h3 .count {
     justify-content: center;
     position: relative;
     overflow: hidden;
-    grid-row: 3;
+    grid-row: 2;
     grid-column: 2;
 }
 
@@ -1987,7 +1990,8 @@ h3 .count {
 
 #timeline-canvas-wrapper {
     flex: 1;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
     position: relative;
 }
 
@@ -1996,6 +2000,204 @@ h3 .count {
     height: 100%;
     display: block;
     cursor: crosshair;
+}
+
+/* === TRACK STRIP SYSTEM === */
+.track-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.track-strip {
+    background: var(--bg-darker);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s ease;
+}
+
+.track-strip:hover {
+    background: var(--bg-hover);
+}
+
+.track-strip.selected {
+    background: rgba(255, 61, 61, 0.1);
+    border-left: 3px solid var(--accent);
+}
+
+.track-header {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    gap: 6px;
+    font-size: 11px;
+    position: relative;
+}
+
+.track-color-strip {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+}
+
+.track-collapse {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 10px;
+    cursor: pointer;
+    padding: 2px 4px;
+    margin-left: 4px;
+}
+
+.track-collapse:hover {
+    color: var(--text-primary);
+}
+
+.track-name {
+    flex: 1;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-primary);
+    font-size: 11px;
+    font-family: inherit;
+    padding: 2px 6px;
+    min-width: 80px;
+    max-width: 140px;
+    border-radius: 2px;
+}
+
+.track-name:hover {
+    border-color: var(--border);
+}
+
+.track-name:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--bg-light);
+}
+
+.track-opacity-slider {
+    width: 60px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+}
+
+.track-opacity-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.track-opacity-slider::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    background: var(--accent);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.track-opacity-value {
+    font-size: 10px;
+    color: var(--text-dim);
+    min-width: 32px;
+    text-align: right;
+}
+
+.track-solo, .track-mute {
+    background: var(--bg-light);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 9px;
+    font-weight: 600;
+    padding: 2px 6px;
+    cursor: pointer;
+    border-radius: 2px;
+    min-width: 24px;
+    transition: all 0.15s ease;
+}
+
+.track-solo:hover {
+    border-color: #ffd700;
+    color: #ffd700;
+}
+
+.track-solo.active {
+    background: #ffd700;
+    border-color: #ffd700;
+    color: #000;
+}
+
+.track-mute:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.track-mute.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.track-blend {
+    background: var(--bg-light);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 2px;
+    cursor: pointer;
+    min-width: 80px;
+}
+
+.track-blend:hover {
+    border-color: var(--accent);
+}
+
+.track-content {
+    padding: 4px 12px 6px 24px;
+    font-size: 10px;
+    color: var(--text-dim);
+}
+
+.track-effects {
+    font-style: italic;
+}
+
+.track-add-button {
+    background: var(--bg-dark);
+    border: 1px dashed var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 8px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin: 4px;
+    border-radius: 2px;
+}
+
+.track-add-button:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.track-add-button span {
+    font-size: 14px;
+    font-weight: bold;
+    margin-right: 4px;
 }
 
 /* Perform toggle button within Timeline header */
@@ -2031,7 +2233,7 @@ h3 .count {
 
 /* Timeline + Perform toggle: show mixer/transport within timeline mode */
 #app.timeline-perform {
-    grid-template-rows: 44px 24px 1fr 4px 140px 4px 250px auto auto;
+    grid-template-rows: 38px 1fr 4px 140px 4px 250px auto auto;
 }
 
 @keyframes perform-slide-in {
@@ -2133,7 +2335,7 @@ h3 .count {
 
 /* Perform grid — add transport + mixer rows */
 #app.perform-mode {
-    grid-template-rows: 44px 24px 1fr 4px auto auto 4px 250px;
+    grid-template-rows: 38px 1fr 4px auto auto 4px 250px;
 }
 
 #app.perform-mode #timeline-area { display: none; }
@@ -3417,19 +3619,26 @@ body.lfo-map-mode .knob-container:not(.lfo-mapped):not(.auto-mapped) .knob:hover
     --off-color: #c4c4cc;
 }
 
-/* === MENU BAR === */
-#menubar {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: center;
-    background: var(--bg-dark);
-    border-bottom: 1px solid var(--border);
-    padding: 0 8px;
-    font-size: 11px;
-    height: 24px;
-    gap: 0;
-    z-index: 100;
+/* === MENUS (inline in topbar) === */
+#topbar .menu-item {
+    position: relative;
+    padding: 4px 10px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    user-select: none;
+    font-size: 12px;
+    border-radius: 3px;
 }
+.file-status {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-left: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+}
+.topbar-spacer { flex: 1; }
 
 .menu-item {
     position: relative;
@@ -3541,12 +3750,19 @@ body.lfo-map-mode .knob-container:not(.lfo-mapped):not(.auto-mapped) .knob:hover
 .panel-collapsed #chain-content,
 .panel-collapsed #timeline-canvas-wrapper { display: none; }
 .panel-collapsed .timeline-controls { display: none; }
+/* Collapsed panels shrink to header-only height */
+#chain-area.panel-collapsed,
+#timeline-area.panel-collapsed {
+    max-height: 28px;
+    min-height: 28px;
+    overflow: hidden;
+}
 
 /* === HISTORY DROPDOWN === */
 #history-dropdown {
     position: fixed;
-    top: 48px;
-    right: 16px;
+    top: 40px;
+    right: 8px;
     width: 240px;
     max-height: 400px;
     background: var(--bg-mid);
@@ -3606,11 +3822,12 @@ body.lfo-map-mode .knob-container:not(.lfo-mapped):not(.auto-mapped) .knob:hover
 
 /* === ICON BUTTONS (compact toolbar) === */
 .icon-btn {
-    font-size: 14px;
-    padding: 3px 8px;
+    font-size: 18px;
+    padding: 4px 10px;
     background: none;
     border: 1px solid transparent;
     color: var(--text-secondary);
+    line-height: 1;
     border-radius: 3px;
     cursor: pointer;
     line-height: 1;
@@ -3704,4 +3921,86 @@ body.dragging-divider {
     left: 2px;
     top: 74px;
     z-index: 20;
+}
+
+/* === TRANSPORT BAR === */
+.transport-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0 8px;
+}
+
+.transport-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 3px;
+    background: none;
+    border: 1px solid var(--border);
+    font-size: 14px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: background 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.transport-btn:hover {
+    background: var(--bg-hover);
+}
+
+/* Active states with color coding */
+#transport-play.active {
+    background: #2d5d2d;
+    color: #4ade80;
+    border-color: #4ade80;
+}
+
+#transport-rec.active,
+#transport-overdub.active {
+    background: #5d2d2d;
+    color: #ef4444;
+    border-color: #ef4444;
+}
+
+#transport-loop.active {
+    background: #5d4d2d;
+    color: #fb923c;
+    border-color: #fb923c;
+}
+
+/* Recording pulse animation */
+@keyframes recording-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+    50% { box-shadow: 0 0 8px 4px rgba(239, 68, 68, 0); }
+}
+
+.transport-btn.recording {
+    animation: recording-pulse 1.5s ease-in-out infinite;
+}
+
+/* Capture button blink */
+@keyframes capture-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+#transport-capture.capturing {
+    animation: capture-blink 0.3s ease-in-out 2;
+}
+
+.transport-time {
+    font-size: 11px;
+    font-family: 'Courier New', monospace;
+    color: var(--text-secondary);
+    min-width: 120px;
+    text-align: center;
+}
+
+.transport-frames {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-family: 'Courier New', monospace;
 }
