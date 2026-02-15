@@ -69,9 +69,14 @@ class TimelineEditor {
         this.nextTrackId = 1;
         this.nextRegionId = 0;
 
+        // Loop brace state
+        this.loopStart = null;
+        this.loopEnd = null;
+        this.loopEnabled = false;
+
         // Interaction state
         this.isDragging = false;
-        this.dragType = null;       // 'playhead', 'region-move', 'region-resize-l', 'region-resize-r', 'scroll', 'select-region'
+        this.dragType = null;       // 'playhead', 'region-move', 'region-resize-l', 'region-resize-r', 'scroll', 'select-region', 'loop-move', 'loop-resize-l', 'loop-resize-r'
         this.dragTarget = null;
         this.dragStartX = 0;
         this.dragStartFrame = 0;
@@ -121,6 +126,8 @@ class TimelineEditor {
             textMuted: '#444',
             soloBtn: '#f5a623',
             muteBtn: '#ff5252',
+            loopBrace: '#f5a623',
+            loopBg: 'rgba(245, 166, 35, 0.08)',
         };
 
         // Track default colors for regions
@@ -190,6 +197,9 @@ class TimelineEditor {
 
         // Draw automation lanes
         this.drawAutomationLanes();
+
+        // Draw loop brace (behind I/O markers and playhead)
+        this.drawLoopBrace();
 
         // Draw I/O markers (behind playhead)
         this.drawIOMarkers();
@@ -460,6 +470,70 @@ class TimelineEditor {
         // Position label to the right of playhead, unless near right edge
         const labelX = x + 8 + textW > this.canvasW ? x - textW - 4 : x + 4;
         ctx.fillText(label, labelX, 12);
+    }
+
+    drawLoopBrace() {
+        if (this.loopStart === null || this.loopEnd === null) return;
+
+        const ctx = this.ctx;
+        const x1 = this.frameToX(this.loopStart);
+        const x2 = this.frameToX(this.loopEnd);
+        const clampX1 = Math.max(this.trackHeaderWidth, x1);
+        const clampX2 = Math.min(this.canvasW, x2);
+
+        if (clampX2 <= clampX1) return;
+
+        const rh = this.rulerHeight;
+        const alpha = this.loopEnabled ? 1.0 : 0.4;
+
+        // Background shading across tracks
+        ctx.fillStyle = this.loopEnabled ? this.colors.loopBg : 'rgba(245, 166, 35, 0.03)';
+        ctx.fillRect(clampX1, rh, clampX2 - clampX1, this.canvasH - rh);
+
+        // Brace bar in ruler
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = this.colors.loopBrace;
+        ctx.fillRect(clampX1, rh - 6, clampX2 - clampX1, 6);
+
+        // Edge handles (small tabs)
+        ctx.fillRect(clampX1, rh - 10, 6, 10);
+        ctx.fillRect(clampX2 - 6, rh - 10, 6, 10);
+
+        // "L" label (centered in brace bar)
+        if (clampX2 - clampX1 > 20) {
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 7px Menlo, Monaco, monospace';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('L', (clampX1 + clampX2) / 2 - 3, rh - 3);
+        }
+
+        ctx.globalAlpha = 1.0;
+
+        // Vertical edge lines (dashed when disabled)
+        if (this.loopEnabled) {
+            ctx.setLineDash([]);
+        } else {
+            ctx.setLineDash([3, 3]);
+        }
+        ctx.strokeStyle = this.colors.loopBrace;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = alpha * 0.5;
+
+        if (x1 >= this.trackHeaderWidth) {
+            ctx.beginPath();
+            ctx.moveTo(x1, rh);
+            ctx.lineTo(x1, this.canvasH);
+            ctx.stroke();
+        }
+        if (x2 <= this.canvasW) {
+            ctx.beginPath();
+            ctx.moveTo(x2, rh);
+            ctx.lineTo(x2, this.canvasH);
+            ctx.stroke();
+        }
+
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1.0;
     }
 
     drawIOMarkers() {
@@ -1106,6 +1180,50 @@ class TimelineEditor {
         }
     }
 
+    // ============ LOOP BRACE ============
+
+    setLoop(startFrame, endFrame) {
+        this.loopStart = Math.max(0, Math.min(startFrame, endFrame));
+        this.loopEnd = Math.min(this.totalFrames - 1, Math.max(startFrame, endFrame));
+        this.loopEnabled = true;
+        this.draw();
+        if (typeof showToast === 'function') {
+            showToast(`Loop: frames ${this.loopStart}–${this.loopEnd}`, 'info');
+        }
+    }
+
+    setLoopFromIO() {
+        if (this.inPoint !== null && this.outPoint !== null) {
+            this.setLoop(this.inPoint, this.outPoint);
+        } else if (typeof showToast === 'function') {
+            showToast('Set in-point (I) and out-point (O) first', 'info');
+        }
+    }
+
+    toggleLoop() {
+        if (this.loopStart === null || this.loopEnd === null) {
+            // No loop set — create one from I/O or a default range
+            if (this.inPoint !== null && this.outPoint !== null) {
+                this.setLoopFromIO();
+            } else if (typeof showToast === 'function') {
+                showToast('No loop set. Use Shift+L with I/O points, or drag in ruler.', 'info');
+            }
+            return;
+        }
+        this.loopEnabled = !this.loopEnabled;
+        this.draw();
+        if (typeof showToast === 'function') {
+            showToast(this.loopEnabled ? 'Loop ON' : 'Loop OFF', 'info');
+        }
+    }
+
+    clearLoop() {
+        this.loopStart = null;
+        this.loopEnd = null;
+        this.loopEnabled = false;
+        this.draw();
+    }
+
     // ============ PLAYBACK ============
 
     togglePlayback() {
@@ -1125,6 +1243,17 @@ class TimelineEditor {
         }
         const interval = 1000 / this.fps;
         this.playInterval = setInterval(() => {
+            // Loop brace: wrap playhead back to loopStart
+            if (this.loopEnabled && this.loopStart !== null && this.loopEnd !== null) {
+                if (this.playhead >= this.loopEnd) {
+                    this.setPlayhead(this.loopStart);
+                    if (typeof prefetchFrames === 'function') {
+                        prefetchFrames(this.loopStart);
+                    }
+                    return;
+                }
+            }
+
             if (this.playhead >= this.totalFrames - 1) {
                 this.stopPlayback();
                 return;
@@ -1280,6 +1409,23 @@ class TimelineEditor {
 
         // Ruler area
         if (canvasY < this.rulerHeight) {
+            // Check loop brace edges first (higher priority than generic ruler click)
+            if (this.loopStart !== null && this.loopEnd !== null) {
+                const lx1 = this.frameToX(this.loopStart);
+                const lx2 = this.frameToX(this.loopEnd);
+                // Left edge handle (8px zone)
+                if (Math.abs(canvasX - lx1) < 8 && canvasY >= this.rulerHeight - 10) {
+                    return { type: 'loop-edge-l' };
+                }
+                // Right edge handle (8px zone)
+                if (Math.abs(canvasX - lx2) < 8 && canvasY >= this.rulerHeight - 10) {
+                    return { type: 'loop-edge-r' };
+                }
+                // Body of loop brace (between edges, bottom 10px of ruler)
+                if (canvasX > lx1 + 8 && canvasX < lx2 - 8 && canvasY >= this.rulerHeight - 10) {
+                    return { type: 'loop-body' };
+                }
+            }
             return { type: 'ruler' };
         }
 
@@ -1441,8 +1587,14 @@ class TimelineEditor {
                 this.pasteBreakpoints();
             }
             // B = toggle draw mode
-            if (e.key === 'b' || e.key === 'B') {
+            if ((e.key === 'b' || e.key === 'B') && !e.shiftKey) {
                 this.toggleDrawMode();
+            }
+            // L = toggle loop, Shift+L = set loop from I/O
+            if (e.key === 'L' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                this.setLoopFromIO();
+            } else if (e.key === 'l' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                this.toggleLoop();
             }
             // Delete/Backspace = delete selected breakpoints
             if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedBreakpoints.length > 0) {
@@ -1505,6 +1657,31 @@ class TimelineEditor {
             hit.lane.keyframes.push({ frame, value, curve: 'step' });
             hit.lane.keyframes.sort((a, b) => a.frame - b.frame);
             this.draw();
+            return;
+        }
+
+        if (hit.type === 'loop-edge-l') {
+            this.isDragging = true;
+            this.dragType = 'loop-resize-l';
+            this.dragOrigStart = this.loopStart;
+            this.dragOrigEnd = this.loopEnd;
+            return;
+        }
+
+        if (hit.type === 'loop-edge-r') {
+            this.isDragging = true;
+            this.dragType = 'loop-resize-r';
+            this.dragOrigStart = this.loopStart;
+            this.dragOrigEnd = this.loopEnd;
+            return;
+        }
+
+        if (hit.type === 'loop-body') {
+            this.isDragging = true;
+            this.dragType = 'loop-move';
+            this.dragStartFrame = this.xToFrame(pos.x);
+            this.dragOrigStart = this.loopStart;
+            this.dragOrigEnd = this.loopEnd;
             return;
         }
 
@@ -1645,7 +1822,23 @@ class TimelineEditor {
         const pos = this.getCanvasPos(e);
 
         if (this.isDragging) {
-            if (this.dragType === 'playhead') {
+            if (this.dragType === 'loop-resize-l') {
+                const frame = Math.max(0, this.xToFrame(pos.x));
+                this.loopStart = Math.min(frame, this.loopEnd - 1);
+                this.draw();
+            } else if (this.dragType === 'loop-resize-r') {
+                const frame = Math.min(this.totalFrames - 1, this.xToFrame(pos.x));
+                this.loopEnd = Math.max(frame, this.loopStart + 1);
+                this.draw();
+            } else if (this.dragType === 'loop-move') {
+                const frameDelta = this.xToFrame(pos.x) - this.dragStartFrame;
+                const duration = this.dragOrigEnd - this.dragOrigStart;
+                let newStart = this.dragOrigStart + frameDelta;
+                newStart = Math.max(0, Math.min(newStart, this.totalFrames - 1 - duration));
+                this.loopStart = newStart;
+                this.loopEnd = newStart + duration;
+                this.draw();
+            } else if (this.dragType === 'playhead') {
                 const frame = this.xToFrame(pos.x);
                 this.setPlayhead(Math.max(0, Math.min(frame, this.totalFrames - 1)));
             } else if (this.dragType === 'breakpoint') {
@@ -1708,7 +1901,11 @@ class TimelineEditor {
 
         // Hover: update cursor based on hit
         const hit = this.hitTest(pos.x, pos.y);
-        if (hit.type === 'breakpoint') {
+        if (hit.type === 'loop-edge-l' || hit.type === 'loop-edge-r') {
+            this.canvas.style.cursor = 'col-resize';
+        } else if (hit.type === 'loop-body') {
+            this.canvas.style.cursor = 'grab';
+        } else if (hit.type === 'breakpoint') {
             this.canvas.style.cursor = 'pointer';
         } else if (hit.type === 'lane-line') {
             this.canvas.style.cursor = 'cell';
@@ -1831,6 +2028,9 @@ class TimelineEditor {
             playhead: this.playhead,
             inPoint: this.inPoint,
             outPoint: this.outPoint,
+            loopStart: this.loopStart,
+            loopEnd: this.loopEnd,
+            loopEnabled: this.loopEnabled,
             zoom: this.zoom,
             scrollX: this.scrollX,
             selectedRegionId: this.selectedRegionId,
@@ -1878,6 +2078,9 @@ class TimelineEditor {
         this.playhead = data.playhead || 0;
         this.inPoint = data.inPoint ?? null;
         this.outPoint = data.outPoint ?? null;
+        this.loopStart = data.loopStart ?? null;
+        this.loopEnd = data.loopEnd ?? null;
+        this.loopEnabled = data.loopEnabled ?? false;
         this.zoom = data.zoom || 2.0;
         this.scrollX = data.scrollX || 0;
         this.selectedRegionId = data.selectedRegionId ?? null;

@@ -25,7 +25,7 @@
 | P0-3 | **Text contrast WCAG pass** — `--text-dim` #555→#7a7a7a, `--text-secondary` #888→#999. | User request | Small | [x] | style.css |
 | P0-4 | **Retest B10-B13** — byte corrupt, flow distort, auto levels, histogram eq. All 4 PASS after frame_index fix. | UAT findings | Small | [x] | tests/test_retest_b10_b13.py |
 | P0-5 | **Seed audit** — 5/10 working (displacement, tvstatic, vhs, noise, dropout), 5/10 vestigial (scanlines, asciiart, brailleart, stutter, feedback). Decide: remove dead seeds or wire up. | UAT S5, P1 | Medium | [~] | effects/*.py |
-| P0-6 | **Loop region selection** — Ableton-style loop brace on timeline. Set loop start/end, playback loops within that range. Drag to reposition, resize by dragging edges. Loop on/off toggle. Currently only perform mode has whole-video loop toggle. | User request | Medium | [ ] | timeline.js, app.js |
+| P0-6 | **Loop region selection** — Ableton-style loop brace on timeline. Set loop start/end, playback loops within that range. Drag to reposition, resize by dragging edges. Loop on/off toggle. Currently only perform mode has whole-video loop toggle. | User request | Medium | [x] | timeline.js |
 | P0-7 | **Timeline scrub verification** — Click ruler sets playhead (BUILT), drag scrubs (BUILT). Verify scrub triggers preview with effects applied during drag. | User request | Small | [~] | timeline.js |
 
 ---
