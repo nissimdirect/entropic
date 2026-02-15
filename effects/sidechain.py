@@ -671,16 +671,94 @@ _SIDECHAIN_MODES = {
     "cross": sidechain_cross,
 }
 
+# Envelope store for parameter targeting.
+# Key: chain context string, Value: {"envelope": float 0-1, "target_effect": str, "target_param": str}
+_sidechain_envelopes = {}
+
+
+def get_sidechain_envelope(chain_id: str = "default") -> dict | None:
+    """Get stored sidechain envelope for parameter targeting.
+
+    Returns dict with 'envelope' (0-1), 'target_effect', 'target_param',
+    or None if no targeting sidechain is active.
+    """
+    return _sidechain_envelopes.get(chain_id)
+
+
+def clear_sidechain_envelopes(chain_id: str = "default"):
+    """Clear stored envelopes after chain rendering completes."""
+    _sidechain_envelopes.pop(chain_id, None)
+
+
+def _compute_envelope_value(frame: np.ndarray, mode: str, kwargs: dict) -> float:
+    """Compute a scalar 0-1 envelope from the sidechain signal.
+
+    For duck/gate: based on source signal level vs threshold.
+    For pump: based on rhythmic envelope position.
+    """
+    if mode == "pump":
+        rate = float(kwargs.get("rate", 2.0))
+        depth = float(kwargs.get("depth", 0.7))
+        frame_index = int(kwargs.get("frame_index", 0))
+        curve = str(kwargs.get("curve", "exponential"))
+        phase = (frame_index / 30.0 * rate) % 1.0
+        if curve == "exponential":
+            return float(1.0 - np.exp(-phase * 5) * depth)
+        elif curve == "logarithmic":
+            return float(1.0 - np.log1p((1.0 - phase) * 10) / np.log1p(10) * depth)
+        else:  # linear
+            return float(1.0 - max(0, (1.0 - phase)) * depth)
+
+    # duck/gate: extract signal level
+    source = str(kwargs.get("source", "brightness"))
+    threshold = float(kwargs.get("threshold", 0.5))
+    signal = _extract_sidechain_signal(frame, source)
+    level = float(np.mean(signal))
+
+    if mode == "gate":
+        return 1.0 if level > threshold else 0.0
+
+    # duck: compressor-style gain reduction
+    ratio = float(kwargs.get("ratio", 4.0))
+    above = max(0.0, level - threshold)
+    gain_reduction = above * (1.0 - 1.0 / max(ratio, 1.0))
+    return float(1.0 - gain_reduction)
+
 
 def sidechain_operator(
     frame: np.ndarray,
     mode: str = "duck",
+    target_effect: str = "",
+    target_param: str = "",
     **kwargs,
 ) -> np.ndarray:
     """Unified sidechain operator — 4 modes: duck, pump, gate, cross.
 
-    Pass any parameter from the underlying effect; unrecognized params are ignored.
+    When target_effect and target_param are set, the sidechain computes
+    its envelope and stores it for the chain runner to apply to the target
+    effect's parameter. The frame passes through unchanged.
+
+    When no targeting is set, applies the sidechain effect directly
+    (traditional mode).
+
+    Args:
+        mode: Sidechain mode — "duck", "pump", "gate", "cross".
+        target_effect: Name of effect in chain to modulate (empty = direct mode).
+        target_param: Parameter name on target effect to modulate.
+        **kwargs: Mode-specific parameters passed to underlying effect.
     """
+    # Parameter targeting mode: compute envelope, store it, passthrough frame
+    if target_effect and target_param:
+        chain_id = kwargs.pop("_chain_id", "default")
+        envelope = _compute_envelope_value(frame, mode, kwargs)
+        _sidechain_envelopes[chain_id] = {
+            "envelope": envelope,
+            "target_effect": target_effect,
+            "target_param": target_param,
+        }
+        return frame
+
+    # Direct mode: apply sidechain effect to frame
     fn = _SIDECHAIN_MODES.get(mode)
     if fn is None:
         raise ValueError(f"Unknown sidechain mode: {mode}. Available: {', '.join(_SIDECHAIN_MODES.keys())}")

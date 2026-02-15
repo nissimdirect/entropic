@@ -51,10 +51,10 @@
 | # | Item | Source | Effort | Status | Files |
 |---|------|--------|--------|--------|-------|
 | P2-1 | **Pixel physics consolidation** — 4 mega-effects expanded with full params from all modes, param_ranges, param_options, and param_visibility dicts for conditional UI display. pixeldynamics (6 modes, 25 params), pixelcosmos (8 modes), pixelorganic (3 modes), pixeldecay (4 modes). | UAT A6 | Large | [x] | effects/__init__.py |
-| P2-2 | **Modular sidechain operator** — one sidechain operator that maps to any parameter. Current 6 sidechain effects → presets. | UAT A4 | Large | [ ] | effects/sidechain.py, app.js |
+| P2-2 | **Modular sidechain operator** — parameter targeting: sidechain envelope modulates any effect's param in chain. target_effect + target_param params, envelope store, apply_chain integration. param_visibility per mode. 14 tests. | UAT A4 | Large | [x] | effects/sidechain.py, effects/__init__.py, tests/test_sidechain_targeting.py |
 | P2-3 | **Taxonomy reclassification** — Operators category added, LFO moved, CATEGORY_ORDER reordered, 9 effects moved to tools (levels, curves, hsladjust, colorbalance, histogrameq, clahe, autolevels, chroma_key, luma_key), hueflanger moved to modulation. | UAT A3 | Medium | [x] | effects/__init__.py |
 | P2-4 | **Transparent layer rendering** — RGBA pipeline: checkerboard composite preview, PNG encoding for alpha frames, output_alpha flag on emboss/chroma_key/luma_key, alpha preservation through chains. 10 tests. | UAT S7 | Medium | [x] | server.py, effects/__init__.py, tests/test_rgba_pipeline.py |
-| P2-5 | **Gravity concentrations** — place attraction points on frame that intensify parameters in that region. Spatial parameter modulation. | UAT S6 | Large | [ ] | new module |
+| P2-5 | **Gravity concentrations** — core/spatial_mod.py with compute_gravity_mask() (4 falloff types: gaussian/linear/cosine/step), apply_chain gravity_points integration, post-effect spatial blending. 13 tests. | UAT S6 | Large | [x] | core/spatial_mod.py, effects/__init__.py, tests/test_spatial_mod.py |
 | P2-6 | **Ring mod reconceptualization** — 4 carrier waveforms (sine/square/triangle/saw), spectrum band selection (all/low/mid/high), animation_rate control, temporal direction, depth-bypass fix for phase mode. 23 tests. | UAT rework | Medium | [x] | effects/modulation.py |
 | P2-7 | **Flanger vs Phaser vs LFO differentiation** — MODULATION-GUIDE.md written (5 types, 16 effects classified, ASCII signal flow diagrams, quick reference table). All modulation descriptions updated with type prefix and param_descriptions. | UAT ARCH-Q | Design | [x] | docs/MODULATION-GUIDE.md |
 
@@ -162,5 +162,5 @@
 
 ---
 
-*Total remaining items: 0 P0 + 0 P1 + 2 P2 + 0 P3 + 0 P4 + 278 P5 + 10 UX = 290 items*
-*P1 done: 9/9. P3 done: 28/28. P4 done: 5/5. P2 Sprint 1 done: P2-3, P2-6, P2-7. P2 Sprint 2 done: P2-1 (mega-effect param_visibility), P2-4 (RGBA pipeline). Remaining P2: P2-2 (modular sidechain), P2-5 (gravity concentrations).*
+*Total remaining items: 0 P0 + 0 P1 + 0 P2 + 0 P3 + 0 P4 + 278 P5 + 10 UX = 288 items*
+*P0-P4 COMPLETE. P2 done: 7/7 across 3 sprints. Sprint 1: P2-3, P2-6, P2-7. Sprint 2: P2-1, P2-4. Sprint 3: P2-2, P2-5. Remaining: 278 P5 effects + 10 UX debt items.*

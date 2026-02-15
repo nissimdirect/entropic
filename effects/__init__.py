@@ -693,9 +693,27 @@ EFFECTS = {
     "sidechainoperator": {
         "fn": sidechain_operator,
         "category": "sidechain",
-        "params": {"mode": "duck", "source": "brightness", "threshold": 0.5, "seed": 42},
-        "param_ranges": {"threshold": {"min": 0, "max": 255}},
-        "description": "Sidechain Operator — 4 modes: duck, pump, gate, cross",
+        "params": {"mode": "duck", "source": "brightness", "threshold": 0.5, "ratio": 4.0, "rate": 2.0, "depth": 0.7, "target_effect": "", "target_param": "", "seed": 42},
+        "param_ranges": {"threshold": {"min": 0.0, "max": 1.0}, "ratio": {"min": 1.0, "max": 20.0}, "rate": {"min": 0.5, "max": 8.0}, "depth": {"min": 0.0, "max": 1.0}},
+        "param_options": {"mode": ["duck", "pump", "gate", "cross"], "source": ["brightness", "motion", "edges", "saturation", "contrast", "hue"]},
+        "param_descriptions": {
+            "mode": "Sidechain mode: duck (compress), pump (rhythmic), gate (threshold), cross (two-video)",
+            "source": "What signal to extract from the input for envelope",
+            "threshold": "Signal level to trigger the sidechain (0-1)",
+            "ratio": "Compression ratio for duck mode (higher=harder)",
+            "rate": "Pump rate in Hz for pump mode (2.0=120BPM quarter notes)",
+            "depth": "How deep the pump ducks (0-1)",
+            "target_effect": "Effect in chain to modulate (empty=apply directly)",
+            "target_param": "Parameter on target effect to modulate",
+        },
+        "param_visibility": {
+            "ratio": {"hidden_when": {"mode": ["pump", "gate", "cross"]}},
+            "rate": {"hidden_when": {"mode": ["duck", "gate", "cross"]}},
+            "depth": {"hidden_when": {"mode": ["duck", "gate", "cross"]}},
+            "source": {"hidden_when": {"mode": ["pump"]}},
+            "threshold": {"hidden_when": {"mode": ["pump"]}},
+        },
+        "description": "Sidechain Operator — 4 modes + parameter targeting. Set target_effect + target_param to modulate another effect's parameter with the sidechain envelope.",
     },
 
     # === PIXEL PHYSICS ===
@@ -1395,7 +1413,7 @@ def _blend_mix(original, wet, mix, blend_mode="normal"):
 
 
 def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_frames: int = 1,
-                watermark: bool = False):
+                watermark: bool = False, gravity_points: list[dict] | None = None):
     """Apply a chain of effects sequentially.
 
     effects_list: [{"name": "pixelsort", "params": {"threshold": 0.6}}, ...]
@@ -1416,12 +1434,37 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
         rate: For LFO trigger, frequency in Hz. For time trigger,
               pulses per second. For content triggers, threshold (0-1).
 
+    Sidechain targeting:
+        When a sidechain_operator in the chain has target_effect and target_param
+        set, it computes an envelope (0-1) and stores it. When the target effect
+        is reached, its target_param is multiplied by the envelope value.
+
+    Gravity concentrations:
+        gravity_points: [{"x": 0.3, "y": 0.5, "radius": 0.2, "strength": 1.0}, ...]
+        When set, effects are only visible near the gravity points.
+
     Args:
         watermark: If True (default), burns watermark on free tier exports.
                    Set False for preview (no watermark on previews).
+        gravity_points: Optional list of gravity point dicts for spatial modulation.
     """
     from core.safety import validate_chain_depth
     validate_chain_depth(effects_list)
+
+    # Precompute gravity mask if gravity points are provided
+    gravity_mask = None
+    if gravity_points:
+        try:
+            from core.spatial_mod import compute_gravity_mask
+            gravity_mask = compute_gravity_mask(gravity_points, frame.shape[:2])
+        except ImportError:
+            pass  # Module not yet available — skip spatial modulation
+
+    # Generate a unique chain ID for sidechain envelope storage
+    chain_id = f"chain_{id(effects_list)}_{frame_index}"
+
+    # Build a name→index map for sidechain targeting lookups
+    effect_names = [e.get("name", "") for e in effects_list if e.get("type") != "group"]
 
     for effect in effects_list:
         # Handle nested group items (Ableton-style racks)
@@ -1436,7 +1479,8 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
             group_blend = effect.get("blend_mode", "normal")
             original = frame.copy() if group_mix < 1.0 or group_blend != "normal" else None
             frame = apply_chain(frame, children, frame_index=frame_index,
-                                total_frames=total_frames, watermark=False)
+                                total_frames=total_frames, watermark=False,
+                                gravity_points=gravity_points)
             if original is not None:
                 if group_mix <= 0.0:
                     frame = original
@@ -1448,10 +1492,29 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
         params = effect.get("params", {})
         envelope = effect.get("envelope")
 
+        # Inject chain_id for sidechain targeting
+        if name in ("sidechainoperator", "sidechain_operator"):
+            params["_chain_id"] = chain_id
+
+        # Check if a sidechain operator is targeting THIS effect's param
+        from effects.sidechain import get_sidechain_envelope
+        sc_env = get_sidechain_envelope(chain_id)
+        if sc_env and sc_env["target_effect"] == name and sc_env["target_param"] in params:
+            # Multiply target param by envelope value
+            param_key = sc_env["target_param"]
+            try:
+                original_val = float(params[param_key])
+                params[param_key] = original_val * sc_env["envelope"]
+            except (ValueError, TypeError):
+                pass  # Non-numeric param, skip modulation
+
         # Extract per-effect mix and blend mode
         mix = float(params.pop("mix", 1.0))
         mix = max(0.0, min(1.0, mix))
         blend_mode = params.pop("blend_mode", "normal")
+
+        # Save frame before effect for gravity mask blending
+        pre_effect = frame.copy() if gravity_mask is not None else None
 
         if envelope is not None:
             # Wrap effect with ADSR envelope
@@ -1479,6 +1542,20 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
         else:
             frame = apply_effect(frame, name, frame_index=frame_index, total_frames=total_frames,
                                 mix=mix, blend_mode=blend_mode, **params)
+
+        # Apply gravity mask: blend between pre-effect and post-effect
+        if gravity_mask is not None and pre_effect is not None:
+            import numpy as _np
+            mask_3d = gravity_mask[:, :, _np.newaxis]
+            frame = (_np.clip(
+                pre_effect.astype(_np.float32) * (1.0 - mask_3d) +
+                frame.astype(_np.float32) * mask_3d,
+                0, 255
+            )).astype(_np.uint8)
+
+    # Clean up sidechain envelope store
+    from effects.sidechain import clear_sidechain_envelopes
+    clear_sidechain_envelopes(chain_id)
 
     # Burn watermark on free tier (only for exports, not previews)
     if watermark and not _check_license():

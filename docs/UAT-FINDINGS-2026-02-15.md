@@ -917,3 +917,59 @@ These items were in the user's feedback but MISSED in the first capture:
 | Browser collapsible via button | Tab key or button | ARCHITECTURE-DEEP-DIVE.md §7.12 |
 | Max 8 tracks | Right-click or "+" to add | ARCHITECTURE-DEEP-DIVE.md §7.6 |
 | MIDI routing in Preferences | Enable/disable per MIDI device | ARCHITECTURE-DEEP-DIVE.md §7.9 |
+
+---
+
+## UAT ROUND 3: POST-SPRINT TESTING (2026-02-15)
+
+> **Context:** Following UI refactor sprint, all toolbar/layout/track issues addressed. Test plan covers merged toolbar, track system, transport controls, preview cleanup, and panel resizing.
+
+### Test Plan
+
+#### A. Toolbar & Navigation
+- [ ] Single merged toolbar (File/Edit/View + transport + status)
+- [ ] File menu: Open File, Export, Save Preset all work
+- [ ] Edit menu: Undo, Redo, Randomize, Refresh all work
+- [ ] View menu: Toggle Histogram, Toggle Sidebar, Split Compare, Pop Out Preview, Keyboard Shortcuts
+- [ ] Transport centered: Play/Pause, Rec, Overdub, Capture, Loop buttons visible
+- [ ] Transport icons are appropriately sized (not too small)
+- [ ] Loop and Refresh have DIFFERENT icons (Loop = ↻, Refresh = ↻ but visually distinct)
+- [ ] No Mixer button visible anywhere
+- [ ] History dropdown opens on right side
+
+#### B. Track System
+- [ ] Default Track 1 appears on startup (before file load)
+- [ ] Can add tracks with "+" button (up to 8)
+- [ ] "+" button is channel-strip width, not full row
+- [ ] Track header shows: name, opacity, Solo, Mute, blend mode
+- [ ] Click track to select → chain panel updates
+- [ ] Right-click track → context menu (Add/Duplicate/Delete/Move)
+- [ ] Track collapse toggle works
+- [ ] Solo/Mute buttons toggle correctly
+
+#### C. Preview Canvas
+- [ ] Preview video maintains aspect ratio (not stretched)
+- [ ] No confusing buttons on preview (Capture/Diff/Split hidden)
+- [ ] Split Compare accessible via View menu
+- [ ] Pop Out Preview opens in new window
+
+#### D. Panel Resizing
+- [ ] Browser width draggable (120-500px)
+- [ ] Canvas↔Timeline divider draggable
+- [ ] Timeline↔Chain divider draggable
+- [ ] Panel sizes persist on page reload
+- [ ] Browser collapses via Tab key
+- [ ] Chain/Timeline collapse to header only (28px)
+
+#### E. Transport Controls
+- [ ] Play/Pause toggles (Space key)
+- [ ] Record activates (R key)
+- [ ] Overdub activates (Shift+R)
+- [ ] Capture blinks on trigger (Cmd+Shift+C)
+- [ ] Loop toggles (L key)
+- [ ] Timecode updates during playback
+- [ ] Frame counter updates
+
+---
+
+*Added: 2026-02-15, post-sprint UAT cycle*

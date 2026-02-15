@@ -779,6 +779,11 @@ async function init() {
     renderChain();
     renderLayers();
     renderHistory();
+    // Ensure Track 1 exists on startup
+    if (tracks.length === 0) {
+        tracks.push(createTrack('Track 1'));
+        selectedTrackIdx = 0;
+    }
     renderTrackList();  // Initialize track strip UI
     startHeartbeat();
     showOnboarding();
@@ -3527,9 +3532,7 @@ function showPreview(dataUrl) {
     img.src = dataUrl;
     img.style.display = 'block';
     document.getElementById('empty-state').style.display = 'none';
-    // Show diff toolbar when we have a preview
-    const dt = document.getElementById('diff-toolbar');
-    if (dt) dt.style.display = 'flex';
+    // DO NOT auto-show diff toolbar — user accesses via View menu
     // Auto-update diff if active
     if (_diffMode && _diffRef) diffShow(_diffMode);
 }
@@ -3581,13 +3584,18 @@ function diffShow(mode) {
         ctx.putImageData(out, 0, 0);
     } else if (mode === 'split') {
         // Left = reference, Right = current
+        // Clear canvas first
+        ctx.clearRect(0, 0, dc.width, dc.height);
         const half = Math.floor(dc.width / 2);
         const refCanvas = document.createElement('canvas');
         refCanvas.width = dc.width; refCanvas.height = dc.height;
         const rctx = refCanvas.getContext('2d');
         rctx.putImageData(_diffRef, 0, 0);
+        // Draw left half of reference (source rect = left half of canvas)
         ctx.drawImage(refCanvas, 0, 0, half, dc.height, 0, 0, half, dc.height);
-        ctx.drawImage(img, half, 0, dc.width - half, dc.height, half, 0, dc.width - half, dc.height);
+        // Draw right half of current (source rect = right half of image at natural size)
+        const imgHalf = Math.floor(img.naturalWidth / 2);
+        ctx.drawImage(img, imgHalf, 0, img.naturalWidth - imgHalf, img.naturalHeight, half, 0, dc.width - half, dc.height);
         // Divider line
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
@@ -3603,6 +3611,81 @@ function diffClear() {
     _diffMode = null;
     const dc = document.getElementById('diff-canvas');
     if (dc) { dc.style.display = 'none'; }
+}
+
+// ============ PREVIEW CONTROLS ============
+function toggleDiffToolbar() {
+    const dt = document.getElementById('diff-toolbar');
+    if (!dt) return;
+    if (dt.style.display === 'none' || !dt.style.display) {
+        dt.style.display = 'flex';
+    } else {
+        dt.style.display = 'none';
+        diffClear();
+    }
+}
+
+function popoutPreview() {
+    const img = document.getElementById('preview-img');
+    if (!img.src || img.style.display === 'none') {
+        showToast('No preview to pop out', 'error');
+        return;
+    }
+    const win = window.open('', 'Entropic Preview', 'width=1280,height=720,menubar=no,toolbar=no,location=no,status=no');
+    if (win) {
+        win.document.write(`
+            <!DOCTYPE html>
+            <html><head><title>Entropic Preview</title>
+            <style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden}
+            img{max-width:100%;max-height:100vh;object-fit:contain}</style>
+            </head><body><img src="${img.src}"></body></html>
+        `);
+        win.document.close();
+    } else {
+        showToast('Failed to open preview window (popup blocked?)', 'error');
+    }
+}
+
+function fullscreenPreview() {
+    const canvas = document.getElementById('canvas-area');
+    if (!canvas) return;
+    if (canvas.requestFullscreen) canvas.requestFullscreen();
+    else if (canvas.webkitRequestFullscreen) canvas.webkitRequestFullscreen();
+    else if (canvas.mozRequestFullScreen) canvas.mozRequestFullScreen();
+    else if (canvas.msRequestFullscreen) canvas.msRequestFullscreen();
+    else showToast('Fullscreen not supported', 'error');
+}
+
+let _previewPlaying = false;
+function togglePlayback() {
+    // Placeholder for future video playback support
+    // Currently just toggles the button state
+    _previewPlaying = !_previewPlaying;
+    const btn = document.getElementById('preview-play');
+    if (btn) btn.innerHTML = _previewPlaying ? '&#9208;' : '&#9654;';
+    if (_previewPlaying) {
+        showToast('Video playback not yet implemented', 'info', null, 2000);
+        _previewPlaying = false;
+        btn.innerHTML = '&#9654;';
+    }
+}
+
+function scrubPreview(value) {
+    // Update progress bar fill
+    const fill = document.getElementById('preview-progress-fill');
+    if (fill) fill.style.width = value + '%';
+    // Future: trigger frame scrubbing when video support is added
+}
+
+function clickScrubPreview(event) {
+    const bar = document.getElementById('preview-progress-bar');
+    if (!bar) return;
+    const rect = bar.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const percent = (x / rect.width) * 100;
+    scrubPreview(Math.max(0, Math.min(100, percent)));
+    const scrubber = document.getElementById('preview-scrubber');
+    if (scrubber) scrubber.value = percent;
 }
 
 // ============ CONTEXT MENU ============
@@ -6861,6 +6944,9 @@ function menuAction(action) {
             const br = document.getElementById('browser');
             if (br) br.style.display = br.style.display === 'none' ? '' : 'none';
             break;
+        case 'toggle-diff': toggleDiffToolbar(); break;
+        case 'popout-preview': popoutPreview(); break;
+        case 'fullscreen-preview': fullscreenPreview(); break;
         case 'refresh': previewChain(); break;
         case 'shortcuts': openShortcutRef(); break;
     }

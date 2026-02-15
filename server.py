@@ -515,6 +515,92 @@ async def preview_effect(chain: EffectChain):
         raise HTTPException(status_code=500, detail=_error_detail("processing_failed", "Effect processing failed"))
 
 
+class MultiTrackPreviewRequest(BaseModel):
+    frame_number: int
+    tracks: list[dict]  # [{name, effects, opacity, blend_mode, muted, solo}]
+
+
+@app.post("/api/preview/multitrack")
+async def preview_multitrack(req: MultiTrackPreviewRequest):
+    """Preview a frame composited from multiple tracks with blend modes."""
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
+
+    try:
+        from core.layer import Layer, LayerStack
+
+        # Determine which tracks are audible (solo logic)
+        any_solo = any(t.get("solo", False) for t in req.tracks)
+
+        layers = []
+        for i, track in enumerate(req.tracks):
+            is_muted = track.get("muted", False)
+            is_solo = track.get("solo", False)
+            # If any track is soloed, only soloed tracks are visible
+            if any_solo and not is_solo:
+                continue
+            if is_muted:
+                continue
+
+            layers.append(Layer(
+                layer_id=i,
+                name=track.get("name", f"Track {i + 1}"),
+                video_path=_state["video_path"],
+                effects=track.get("effects", []),
+                opacity=max(0.0, min(1.0, track.get("opacity", 1.0))),
+                z_order=i,
+                blend_mode=track.get("blend_mode", "normal"),
+                trigger_mode="always_on",
+            ))
+
+        if not layers:
+            # All muted — return black frame
+            frame = extract_single_frame(_state["video_path"], req.frame_number)
+            black = np.zeros_like(frame)
+            return {"preview": _frame_to_data_url(black)}
+
+        stack = LayerStack(layers)
+
+        # Load the source frame once and apply each track's effects
+        raw_frame = extract_single_frame(_state["video_path"], req.frame_number)
+
+        # Cap resolution
+        MAX_PREVIEW_PIXELS = 1920 * 1080
+        h, w = raw_frame.shape[:2]
+        if h * w > MAX_PREVIEW_PIXELS:
+            scale = (MAX_PREVIEW_PIXELS / (h * w)) ** 0.5
+            new_h, new_w = int(h * scale), int(w * scale)
+            raw_frame = np.array(Image.fromarray(raw_frame).resize((new_w, new_h)))
+
+        total_frames = _state["video_info"].get("total_frames", 1)
+
+        frame_dict = {}
+        for layer in layers:
+            effects = layer.effects
+            if effects:
+                filtered, _ = _filter_video_level_effects(effects)
+                if filtered:
+                    processed = apply_chain(
+                        raw_frame.copy(), filtered,
+                        frame_index=req.frame_number,
+                        total_frames=total_frames,
+                        watermark=False,
+                    )
+                else:
+                    processed = raw_frame.copy()
+            else:
+                processed = raw_frame.copy()
+            frame_dict[layer.layer_id] = processed
+
+        composited = stack.composite(frame_dict)
+        return {"preview": _frame_to_data_url(composited)}
+
+    except Exception as e:
+        import logging
+        logging.exception("Multitrack preview failed")
+        raise HTTPException(status_code=500, detail=_error_detail("processing_failed", "Multi-track preview failed"))
+
+
 class TimelinePreviewRequest(BaseModel):
     frame_number: int
     regions: list[dict]  # [{start, end, effects, muted, mask}]

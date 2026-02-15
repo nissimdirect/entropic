@@ -1686,15 +1686,15 @@ Entropic has 3 separate modes (Quick/Timeline/Perform) that each present a diffe
 
 ### 7.4 Layout Specification
 
+**UPDATED 2026-02-15:** Toolbar and menu bar merged into single 38px topbar.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ TOPBAR                                                       │
-│ [Logo] [Load File] [Export]                                  │
-│         ◄ ▶/▮▮ ● ◎ ⊡ ↻Loop │ 0:00:00 / 0:30:00           │
-│                          [🎹 Keyboard] [Undo↶] [Redo↷]      │
-├──────┬──────────────────────────────────────────────────────┤
-│ MENU │ File │ Edit │ View                                    │
-├──────┴──────────────────────────────────────────────────────┤
+│ TOPBAR (single unified bar, 38px height)                    │
+│ [Entropic] File Edit View   No file loaded                  │
+│         ◄ ▶/▮▮ ● ◎ ⊡ ↻ │ 0:00:00/0:30:00 F:0/0          │
+│                    Rand ↻ History▾                          │
+├─────────────────────────────────────────────────────────────┤
 │ BROWSER │ PREVIEW CANVAS                                     │
 │ (collap-│                                                    │
 │  sible) │     ┌──────────────────────┐                      │
@@ -1717,16 +1717,24 @@ Entropic has 3 separate modes (Quick/Timeline/Perform) that each present a diffe
   [☽ theme switch]                                bottom-right
 ```
 
+**Key changes:**
+- Menu bar (File/Edit/View) now INLINE in topbar (left side)
+- No separate 24px menu bar row
+- File status indicator shows loaded file name
+- Transport controls centered
+- History dropdown right-aligned
+
 ### 7.5 Panel Behavior
+
+**UPDATED 2026-02-15:** Menu bar removed, topbar height reduced.
 
 | Panel | Default | Resizable | Collapsible | Method |
 |-------|---------|-----------|-------------|--------|
 | Browser (left) | 220px width | Yes (drag divider) | Yes (button) | Collapse to 0px |
 | Preview | 1fr (fills remaining) | Yes (drag dividers) | No | Always visible |
-| Timeline | 140px height | Yes (drag divider) | Yes (▼ toggle) | Collapse to header only |
-| Effect Chain | 200px height | Yes (drag divider) | Yes (▼ toggle) | Collapse to header only |
-| Menu bar | 24px | No | No | Always visible |
-| Top bar | 44px | No | No | Always visible |
+| Timeline | 140px height | Yes (drag divider) | Yes (▼ toggle) | Collapse to header only (28px) |
+| Effect Chain | 200px height | Yes (drag divider) | Yes (▼ toggle) | Collapse to header only (28px) |
+| Top bar | 38px | No | No | Always visible (merged with menu bar) |
 
 **Drag dividers:** Thin (4px) bars between panels. Grab and drag to resize. Sizes saved to localStorage. Standard pattern from VSCode/Ableton/Photoshop.
 
@@ -1823,24 +1831,35 @@ Clicking the Perform device expands its UI in the chain panel, showing the trigg
 
 ### 7.10 Toolbar Reorganization
 
+**STATUS: COMPLETED 2026-02-15** — Menu bar merged into topbar, single unified bar.
+
 **Top bar layout (left to right):**
 ```
-[Logo] [Load File] [Export] | [◄] [▶/▮▮] [●] [◎] [⊡] [↻] 0:00/0:30 | [🎹] [↶ Undo] [↷ Redo] [Randomize 🎲] [Refresh ↻] [History ▾]
+[Entropic] File Edit View   File status   [◄] [▶/▮▮] [●] [◎] [⊡] [↻Loop] 0:00/0:30 F:0/0   Rand ↻ History▾
 ```
 
-**Menu bar (below top bar):**
+**Implemented changes:**
+- Menu bar (File/Edit/View) now INLINE in topbar (no separate row)
+- File status shows loaded file name or "No file loaded"
+- Transport controls centered with timecode and frame count
+- Rand (text button, not dice emoji)
+- Refresh icon distinct from Loop icon
+- History dropdown right-aligned
+- Undo/Redo moved to Edit menu
+- No Mixer button (perform panel toggled with P key)
+
+**Menu dropdowns (click to expand):**
 | Menu | Items |
 |------|-------|
-| File | Import File..., Export..., Save Preset, Load Preset |
-| Edit | Undo, Redo, Randomize Chain, Clear Chain, Preferences... |
-| View | Toggle Browser, Toggle Histogram, Keyboard Shortcuts, Help |
+| File | Open File... (⌘O), Export... (⌘E), Save Preset (⌘S) |
+| Edit | Undo (⌘Z), Redo (⌘⇧Z), Randomize Chain, Refresh Preview |
+| View | Toggle Histogram, Toggle Sidebar (Tab), Keyboard Shortcuts |
 
-**Removed from top bar:**
+**Removed:**
 - Mode toggle (Quick/Timeline/Perform) — KILLED
-- "Refresh Preview" text → replaced with ↻ icon
-- "Export" text button → moved next to "Load File"
-
-**Undo/Redo:** Small icon buttons (↶ ↷), no text labels.
+- Separate menu bar row — merged into topbar
+- Mixer button — perform panel toggled with P key
+- Dice emoji — replaced with "Rand" text
 
 ### 7.11 History
 

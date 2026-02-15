@@ -265,9 +265,10 @@ class TestUIElements:
         """Right panel tab renamed from 'Layers' to 'Devices'."""
         assert ">Devices<" in self.html
 
-    def test_perform_renamed_to_mixer(self):
-        """Perform toggle button renamed to 'Mixer'."""
-        assert ">Mixer<" in self.html
+    def test_transport_bar_exists(self):
+        """Transport bar with play/rec/loop controls replaces Mixer toggle."""
+        assert 'class="transport-bar"' in self.html
+        assert 'id="transport-play"' in self.html
 
     def test_mode_badge_removed(self):
         """Mode badge div removed (was always 'TIMELINE')."""

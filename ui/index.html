@@ -97,6 +97,10 @@
                 <button onclick="menuAction('toggle-histogram')">Toggle Histogram</button>
                 <button onclick="menuAction('toggle-sidebar')">Toggle Sidebar <span class="menu-shortcut">Tab</span></button>
                 <hr>
+                <button onclick="menuAction('toggle-diff')">Split Compare</button>
+                <button onclick="menuAction('popout-preview')">Pop Out Preview</button>
+                <button onclick="menuAction('fullscreen-preview')">Fullscreen Preview</button>
+                <hr>
                 <button onclick="menuAction('shortcuts')">Keyboard Shortcuts</button>
             </div>
         </div>
@@ -107,7 +111,7 @@
             <button class="transport-btn" id="transport-rec" onclick="toggleRecord()" title="Record (R)">&#9679;</button>
             <button class="transport-btn" id="transport-overdub" onclick="toggleOverdub()" title="Overdub (Shift+R)">&#9678;</button>
             <button class="transport-btn" id="transport-capture" onclick="capturePerformBuffer()" title="Capture (Cmd+Shift+C)">&#8865;</button>
-            <button class="transport-btn" id="transport-loop" onclick="toggleLoop()" title="Loop (L)">&#8635;</button>
+            <button class="transport-btn" id="transport-loop" onclick="toggleLoop()" title="Loop (L)">⟳</button>
             <span class="transport-time" id="transport-timecode">0:00:00 / 0:00:00</span>
             <span class="transport-frames" id="transport-frames">F:0/0</span>
         </div>
@@ -152,6 +156,15 @@
             <p class="hint">Drop video, image, GIF — or anything else for creative interpretation</p>
         </div>
         <img id="preview-img" style="display:none">
+        <div id="preview-controls">
+            <button onclick="togglePlayback()" class="preview-ctrl-btn" id="preview-play" title="Play/Pause">&#9654;</button>
+            <div id="preview-progress-bar" onclick="clickScrubPreview(event)">
+                <div id="preview-progress-fill"></div>
+                <input type="range" id="preview-scrubber" min="0" max="100" value="0" oninput="scrubPreview(this.value)">
+            </div>
+            <button onclick="toggleDiffToolbar()" class="preview-ctrl-btn" title="Split Compare">&#9645;</button>
+            <button onclick="fullscreenPreview()" class="preview-ctrl-btn" title="Fullscreen">&#9974;</button>
+        </div>
         <div id="perf-hud" style="display:none">
             <span id="perf-hud-rec"></span>
             <span id="perf-hud-time"></span>
@@ -211,8 +224,6 @@
             <span class="collapse-toggle" onclick="togglePanel('timeline-area')">&#9660;</span>
             <span>Timeline</span>
             <div class="timeline-controls">
-                <button id="perform-toggle-btn" onclick="togglePerformPanel()" title="Toggle Mixer (P)" class="perform-toggle-btn">Mixer</button>
-                <span class="timeline-controls-sep"></span>
                 <button onclick="timelineEditor.zoomIn()" title="Zoom In (+)">+</button>
                 <button onclick="timelineEditor.zoomOut()" title="Zoom Out (-)">-</button>
                 <button onclick="timelineEditor.fitToWindow()" title="Fit to Window (Cmd+0)">Fit</button>
@@ -224,7 +235,7 @@
     </div>
 
     <!-- PERFORM: Transport Bar (between preview and mixer) -->
-    <div id="perform-transport">
+    <div id="perform-transport" style="display:none">
         <div class="transport-left">
             <button id="perf-play-btn" onclick="perfTogglePlay()" title="Space" data-tooltip="Play/pause perform mode playback" onmouseenter="showInfoViewText('PLAY: Start or pause perform mode playback (Space). Layers render at 15fps preview rate.')" onmouseleave="showInfoViewText('')">&#9654; Play</button>
             <button id="perf-rec-btn" onclick="perfToggleRecord()" title="R" data-tooltip="Toggle explicit recording — captures trigger events to session" onmouseenter="showInfoViewText('REC: Toggle explicit recording (R). Events are captured to a session buffer. Stop to Review, Bake to Timeline, Save, or Discard.')" onmouseleave="showInfoViewText('')">&#9679; Rec</button>
@@ -246,7 +257,7 @@
     </div>
 
     <!-- PERFORM: Mixer Panel (4 channel strips + master) -->
-    <div id="perform-panel">
+    <div id="perform-panel" style="display:none">
         <div id="mixer"><!-- Rendered by JS: renderMixer() --></div>
     </div>
 

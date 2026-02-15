@@ -6,7 +6,7 @@
 
 ---
 
-## Phase A: Layout Foundation (CURRENT)
+## Phase A: Layout Foundation (COMPLETE)
 
 - [x] A1. Kill 3-mode system (Quick/Timeline/Perform) — hide mode toggle
 - [x] A2. Merge topbar + menubar into single bar (File/Edit/View + logo + status)
@@ -77,21 +77,42 @@
 - [ ] F3. Visual: frozen track shows snowflake icon, grayed-out chain
 - [ ] F4. Backend: cache rendered frames per track
 
-## Immediate Fixes (from latest UAT)
+## Immediate Fixes (from latest UAT) — COMPLETE
 
 - [x] I1. Dice button looks terrible → replaced with "Rand" text
 - [x] I2. Undo/redo/refresh icons too small → bumped to 16px
 - [x] I3. Combine topbar + menubar → single row
 - [x] I4. History to right side
 - [x] I5. Panel collapse arrow goes to middle → max-height: 28px when collapsed
+- [x] I6. Default Track 1 on startup (before file load)
+- [x] I7. Add Track "+" button sizing (channel-strip width)
+- [x] I8. Hide diff tools from preview canvas
+- [x] I9. Loop and Refresh icons differentiated
+- [x] I10. Mixer button removed from toolbar
+
+---
+
+## Phase Round 3 Tasks (NEW — from sprint completion)
+
+- [ ] R3-1. UAT Round 3 execution — test all completed features per checklist
+- [ ] R3-2. File upload regression test (was broken in Round 1)
+- [ ] R3-3. Verify panel resize persistence across reload
+- [ ] R3-4. Test all keyboard shortcuts (Space, R, Shift+R, Cmd+Shift+C, L, Tab)
+- [ ] R3-5. Verify transport controls wired correctly
+- [ ] R3-6. Test track selection → chain panel update
+- [ ] R3-7. Verify Solo/Mute buttons toggle correctly
+- [ ] R3-8. Test View menu items (Toggle Histogram, Toggle Sidebar, etc.)
 
 ---
 
 ## Implementation Priority
 
-1. **Phase A** — Layout foundation (mostly done, finish A14-A15)
-2. **Phase B** — Track system (core architecture, biggest change)
-3. **Phase C** — Transport bar (depends on B for track context)
-4. **Phase F** — Freeze/Flatten (depends on B for track system)
-5. **Phase D** — Perform module (depends on B for track-based chains)
-6. **Phase E** — Keyboard/MIDI (depends on D for perform module)
+1. **Phase A** — Layout foundation ✅ COMPLETE
+2. **Phase B** — Track system ✅ COMPLETE (UI layer)
+3. **Phase C** — Transport bar ✅ COMPLETE (UI wiring)
+4. **Immediate Fixes** — ✅ COMPLETE
+5. **Phase Round 3** — UAT testing (CURRENT)
+6. **Phase F** — Freeze/Flatten (backend needed)
+7. **Phase D** — Perform module (backend needed)
+8. **Phase E** — Keyboard/MIDI (backend needed)
+9. **Backend: Multi-track rendering** — B13 (render pipeline)

@@ -616,6 +616,57 @@ h3 .count {
     cursor: pointer;
 }
 
+/* === PREVIEW CONTROLS OVERLAY === */
+#preview-controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 10;
+}
+#canvas-area:hover #preview-controls { opacity: 1; }
+.preview-ctrl-btn {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px;
+    transition: transform 0.1s;
+}
+.preview-ctrl-btn:hover {
+    transform: scale(1.15);
+}
+#preview-progress-bar {
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+    position: relative;
+    cursor: pointer;
+}
+#preview-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.1s linear;
+}
+#preview-scrubber {
+    position: absolute;
+    inset: -4px 0;
+    width: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
 /* === RIGHT PANEL: Photoshop Layers + History === */
 #right-panel {
     background: var(--bg-dark);
@@ -2186,6 +2237,7 @@ h3 .count {
     transition: all 0.15s ease;
     margin: 4px;
     border-radius: 2px;
+    width: 140px;
 }
 
 .track-add-button:hover {
@@ -3929,15 +3981,18 @@ body.dragging-divider {
     align-items: center;
     gap: 4px;
     margin: 0 8px;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
 }
 
 .transport-btn {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     border-radius: 3px;
     background: none;
     border: 1px solid var(--border);
-    font-size: 14px;
+    font-size: 16px;
     cursor: pointer;
     color: var(--text-secondary);
     transition: background 0.15s, color 0.15s;
