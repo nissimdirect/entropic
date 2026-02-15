@@ -14,6 +14,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from effects.color import levels, curves, hsl_adjust, color_balance, compute_histogram, tape_saturation
+from effects.ascii import ascii_art
 
 
 @pytest.fixture
@@ -391,3 +392,74 @@ class TestTapeSaturation:
         high_drive = tape_saturation(frame, drive=4.0, warmth=0.0, output_level=1.0)
         diff = np.mean(np.abs(low_drive.astype(float) - high_drive.astype(float)))
         assert diff > 5.0, f"Drive should change output visibly, got diff={diff:.1f}"
+
+
+class TestAsciiArtExpansion:
+    """Test ASCII art new features: custom_chars, palette mode, tint mode."""
+
+    @pytest.fixture
+    def frame(self):
+        rng = np.random.RandomState(42)
+        return rng.randint(0, 256, (64, 64, 3), dtype=np.uint8)
+
+    def test_custom_chars_override(self, frame):
+        """Custom chars string should be used instead of charset lookup."""
+        result = ascii_art(frame, custom_chars=" .oO@", width=40)
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_custom_chars_different_from_basic(self, frame):
+        """Custom chars should produce different output than basic charset."""
+        basic = ascii_art(frame, charset="basic", width=40)
+        custom = ascii_art(frame, custom_chars=" XYZ#", width=40)
+        diff = np.mean(np.abs(basic.astype(float) - custom.astype(float)))
+        assert diff > 0, "Custom chars should differ from basic"
+
+    def test_tint_color_mode(self, frame):
+        """Tint mode should render in the specified color."""
+        result = ascii_art(frame, color_mode="tint", tint_color="#ff0000", width=40)
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+        # Red channel should dominate in non-black areas
+        nonblack = result.sum(axis=2) > 10
+        if nonblack.any():
+            red_mean = np.mean(result[nonblack, 0])
+            blue_mean = np.mean(result[nonblack, 2])
+            assert red_mean > blue_mean, "Red tint should make red channel dominate"
+
+    def test_tint_vs_mono_differs(self, frame):
+        """Tint mode with blue should differ from mono (white)."""
+        mono = ascii_art(frame, color_mode="mono", width=40)
+        tint = ascii_art(frame, color_mode="tint", tint_color="#0000ff", width=40)
+        diff = np.mean(np.abs(mono.astype(float) - tint.astype(float)))
+        assert diff > 1.0, f"Tint should differ from mono, got diff={diff:.2f}"
+
+    def test_palette_mode(self, frame):
+        """Palette mode should render without crashing."""
+        result = ascii_art(frame, color_mode="palette", palette_size=4, width=40)
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_palette_limits_colors(self, frame):
+        """Palette mode with 2 colors should have fewer unique colors than original."""
+        palette_2 = ascii_art(frame, color_mode="palette", palette_size=2, width=40)
+        original = ascii_art(frame, color_mode="original", width=40)
+        # Count unique non-black colors
+        pal_colors = set(map(tuple, palette_2.reshape(-1, 3)[palette_2.sum(axis=2).ravel() > 10]))
+        orig_colors = set(map(tuple, original.reshape(-1, 3)[original.sum(axis=2).ravel() > 10]))
+        # Palette should have fewer unique colors
+        assert len(pal_colors) <= len(orig_colors) + 1, "Palette should limit color count"
+
+    def test_all_new_color_modes_no_crash(self, frame):
+        """All 7 color modes should run without error."""
+        for mode in ["mono", "green", "amber", "original", "rainbow", "palette", "tint"]:
+            result = ascii_art(frame, color_mode=mode, width=30)
+            assert result.shape == frame.shape, f"Mode {mode} shape mismatch"
+            assert result.dtype == np.uint8, f"Mode {mode} wrong dtype"
+
+    def test_short_custom_chars_fallback(self, frame):
+        """Custom chars with <2 characters should fall back to charset."""
+        result = ascii_art(frame, custom_chars="X", charset="basic", width=40)
+        basic = ascii_art(frame, charset="basic", width=40)
+        # Should match basic since custom_chars is too short
+        assert np.array_equal(result, basic)

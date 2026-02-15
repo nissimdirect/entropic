@@ -207,8 +207,11 @@ EFFECTS = {
     "asciiart": {
         "fn": ascii_art,
         "category": "texture",
-        "params": {"charset": "basic", "width": 80, "invert": False, "color_mode": "mono", "edge_mix": 0.0},
-        "description": "ASCII art (25 charsets incl. matrix/code/virus/daemon/hex/octal/base64/currency/katakana/runic, 5 colors: mono/green/amber/original/rainbow)",
+        "params": {"charset": "basic", "width": 80, "invert": False, "color_mode": "mono", "edge_mix": 0.0, "tint_color": "#ffffff", "palette_size": 8, "custom_chars": ""},
+        "param_ranges": {"width": {"min": 10, "max": 300}, "edge_mix": {"min": 0.0, "max": 1.0}, "palette_size": {"min": 2, "max": 32}},
+        "param_descriptions": {"charset": "basic/dense/block/katakana/matrix/code/virus/daemon/hex/runic/etc", "color_mode": "mono/green/amber/original/rainbow/palette/tint", "tint_color": "Hex color for tint mode (#ff6600)", "palette_size": "Colors for palette mode (2-32)", "custom_chars": "Custom chars lightest-to-darkest (overrides charset)", "edge_mix": "Edge detection overlay (0=none, 1=full)"},
+        "param_visibility": {"tint_color": {"hidden_when": {"color_mode": ["mono", "green", "amber", "original", "rainbow", "palette"]}}, "palette_size": {"hidden_when": {"color_mode": ["mono", "green", "amber", "original", "rainbow", "tint"]}}},
+        "description": "ASCII art (25 charsets + custom, 7 colors: mono/green/amber/original/rainbow/palette/tint)",
     },
     "brailleart": {
         "fn": braille_art,

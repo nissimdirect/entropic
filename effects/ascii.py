@@ -213,20 +213,87 @@ def _render_ascii_colored(lines, small_frame, out_w, out_h, ascii_h, ascii_w):
     return np.array(canvas)
 
 
+def _render_ascii_palette(lines, small_frame, out_w, out_h, ascii_h, ascii_w, palette_size=8):
+    """Render ASCII with per-character color quantized to a limited palette."""
+    from PIL import Image, ImageDraw, ImageFont
+    import cv2
+
+    canvas = Image.new("RGB", (out_w, out_h), (0, 0, 0))
+    if not lines:
+        return np.array(canvas)
+
+    draw = ImageDraw.Draw(canvas)
+    num_lines = len(lines)
+    max_line_len = max(len(line) for line in lines) if lines else 1
+
+    font_size = max(6, min(int(out_h / num_lines * 0.85), int(out_w / max_line_len * 1.8)))
+    font = None
+    for fp in ["/System/Library/Fonts/Menlo.ttc",
+               "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"]:
+        try:
+            font = ImageFont.truetype(fp, font_size)
+            break
+        except (OSError, IOError):
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+
+    bbox = draw.textbbox((0, 0), "X", font=font)
+    char_w = max(1, bbox[2] - bbox[0])
+    char_h = max(1, bbox[3] - bbox[1])
+    line_spacing = int(char_h * 1.15)
+    y_start = max(0, (out_h - num_lines * line_spacing) // 2)
+
+    # Build palette from image by K-means quantization
+    palette_size = max(2, min(palette_size, 32))
+    pixels = small_frame.reshape(-1, 3).astype(np.float32)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+    _, labels, centers = cv2.kmeans(pixels, palette_size, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
+    palette = centers.astype(np.uint8)
+
+    # Map each cell to nearest palette color
+    for row_idx, line in enumerate(lines):
+        y = y_start + row_idx * line_spacing
+        if y > out_h:
+            break
+        for col_idx, ch in enumerate(line):
+            if ch == ' ':
+                continue
+            src_y = min(row_idx, small_frame.shape[0] - 1)
+            src_x = min(col_idx, small_frame.shape[1] - 1)
+            pixel = small_frame[src_y, src_x].astype(np.float32)
+            # Find nearest palette color
+            dists = np.sum((palette.astype(np.float32) - pixel) ** 2, axis=1)
+            nearest = palette[np.argmin(dists)]
+            color = tuple(int(c) for c in nearest)
+            x = 2 + col_idx * char_w
+            if x < out_w:
+                draw.text((x, y), ch, fill=color, font=font)
+
+    return np.array(canvas)
+
+
 def ascii_art(frame: np.ndarray, charset: str = "basic", width: int = 80,
               invert: bool = False, color_mode: str = "mono", edge_mix: float = 0.0,
+              tint_color: str = "#ffffff", palette_size: int = 8,
+              custom_chars: str = "",
               seed: int = 42, **kwargs) -> np.ndarray:
     """Convert frame to ASCII art rendered back as an image.
 
     Args:
         frame: (H, W, 3) uint8 BGR array.
         charset: Character set — "basic", "dense", "block", "digits",
-                 "symbols", "binary", "katakana".
+                 "symbols", "binary", "katakana", or any key from CHARSETS.
         width: ASCII width in characters (controls detail level).
         invert: Invert brightness mapping (swap light/dark chars).
         color_mode: "mono" (white on black), "green" (matrix), "amber" (retro),
-                    "original" (per-cell color from source), "rainbow" (hue gradient).
+                    "original" (per-cell color from source), "rainbow" (hue gradient),
+                    "palette" (quantized source colors), "tint" (custom tint color).
         edge_mix: Blend in edge detection (0.0 = none, 1.0 = full).
+        tint_color: Hex color for "tint" mode (e.g. "#ff6600"). Ignored in other modes.
+        palette_size: Number of colors for "palette" mode (2-32).
+        custom_chars: If non-empty, use this string as the character set
+                      (ordered lightest to darkest). Overrides charset param.
         seed: Random seed (unused but kept for interface consistency).
 
     Returns:
@@ -234,7 +301,12 @@ def ascii_art(frame: np.ndarray, charset: str = "basic", width: int = 80,
     """
     h, w = frame.shape[:2]
     width = max(10, min(width, 500))
-    chars = CHARSETS.get(charset, CHARSETS["basic"])
+
+    # Custom chars override charset lookup
+    if custom_chars and len(custom_chars) >= 2:
+        chars = custom_chars
+    else:
+        chars = CHARSETS.get(charset, CHARSETS["basic"])
     if invert:
         chars = chars[::-1]
 
@@ -280,12 +352,26 @@ def ascii_art(frame: np.ndarray, charset: str = "basic", width: int = 80,
     if color_mode == "original":
         # Per-cell color from source image — render with Pillow for color per character
         return _render_ascii_colored(lines, small, w, h, ascii_height, width)
+    elif color_mode == "palette":
+        # Per-cell color quantized to a limited palette from the source
+        return _render_ascii_palette(lines, small, w, h, ascii_height, width, palette_size)
     elif color_mode == "rainbow":
         # Rainbow hue gradient across the frame
         import colorsys
         hue = (kwargs.get("frame_index", 0) * 0.02) % 1.0
         r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
         text_color = (int(r * 255), int(g * 255), int(b * 255))
+        bg = (0, 0, 0)
+    elif color_mode == "tint":
+        # Custom tint color from hex string
+        tc = tint_color.strip().lstrip('#')
+        if len(tc) == 6:
+            try:
+                text_color = (int(tc[0:2], 16), int(tc[2:4], 16), int(tc[4:6], 16))
+            except ValueError:
+                text_color = (255, 255, 255)
+        else:
+            text_color = (255, 255, 255)
         bg = (0, 0, 0)
     else:
         text_color = color_map.get(color_mode, (255, 255, 255))
