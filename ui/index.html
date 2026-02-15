@@ -146,7 +146,7 @@
     <!-- RIGHT SIDEBAR: Layers + History (Photoshop-style) -->
     <div id="right-panel">
         <div id="panel-tabs">
-            <button class="panel-tab active" data-tab="layers">Layers</button>
+            <button class="panel-tab active" data-tab="layers">Devices</button>
             <button class="panel-tab" data-tab="history">History</button>
         </div>
 
@@ -166,7 +166,7 @@
         <div id="timeline-header">
             <span>Timeline</span>
             <div class="timeline-controls">
-                <button id="perform-toggle-btn" onclick="togglePerformPanel()" title="Toggle Perform Mixer (P)" class="perform-toggle-btn">Perform</button>
+                <button id="perform-toggle-btn" onclick="togglePerformPanel()" title="Toggle Mixer (P)" class="perform-toggle-btn">Mixer</button>
                 <span class="timeline-controls-sep"></span>
                 <button onclick="timelineEditor.zoomIn()" title="Zoom In (+)">+</button>
                 <button onclick="timelineEditor.zoomOut()" title="Zoom Out (-)">-</button>
@@ -338,9 +338,10 @@
                 </select>
             </div>
             <div class="export-row">
-                <label>Mix</label>
+                <label>Mix (Effect Intensity)</label>
                 <input type="range" id="export-mix" min="0" max="100" value="100" oninput="document.getElementById('export-mix-val').textContent=this.value+'%'">
                 <span id="export-mix-val">100%</span>
+                <span class="hint">0% = original, 100% = full effect</span>
             </div>
         </div>
         <div class="modal-footer">
@@ -392,6 +393,8 @@
                 <div class="sc-row"><kbd>B</kbd> Bypass toggle</div>
                 <div class="sc-row"><kbd>R</kbd> Reset to defaults</div>
                 <div class="sc-row"><kbd>&uarr;</kbd> <kbd>&darr;</kbd> Select prev/next</div>
+                <div class="sc-row"><kbd>Cmd+G</kbd> Create group</div>
+                <div class="sc-row"><kbd>Cmd+Shift+G</kbd> Ungroup</div>
                 <h3 data-shortcut-mode="common">Parameters</h3>
                 <div class="sc-row"><kbd>Drag</kbd> Adjust knob</div>
                 <div class="sc-row"><kbd>Shift+Drag</kbd> Fine adjust</div>
@@ -410,6 +413,7 @@
                 <h3 data-shortcut-mode="common">UI</h3>
                 <div class="sc-row"><kbd>Tab</kbd> Toggle sidebar</div>
                 <div class="sc-row"><kbd>Esc</kbd> Close modal</div>
+                <div class="sc-row"><kbd>H</kbd> Help panel</div>
                 <div class="sc-row"><kbd>?</kbd> This reference</div>
                 <h3 data-shortcut-mode="timeline">Timeline</h3>
                 <div class="sc-row"><kbd>I</kbd> Set in-point</div>
@@ -427,6 +431,33 @@
                 <div class="sc-row"><kbd>Space</kbd> Play/Pause</div>
                 <div class="sc-row"><kbd>R</kbd> Toggle recording</div>
                 <div class="sc-row"><kbd>Shift+P</kbd> Panic (reset all)</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Help Panel (H key) -->
+<div id="help-overlay" class="modal-overlay" style="display:none">
+    <div class="modal-dialog help-dialog">
+        <div class="modal-header">
+            <h2>Help</h2>
+            <button onclick="closeHelpPanel()" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body help-body">
+            <div class="help-section">
+                <h3>Quick Start</h3>
+                <ol class="help-steps">
+                    <li>Load a video, image, or GIF with <kbd>Cmd+O</kbd> or drag &amp; drop</li>
+                    <li>Browse effects in the left sidebar and drag them into the chain</li>
+                    <li>Adjust parameters with the Moog-style knobs (drag up/down)</li>
+                    <li>Preview updates automatically &mdash; press <kbd>Space</kbd> to compare original</li>
+                    <li>Export with <kbd>Cmd+E</kbd> when you're happy with the result</li>
+                </ol>
+            </div>
+            <div class="help-section">
+                <h3>Effect Reference</h3>
+                <input type="text" id="help-search" placeholder="Search effects..." class="modal-input" oninput="filterHelpEffects(this.value)">
+                <div id="help-effect-list"></div>
             </div>
         </div>
     </div>

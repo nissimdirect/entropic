@@ -64,46 +64,46 @@
 
 | # | Effect | Enhancement | Status |
 |---|--------|-------------|--------|
-| F1 | **Smear** | More directions, animated motion, shifting vectors | [ ] |
-| F2 | **Wave** | More directions, amplitude/frequency modulation, bouncing wave | [ ] |
+| F1 | **Smear** | More directions, animated motion, shifting vectors | [~] Already has 4 directions + animate |
+| F2 | **Wave** | More directions, amplitude/frequency modulation, bouncing wave | [x] Added diagonal + circular directions |
 | F3 | **ASCII art** | All character modes, expand color modes. "INSANE!" | [ ] |
-| F4 | **Blur** | More types: Gaussian, radial, motion, lens | [ ] |
-| F5 | **Contours** | Outline-only mode without affecting interior color | [ ] |
-| F6 | **Edges** | Color palette control, fix threshold sensitivity | [ ] |
-| F7 | **Noise** | Animated seed = motion noise. Before pixelsort = animated texture. | [ ] |
-| F8 | **TV static** | Spatial concentration, physics/gravity, animated displacement | [ ] |
+| F4 | **Blur** | More types: Gaussian, radial, motion, lens | [x] All 6 types built (box/gaussian/motion/radial/median/lens) |
+| F5 | **Contours** | Outline-only mode without affecting interior color | [x] outline_only already built |
+| F6 | **Edges** | Color palette control, fix threshold sensitivity | [x] edge_color + mode already built |
+| F7 | **Noise** | Animated seed = motion noise. Before pixelsort = animated texture. | [x] animate toggle already built |
+| F8 | **TV static** | Spatial concentration, physics/gravity, animated displacement | [x] concentrate_x/y/radius + animate_displacement already built |
 | F9 | **Contrast** | (DONE — Photoshop-level via color suite) | [x] |
 | F10 | **Pixel elastic** | More force types, concentrations, vectors. Less atmospheric. | [ ] |
-| F11 | **Pixel wormhole** | Position moves around screen. Currently static. | [ ] |
-| F12 | **Block corrupt** | More non-random modes in dropdown | [ ] |
-| F13 | **Channel destroy** | More modes | [ ] |
-| F14 | **Data bend** | More modes, more variability | [ ] |
-| F15 | **Film grain** | Automated seed = grain with motion | [ ] |
-| F16 | **Framesmash** | Color control / color affect options | [ ] |
-| F17 | **Glitch repeat** | Motion, flicker, switchable states | [ ] |
-| F18 | **Invert bands** | Direction, rotation, vectors, non-linear shapes, CRT motion | [ ] |
-| F19 | **Pixel annihilate** | Differentiate with more params OR cut | [ ] |
-| F20 | **Pixel risograph** | Changeable colors | [ ] |
+| F11 | **Pixel wormhole** | Position moves around screen. Currently static. | [x] Added center_x/center_y position control |
+| F12 | **Block corrupt** | More non-random modes in dropdown | [x] Already has 6 modes + 4 placement modes |
+| F13 | **Channel destroy** | More modes | [x] Already has 6 modes (separate/swap/crush/eliminate/invert/xor) |
+| F14 | **Data bend** | More modes, more variability | [x] Added tremolo + ringmod (now 7 DSP modes) |
+| F15 | **Film grain** | Automated seed = grain with motion | [x] animate=True default already built |
+| F16 | **Framesmash** | Color control / color affect options | [x] color_affect toggle already built |
+| F17 | **Glitch repeat** | Motion, flicker, switchable states | [x] shift + flicker already built, seed varies per frame |
+| F18 | **Invert bands** | Direction, rotation, vectors, non-linear shapes, CRT motion | [x] Added direction (horizontal/vertical) |
+| F19 | **Pixel annihilate** | Differentiate with more params OR cut | [x] CUT |
+| F20 | **Pixel risograph** | Changeable colors | [x] Added palette presets (classic/zine/punk/ocean/sunset/custom) |
 | F21 | **Xerox** | Individuate, patchable effect order, better physical model OR cut | [ ] |
-| F22 | **Row shift** | Rotation, gravity concentrations | [ ] |
-| F23 | **XOR glitch** | More modes, more params | [ ] |
-| F24 | **Emboss** | Transparent gray for layering | [ ] |
-| F25 | **Parallel compress** | Compress on dimensions beyond black-white | [ ] |
-| F26 | **Solarize** | Own brightness/black-gray-white control | [ ] |
-| F27 | **Wavefold** | Brightness control, histogram for luminosity | [ ] |
+| F22 | **Row shift** | Rotation, gravity concentrations | [x] Added direction (horizontal/vertical/both) |
+| F23 | **XOR glitch** | More modes, more params | [x] Already has 6 modes |
+| F24 | **Emboss** | Transparent gray for layering | [x] transparent_bg already built |
+| F25 | **Parallel compress** | Compress on dimensions beyond black-white | [x] Added mode (luminance/per_channel/saturation) |
+| F26 | **Solarize** | Own brightness/black-gray-white control | [x] Added target (all/shadows/midtones/highlights) + brightness |
+| F27 | **Wavefold** | Brightness control, histogram for luminosity | [x] Added brightness param |
 | F28 | **Tapesaturation** | Reconceptualize. Currently "just makes it more white." | [ ] |
 
 ---
 
 ## P4 — Cut/Rework Candidates
 
-| Effect | User Feedback | Decision |
-|--------|--------------|----------|
-| **AM radio** | "Kind of useless" | Cut or make preset of ring mod |
-| **Pixel annihilate** | "Redundant with noisy plugins" | Differentiate or cut |
-| **Xerox** | "Maybe chopping block" | Better physical model or cut |
-| **Cyanotype** | "Just makes it blue" | Move to color filter preset |
-| **Infrared** | Cool but should be a filter preset | Move to color filter preset |
+| Effect | User Feedback | Decision | Status |
+|--------|--------------|----------|--------|
+| **AM radio** | "Kind of useless" | Cut | [x] REMOVED |
+| **Pixel annihilate** | "Redundant with noisy plugins" | Cut | [x] REMOVED |
+| **Xerox** | "Maybe chopping block" | Better physical model or cut | [ ] |
+| **Cyanotype** | "Just makes it blue" | Move to color filter preset | [x] → colorfilter preset |
+| **Infrared** | Cool but should be a filter preset | Move to color filter preset | [x] → colorfilter preset |
 
 ---
 
@@ -162,6 +162,6 @@
 
 ---
 
-*Total remaining items: 0 P0 + 9 P1 + 7 P2 + 27 P3 + 5 P4 + 278 P5 + 10 UX = 336 items*
-*Sprint velocity: ~4-8 items per session depending on size*
-*Estimated: 8-12 sessions for P0-P2, ongoing for P3+*
+*Total remaining items: 0 P0 + 9 P1 + 7 P2 + 4 P3 + 2 P4 + 278 P5 + 10 UX = 310 items*
+*P3 done this session: 23/28 (F1-F2,F4-F9,F11-F20,F22-F27). Remaining: F3 ASCII, F10 elastic, F21 xerox, F28 tapesaturation.*
+*P4 done this session: 3/5 (AM radio CUT, pixel annihilate CUT, cyanotype/infrared → presets). Remaining: xerox rework.*

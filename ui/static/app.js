@@ -59,6 +59,35 @@ function showErrorToast(message, details) {
     showToast(message, 'error', null, 8000, details || null);
 }
 
+// Structured error handler — parses server error detail dicts with hint + action
+function handleApiError(data, context) {
+    let detail = data;
+    // FastAPI wraps HTTPException detail in {detail: ...}
+    if (data && data.detail && typeof data.detail === 'object') {
+        detail = data.detail;
+    } else if (data && data.detail && typeof data.detail === 'string') {
+        showErrorToast(`${context}: ${data.detail}`);
+        return;
+    }
+
+    const message = detail.detail || detail.message || context || 'Unknown error';
+    const hint = detail.hint || '';
+    const actionKey = detail.action;
+
+    const actionMap = {
+        load_file: { label: 'Load File', fn: "function(){document.getElementById('file-input').click()}" },
+        retry: { label: 'Retry', fn: "function(){previewChain()}" },
+        undo: { label: 'Undo', fn: "function(){undo()}" },
+        flatten: { label: 'Flatten', fn: "function(){flattenChain()}" },
+        refresh: { label: 'Refresh', fn: "function(){location.reload()}" },
+        trim: null,
+    };
+
+    const action = actionKey ? actionMap[actionKey] : null;
+    const fullMsg = hint ? `${message} — ${hint}` : message;
+    showToast(fullMsg, 'error', action || null, 10000);
+}
+
 function showConfirmDialog(title, message) {
     return new Promise(resolve => {
         // Simple confirm using native dialog for now
@@ -205,6 +234,174 @@ function closeShortcutRef() {
     document.getElementById('shortcut-overlay').style.display = 'none';
 }
 
+// ============ HELP PANEL (H key) ============
+
+function showHelpPanel() {
+    const overlay = document.getElementById('help-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+    // Populate effect reference
+    const list = document.getElementById('help-effect-list');
+    if (list && effectDefs.length > 0) {
+        list.innerHTML = effectDefs.map(e =>
+            `<div class="help-effect-item" data-name="${esc(e.name)}">
+                <div class="name">${esc(e.name)}</div>
+                <div class="desc">${esc(e.description || '')}</div>
+            </div>`
+        ).join('');
+    }
+    const search = document.getElementById('help-search');
+    if (search) { search.value = ''; search.focus(); }
+}
+
+function closeHelpPanel() {
+    const overlay = document.getElementById('help-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+function filterHelpEffects(query) {
+    const q = query.toLowerCase();
+    document.querySelectorAll('.help-effect-item').forEach(item => {
+        const name = (item.dataset.name || '').toLowerCase();
+        const desc = (item.querySelector('.desc')?.textContent || '').toLowerCase();
+        item.style.display = (name.includes(q) || desc.includes(q)) ? '' : 'none';
+    });
+}
+
+// ============ ONBOARDING ============
+
+function showOnboarding() {
+    if (localStorage.getItem('entropic_onboarded')) return;
+    localStorage.setItem('entropic_onboarded', '1');
+    showToast('Welcome to Entropic! Press H for help, ? for shortcuts.', 'info', {
+        label: 'Show Help',
+        fn: "function(){showHelpPanel()}"
+    }, 8000);
+}
+
+// ============ EFFECT GROUPS (Ableton-style racks) ============
+
+let groupIdCounter = 1000;
+
+function addGroup() {
+    const group = {
+        id: deviceIdCounter++,
+        type: 'group',
+        name: 'Group',
+        collapsed: false,
+        bypassed: false,
+        mix: 1.0,
+        children: [],
+    };
+
+    // If effects are selected, wrap them into the group
+    if (selectedLayerId !== null) {
+        const idx = chain.findIndex(d => d.id === selectedLayerId);
+        if (idx >= 0) {
+            const selected = chain.splice(idx, 1)[0];
+            group.children.push(selected);
+            chain.splice(idx, 0, group);
+        } else {
+            chain.push(group);
+        }
+    } else {
+        chain.push(group);
+    }
+
+    selectedLayerId = group.id;
+    pushHistory('Create Group');
+    syncChainToRegion();
+    renderChain();
+    renderLayers();
+}
+
+function ungroupSelected() {
+    if (selectedLayerId === null) return;
+    const idx = chain.findIndex(d => d.id === selectedLayerId);
+    if (idx < 0) return;
+    const item = chain[idx];
+    if (item.type !== 'group') return;
+
+    // Splice children back into parent array
+    const children = item.children || [];
+    chain.splice(idx, 1, ...children);
+    selectedLayerId = children.length > 0 ? children[0].id : null;
+    pushHistory('Ungroup');
+    syncChainToRegion();
+    renderChain();
+    renderLayers();
+    schedulePreview();
+}
+
+function flattenChainForApi(items) {
+    // Recursively flatten chain tree into flat effect array for server
+    const result = [];
+    for (const item of items) {
+        if (item.type === 'group') {
+            if (item.bypassed) continue;
+            const children = flattenChainForApi(item.children || []);
+            // Apply group mix by injecting it into children
+            for (const child of children) {
+                if (item.mix < 1.0) {
+                    child.params = child.params || {};
+                    child.params._group_mix = item.mix;
+                }
+                result.push(child);
+            }
+        } else {
+            if (item.bypassed) continue;
+            result.push({
+                name: item.name,
+                params: { ...item.params, mix: item.mix ?? 1.0 },
+            });
+        }
+    }
+    return result;
+}
+
+function _countDevices(items) {
+    let count = 0;
+    for (const item of items) {
+        if (item.type === 'group') {
+            count += _countDevices(item.children || []);
+        } else {
+            count++;
+        }
+    }
+    return count;
+}
+
+function _findItemInChain(items, id) {
+    for (const item of items) {
+        if (item.id === id) return item;
+        if (item.type === 'group' && item.children) {
+            const found = _findItemInChain(item.children, id);
+            if (found) return found;
+        }
+    }
+    return null;
+}
+
+function toggleGroupCollapse(groupId) {
+    const group = _findItemInChain(chain, groupId);
+    if (group && group.type === 'group') {
+        group.collapsed = !group.collapsed;
+        renderChain();
+    }
+}
+
+function renameGroup(groupId) {
+    const group = _findItemInChain(chain, groupId);
+    if (!group || group.type !== 'group') return;
+    showInputModal('Rename Group', group.name, (newName) => {
+        if (newName && newName.trim()) {
+            group.name = newName.trim();
+            pushHistory(`Rename Group → ${group.name}`);
+            renderChain();
+        }
+    });
+}
+
 // Reveal in Finder via pywebview bridge (or no-op in browser mode)
 function revealInFinder(path) {
     if (window.pywebview && window.pywebview.api) {
@@ -301,6 +498,7 @@ function pushHistory(action) {
     });
     historyIndex = history.length - 1;
     renderHistory();
+    _persistHistory();
 }
 
 function undo() {
@@ -325,6 +523,7 @@ function restoreFromHistory(index) {
     renderChain();
     renderLayers();
     renderHistory();
+    _persistHistory();
     schedulePreview();
 }
 
@@ -332,6 +531,48 @@ function jumpToHistory(index) {
     if (index < 0 || index >= history.length) return;
     historyIndex = index;
     restoreFromHistory(index);
+}
+
+// ============ HISTORY PERSISTENCE (localStorage) ============
+
+function _persistHistory() {
+    try {
+        const data = history.slice(-50).map(h => ({
+            action: h.action,
+            chain: h.chain,
+            timestamp: h.timestamp.toISOString(),
+        }));
+        localStorage.setItem('entropic_history', JSON.stringify(data));
+        localStorage.setItem('entropic_history_index', String(historyIndex));
+    } catch (e) { /* localStorage full or disabled — silently ignore */ }
+}
+
+function _loadHistory() {
+    try {
+        const raw = localStorage.getItem('entropic_history');
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (!Array.isArray(data) || data.length === 0) return;
+        history = data.map(h => ({
+            action: h.action,
+            chain: h.chain,
+            timestamp: new Date(h.timestamp),
+        }));
+        const savedIdx = parseInt(localStorage.getItem('entropic_history_index') || '0');
+        historyIndex = Math.min(savedIdx, history.length - 1);
+        // Restore chain from current history position
+        const entry = history[historyIndex];
+        if (entry) {
+            chain = JSON.parse(JSON.stringify(entry.chain));
+            const maxId = chain.reduce((m, d) => Math.max(m, d.id || 0), -1);
+            deviceIdCounter = maxId + 1;
+        }
+    } catch (e) { /* corrupt data — ignore and start fresh */ }
+}
+
+function _clearPersistedHistory() {
+    localStorage.removeItem('entropic_history');
+    localStorage.removeItem('entropic_history_index');
 }
 
 // ============ GRIP HANDLE HTML ============
@@ -369,10 +610,15 @@ async function init() {
     setupPanelTabs();
     setupKeyboard();
     setupMaskDrawing();
-    pushHistory('Open');
+    _loadHistory();
+    if (history.length === 0) {
+        pushHistory('Open');
+    }
+    renderChain();
     renderLayers();
     renderHistory();
     startHeartbeat();
+    showOnboarding();
 
     // Initialize timeline editor
     window.timelineEditor = new TimelineEditor('timeline-canvas');
@@ -629,14 +875,27 @@ async function uploadVideo(file) {
 
     const form = new FormData();
     form.append('file', file);
-    showLoading('Uploading...');
+    const fileSizeMB = (file.size / 1024 / 1024).toFixed(0);
+    showLoading(`Uploading ${file.name} (${fileSizeMB} MB)...`);
+
+    if (file.size > 50 * 1024 * 1024) {
+        showToast(`Large file (${fileSizeMB} MB). Upload may take a moment.`, 'info', null, 5000);
+    }
 
     try {
+        const uploadStart = Date.now();
         const data = await new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', `${API}/api/upload`);
             xhr.upload.onprogress = (e) => {
-                if (e.lengthComputable) updateProgress(e.loaded, e.total, 'Uploading');
+                if (e.lengthComputable) {
+                    const elapsed = (Date.now() - uploadStart) / 1000;
+                    const speed = elapsed > 0 ? e.loaded / elapsed : 0;
+                    const speedMB = (speed / 1024 / 1024).toFixed(1);
+                    const remaining = speed > 0 ? Math.ceil((e.total - e.loaded) / speed) : 0;
+                    const eta = remaining > 0 ? ` — ~${remaining}s remaining` : '';
+                    updateProgress(e.loaded, e.total, `Uploading — ${speedMB} MB/s${eta}`);
+                }
             };
             xhr.onload = () => {
                 if (xhr.status >= 200 && xhr.status < 300) {
@@ -657,6 +916,7 @@ async function uploadVideo(file) {
         videoLoaded = true;
         totalFrames = data.info.total_frames || 100;
         currentFrame = 0;
+        _clearPersistedHistory();
 
         const slider = document.getElementById('frame-slider');
         slider.max = totalFrames - 1;
@@ -667,7 +927,10 @@ async function uploadVideo(file) {
         updateFrameInfo(data.info);
         // Fetch histogram for color analysis (fires even if panel is collapsed — data is cached)
         fetchHistogram();
-        showToast(`Loaded: ${file.name}`, 'success');
+        const infoStr = data.info.duration
+            ? `${file.name} — ${data.info.width}x${data.info.height}, ${totalFrames} frames`
+            : `${file.name} — ${data.info.width}x${data.info.height}`;
+        showToast(`Loaded: ${infoStr}`, 'success');
 
         // Suggest perform toggle (toast with action)
         if (appMode === 'timeline' && !performToggleActive) {
@@ -732,12 +995,16 @@ function setupKeyboard() {
     const isModalOpen = () => {
         return document.getElementById('export-overlay')?.style.display === 'flex'
             || document.getElementById('input-modal-overlay')?.style.display === 'flex'
-            || document.getElementById('shortcut-overlay')?.style.display === 'flex';
+            || document.getElementById('shortcut-overlay')?.style.display === 'flex'
+            || document.getElementById('help-overlay')?.style.display === 'flex';
     };
 
     document.addEventListener('keydown', e => {
         // --- Escape: close any open modal ---
         if (e.key === 'Escape') {
+            if (document.getElementById('help-overlay')?.style.display === 'flex') {
+                closeHelpPanel(); e.preventDefault(); return;
+            }
             if (document.getElementById('shortcut-overlay')?.style.display === 'flex') {
                 closeShortcutRef(); e.preventDefault(); return;
             }
@@ -768,6 +1035,14 @@ function setupKeyboard() {
         // Cmd+D = Duplicate selected
         if (isMod(e) && e.key === 'd') {
             e.preventDefault(); duplicateSelected(); return;
+        }
+        // Cmd+G = Create group from selected
+        if (isMod(e) && e.key === 'g' && !e.shiftKey) {
+            e.preventDefault(); addGroup(); return;
+        }
+        // Cmd+Shift+G = Ungroup selected
+        if (isMod(e) && e.key === 'g' && e.shiftKey) {
+            e.preventDefault(); ungroupSelected(); return;
         }
         // Cmd+O = Open file
         if (isMod(e) && e.key === 'o') {
@@ -976,6 +1251,11 @@ function setupKeyboard() {
             return;
         }
 
+        // H = Show help panel
+        if (e.key === 'h') {
+            e.preventDefault(); showHelpPanel(); return;
+        }
+
         // ? = Show shortcut reference
         if (e.key === '?') {
             e.preventDefault(); showShortcutRef(); return;
@@ -1050,7 +1330,7 @@ function removeFromChain(deviceId) {
 }
 
 function toggleBypass(deviceId) {
-    const device = chain.find(d => d.id === deviceId);
+    const device = _findItemInChain(chain, deviceId);
     if (device) {
         device.bypassed = !device.bypassed;
         const state = device.bypassed ? 'Off' : 'On';
@@ -1063,7 +1343,7 @@ function toggleBypass(deviceId) {
 }
 
 function updateDeviceMix(deviceId, value) {
-    const device = chain.find(d => d.id === deviceId);
+    const device = _findItemInChain(chain, deviceId);
     if (device) {
         device.mix = parseInt(value) / 100;
         const span = document.querySelector(`.mix-slider[data-device="${deviceId}"]`);
@@ -1109,63 +1389,99 @@ function flattenChain() {
     schedulePreview();
 }
 
-function renderChain() {
-    const rack = document.getElementById('chain-rack');
-    document.getElementById('chain-count').textContent = `${chain.length} device${chain.length !== 1 ? 's' : ''}`;
-
-    rack.innerHTML = chain.map(device => {
-        const def = effectDefs.find(e => e.name === device.name);
+function _renderDeviceHTML(device) {
+    // Render a group item
+    if (device.type === 'group') {
         const bypassClass = device.bypassed ? 'bypassed' : '';
         const powerClass = device.bypassed ? 'off' : 'on';
-
-        let essentialHtml = '';
-        let advancedHtml = '';
-        const essentialList = controlMap?.effects?.[device.name]?.essential;
-
-        if (def) {
-            for (const [key, spec] of Object.entries(def.params)) {
-                const value = device.params[key] ?? spec.default;
-                const ctrlSpec = controlMap?.effects?.[device.name]?.params?.[key];
-                const ctrlType = ctrlSpec?.control_type || (spec.type === 'string' ? 'dropdown' : spec.type === 'bool' ? 'toggle' : 'knob');
-                const html = createControl(device.id, key, spec, value, ctrlType, ctrlSpec);
-
-                if (essentialList && !essentialList.includes(key)) {
-                    advancedHtml += html;
-                } else {
-                    essentialHtml += html;
-                }
-            }
-        }
-
-        const advancedCount = advancedHtml ? (advancedHtml.match(/class="(param-control|knob-container|dropdown-container|toggle-container)/g) || []).length : 0;
-        const advancedToggle = advancedCount > 0
-            ? `<button class="params-toggle" onclick="this.nextElementSibling.classList.toggle('open'); this.classList.toggle('open')">+ ${advancedCount} more</button><div class="params-advanced">${advancedHtml}</div>`
-            : '';
-
+        const arrowClass = device.collapsed ? 'collapsed' : '';
+        const childrenClass = device.collapsed ? 'collapsed' : '';
+        const childCount = (device.children || []).length;
+        const childrenHtml = (device.children || []).map(c => _renderDeviceHTML(c)).join('');
         const mixPct = Math.round((device.mix ?? 1.0) * 100);
 
         return `
-            <div class="device ${bypassClass}" data-device-id="${device.id}" draggable="true"
-                 oncontextmenu="deviceContextMenu(event, ${device.id})">
-                <div class="device-header">
-                    ${gripHTML()}
-                    <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
-                    <span class="device-name">${esc(device.name)}</span>
-                    <span class="device-mix" title="Dry/Wet Mix: ${mixPct}%">
+            <div class="device-group ${bypassClass}" data-device-id="${device.id}" draggable="true">
+                <div class="group-header" onclick="toggleGroupCollapse(${device.id})">
+                    <span class="group-collapse-arrow ${arrowClass}">&#9660;</span>
+                    <button class="device-power ${powerClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
+                    <span class="group-name" ondblclick="event.stopPropagation(); renameGroup(${device.id})">${esc(device.name)}</span>
+                    <span class="group-badge">${childCount} fx</span>
+                    <span class="device-mix" title="Group Mix: ${mixPct}%">
                         <label>Mix</label>
                         <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
                                data-device="${device.id}"
-                               oninput="updateDeviceMix(${device.id}, this.value)"
+                               oninput="event.stopPropagation(); updateDeviceMix(${device.id}, this.value)"
                                onclick="event.stopPropagation()">
                         <span class="mix-value">${mixPct}%</span>
                     </span>
-                    <button class="more-btn" onclick="event.stopPropagation(); deviceContextMenu(event, ${device.id})" title="More options">&#8943;</button>
                 </div>
-                <div class="device-params">
-                    ${essentialHtml}${advancedToggle}
+                <div class="group-children ${childrenClass}">
+                    ${childrenHtml}
                 </div>
             </div>`;
-    }).join('');
+    }
+
+    // Render a normal effect device
+    const def = effectDefs.find(e => e.name === device.name);
+    const bypassClass = device.bypassed ? 'bypassed' : '';
+    const powerClass = device.bypassed ? 'off' : 'on';
+
+    let essentialHtml = '';
+    let advancedHtml = '';
+    const essentialList = controlMap?.effects?.[device.name]?.essential;
+
+    if (def) {
+        for (const [key, spec] of Object.entries(def.params)) {
+            const value = device.params[key] ?? spec.default;
+            const ctrlSpec = controlMap?.effects?.[device.name]?.params?.[key];
+            const ctrlType = ctrlSpec?.control_type || (spec.type === 'string' ? 'dropdown' : spec.type === 'bool' ? 'toggle' : 'knob');
+            const html = createControl(device.id, key, spec, value, ctrlType, ctrlSpec);
+
+            if (essentialList && !essentialList.includes(key)) {
+                advancedHtml += html;
+            } else {
+                essentialHtml += html;
+            }
+        }
+    }
+
+    const advancedCount = advancedHtml ? (advancedHtml.match(/class="(param-control|knob-container|dropdown-container|toggle-container)/g) || []).length : 0;
+    const advancedToggle = advancedCount > 0
+        ? `<button class="params-toggle" onclick="this.nextElementSibling.classList.toggle('open'); this.classList.toggle('open')">+ ${advancedCount} more</button><div class="params-advanced">${advancedHtml}</div>`
+        : '';
+
+    const mixPct = Math.round((device.mix ?? 1.0) * 100);
+
+    return `
+        <div class="device ${bypassClass}" data-device-id="${device.id}" draggable="true"
+             oncontextmenu="deviceContextMenu(event, ${device.id})">
+            <div class="device-header">
+                ${gripHTML()}
+                <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
+                <span class="device-name">${esc(device.name)}</span>
+                <span class="device-mix" title="Dry/Wet Mix: ${mixPct}%">
+                    <label>Mix</label>
+                    <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
+                           data-device="${device.id}"
+                           oninput="updateDeviceMix(${device.id}, this.value)"
+                           onclick="event.stopPropagation()">
+                    <span class="mix-value">${mixPct}%</span>
+                </span>
+                <button class="more-btn" onclick="event.stopPropagation(); deviceContextMenu(event, ${device.id})" title="More options">&#8943;</button>
+            </div>
+            <div class="device-params">
+                ${essentialHtml}${advancedToggle}
+            </div>
+        </div>`;
+}
+
+function renderChain() {
+    const rack = document.getElementById('chain-rack');
+    const totalDevices = _countDevices(chain);
+    document.getElementById('chain-count').textContent = `${totalDevices} device${totalDevices !== 1 ? 's' : ''}`;
+
+    rack.innerHTML = chain.map(device => _renderDeviceHTML(device)).join('');
 
     // Re-attach control event listeners
     document.querySelectorAll('.knob').forEach(setupKnobInteraction);
@@ -2325,7 +2641,11 @@ async function previewChain() {
             perfSyncWithServer(data.layer_states);
         }
     } catch (err) {
-        showToast('Preview failed: ' + err.message, 'warning');
+        if (err.response) {
+            try { handleApiError(await err.response.json(), 'Preview failed'); } catch (_) {}
+        } else {
+            showToast('Preview failed: ' + err.message, 'warning');
+        }
     }
 }
 
@@ -2692,6 +3012,11 @@ async function randomizeChain() {
         renderChain();
         renderLayers();
         schedulePreview();
+        // Show undo toast so user can revert if they didn't want random
+        showToast('Chain randomized', 'info', {
+            label: 'Undo',
+            fn: "function(){undo()}"
+        }, 6000);
     } catch (err) {
         showErrorToast('Randomize failed: ' + err.message);
     }
@@ -2804,6 +3129,18 @@ async function startExport() {
     }
 
     showLoading('Exporting...');
+    // Poll render progress during export
+    const progressInterval = setInterval(async () => {
+        try {
+            const pRes = await fetch(`${API}/api/render/progress`);
+            const prog = await pRes.json();
+            if (prog.active && prog.total_frames > 0) {
+                updateProgress(prog.current_frame, prog.total_frames,
+                    `${prog.phase === 'encoding' ? 'Encoding' : 'Processing'} frame ${prog.current_frame}/${prog.total_frames}`);
+            }
+        } catch (_) {}
+    }, 500);
+
     try {
         const endpoint = (appMode === 'timeline' && settings.timeline_regions)
             ? `${API}/api/export/timeline`
@@ -2813,6 +3150,7 @@ async function startExport() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings),
         });
+        clearInterval(progressInterval);
         const data = await res.json();
         if (data.status === 'ok') {
             closeExportDialog();
@@ -2824,9 +3162,10 @@ async function startExport() {
                 fn: `function(){revealInFinder('${(data.path || '').replace(/'/g, "\\'")}')}`
             }, 8000);
         } else {
-            showErrorToast(`Export failed: ${data.detail || 'Unknown error'}`);
+            handleApiError(data, 'Export failed');
         }
     } catch (err) {
+        clearInterval(progressInterval);
         showErrorToast(`Export error: ${err.message}`);
     } finally {
         hideLoading();

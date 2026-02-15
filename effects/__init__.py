@@ -127,7 +127,7 @@ EFFECTS = {
         "fn": wave_distort,
         "category": "distortion",
         "params": {"amplitude": 10.0, "frequency": 0.05, "direction": "horizontal"},
-        "description": "Sine wave displacement distortion",
+        "description": "Sine wave displacement (horizontal/vertical/diagonal/circular)",
     },
     "mirror": {
         "fn": mirror,
@@ -177,7 +177,7 @@ EFFECTS = {
         "fn": blur,
         "category": "texture",
         "params": {"radius": 3, "blur_type": "box"},
-        "description": "Blur (box/gaussian/motion/radial/median)",
+        "description": "Blur (box/gaussian/motion/radial/median/lens)",
     },
     "sharpen": {
         "fn": sharpen,
@@ -202,7 +202,7 @@ EFFECTS = {
         "fn": ascii_art,
         "category": "texture",
         "params": {"charset": "basic", "width": 80, "invert": False, "color_mode": "mono", "edge_mix": 0.0},
-        "description": "Convert frame to ASCII art (basic/dense/block charset, mono/green/amber/original color)",
+        "description": "ASCII art (25 charsets incl. matrix/code/virus/daemon/hex/octal/base64/currency/katakana/runic, 5 colors: mono/green/amber/original/rainbow)",
     },
     "brailleart": {
         "fn": braille_art,
@@ -215,9 +215,9 @@ EFFECTS = {
     "tapesaturation": {
         "fn": tape_saturation,
         "category": "color",
-        "params": {"drive": 1.5, "warmth": 0.3},
-        "param_ranges": {"drive": {"min": 0.5, "max": 5.0}, "warmth": {"min": 0.0, "max": 1.0}},
-        "description": "Analog tape saturation curve (tanh soft-clip + warmth)",
+        "params": {"drive": 1.5, "warmth": 0.3, "mode": "vintage", "output_level": 0.85},
+        "param_ranges": {"drive": {"min": 0.5, "max": 5.0}, "warmth": {"min": 0.0, "max": 1.0}, "output_level": {"min": 0.5, "max": 1.5}},
+        "description": "Tape saturation — midpoint-preserving dynamics compression (vintage/hot/lo-fi)",
     },
     "colorfilter": {
         "fn": color_filter,
@@ -399,8 +399,8 @@ EFFECTS = {
     "wavefold": {
         "fn": wavefold,
         "category": "modulation",
-        "params": {"threshold": 0.7, "folds": 3},
-        "description": "Audio wavefolding — pixel brightness folds at threshold",
+        "params": {"threshold": 0.7, "folds": 3, "brightness": 1.0},
+        "description": "Audio wavefolding — pixel brightness folds at threshold (brightness compensation)",
     },
     "ringmod": {
         "fn": ring_mod,
@@ -431,14 +431,14 @@ EFFECTS = {
     "parallelcompress": {
         "fn": parallel_compression,
         "category": "enhance",
-        "params": {"crush": 0.5, "blend": 0.5},
-        "description": "Parallel compression (NY compression for video)",
+        "params": {"crush": 0.5, "blend": 0.5, "mode": "luminance"},
+        "description": "Parallel compression (luminance/per_channel/saturation modes)",
     },
     "solarize": {
         "fn": solarize,
         "category": "enhance",
-        "params": {"threshold": 128, "brightness": 1.0},
-        "description": "Partial inversion above threshold (Sabattier/Man Ray effect, brightness compensation)",
+        "params": {"threshold": 128, "brightness": 1.0, "target": "all"},
+        "description": "Partial inversion (Sabattier/Man Ray — target: all/shadows/midtones/highlights)",
     },
     "duotone": {
         "fn": duotone,
@@ -503,8 +503,8 @@ EFFECTS = {
     "rowshift": {
         "fn": row_shift,
         "category": "destruction",
-        "params": {"max_shift": 30, "density": 0.3, "seed": 42},
-        "description": "Horizontal scanline tearing — rows displaced randomly",
+        "params": {"max_shift": 30, "density": 0.3, "direction": "horizontal", "seed": 42},
+        "description": "Scanline tearing — rows/columns displaced (horizontal/vertical/both)",
     },
     "jpegdamage": {
         "fn": jpeg_artifacts,
@@ -515,14 +515,14 @@ EFFECTS = {
     "invertbands": {
         "fn": invert_bands,
         "category": "destruction",
-        "params": {"band_height": 10, "offset": 0},
-        "description": "Alternating inverted horizontal bands (CRT damage)",
+        "params": {"band_height": 10, "offset": 0, "direction": "horizontal"},
+        "description": "Alternating inverted bands (horizontal/vertical, CRT damage)",
     },
     "databend": {
         "fn": data_bend,
         "category": "destruction",
         "params": {"effect": "echo", "intensity": 0.5, "seed": 42},
-        "description": "Audio DSP on pixel data — echo, distort, bitcrush, reverse",
+        "description": "Audio DSP on pixel data — echo, distort, bitcrush, reverse, feedback, tremolo, ringmod",
     },
     "flowdistort": {
         "fn": flow_distort,
@@ -624,9 +624,9 @@ EFFECTS = {
     "pixelelastic": {
         "fn": pixel_elastic,
         "category": "distortion",
-        "params": {"stiffness": 0.3, "mass": 1.0, "force_type": "turbulence", "force_strength": 5.0, "damping": 0.9, "seed": 42, "boundary": "mirror"},
+        "params": {"stiffness": 0.3, "mass": 1.0, "force_type": "turbulence", "force_strength": 5.0, "damping": 0.9, "concentrate_x": 0.5, "concentrate_y": 0.5, "concentrate_radius": 0.0, "seed": 42, "boundary": "mirror"},
         "param_ranges": {"stiffness": {"min": 0.05, "max": 0.8}, "mass": {"min": 0.1, "max": 5.0}, "force_strength": {"min": 1.0, "max": 20.0}, "damping": {"min": 0.8, "max": 0.99}},
-        "description": "Elastic — pixels on springs that stretch, bounce, and snap back",
+        "description": "Elastic — springs + 6 forces (turbulence/brightness/edges/radial/vortex/wave) + spatial concentration",
     },
     "pixelmelt": {
         "fn": pixel_melt,
@@ -670,8 +670,8 @@ EFFECTS = {
     "pixelwormhole": {
         "fn": pixel_wormhole,
         "category": "distortion",
-        "params": {"portal_radius": 0.1, "tunnel_strength": 8.0, "spin": 2.0, "distortion_ring": 1.5, "wander": 0.3, "damping": 0.9, "seed": 42, "boundary": "black"},
-        "description": "Wormhole — paired portals teleport pixels between two connected points",
+        "params": {"portal_radius": 0.1, "tunnel_strength": 8.0, "spin": 2.0, "distortion_ring": 1.5, "wander": 0.3, "center_x": 0.5, "center_y": 0.5, "damping": 0.9, "seed": 42, "boundary": "black"},
+        "description": "Wormhole — paired portals with position control (center_x/center_y)",
     },
     "pixelquantum": {
         "fn": pixel_quantum,
@@ -715,8 +715,8 @@ EFFECTS = {
     "pixelxerox": {
         "fn": pixel_xerox,
         "category": "destruction",
-        "params": {"generations": 8, "contrast_gain": 1.15, "noise_amount": 0.06, "halftone_size": 4, "edge_fuzz": 1.5, "toner_skip": 0.05, "seed": 42, "boundary": "clamp"},
-        "description": "Xerox — generational copy loss, each frame more degraded like a billion photocopies",
+        "params": {"generations": 8, "contrast_gain": 1.15, "noise_amount": 0.06, "halftone_size": 4, "edge_fuzz": 1.5, "toner_skip": 0.05, "style": "copy", "seed": 42, "boundary": "clamp"},
+        "description": "Xerox — generational copy loss (styles: copy/faded/harsh/zine)",
     },
     "pixelfax": {
         "fn": pixel_fax,
@@ -727,8 +727,8 @@ EFFECTS = {
     "pixelrisograph": {
         "fn": pixel_risograph,
         "category": "destruction",
-        "params": {"ink_bleed": 2.5, "registration_offset": 3, "paper_grain": 0.3, "ink_coverage": 0.85, "num_colors": 2, "color_a": [0, 90, 180], "color_b": [220, 50, 50], "seed": 42, "boundary": "clamp"},
-        "description": "Risograph — ink bleed, misregistration, paper grain, limited color palette print",
+        "params": {"ink_bleed": 2.5, "registration_offset": 3, "paper_grain": 0.3, "ink_coverage": 0.85, "num_colors": 2, "palette": "classic", "color_a": [0, 90, 180], "color_b": [220, 50, 50], "seed": 42, "boundary": "clamp"},
+        "description": "Risograph — palettes: classic/zine/punk/ocean/sunset/custom (color_a/color_b for custom)",
     },
 
     # === DSP FILTERS ===

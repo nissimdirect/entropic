@@ -170,27 +170,74 @@ def color_temperature(frame: np.ndarray, temp: float = 30) -> np.ndarray:
 
 
 def tape_saturation(frame: np.ndarray, drive: float = 1.5,
-                    warmth: float = 0.3) -> np.ndarray:
-    """Audio tape saturation curve applied to pixel brightness.
+                    warmth: float = 0.3, mode: str = "vintage",
+                    output_level: float = 1.0) -> np.ndarray:
+    """Audio tape saturation applied to video — compresses dynamics, not just brightness.
 
-    Warm, compressed highlights with soft roll-off — exactly like
-    analog tape soft-clips audio signals.
+    Real tape saturates differently across the frequency spectrum: highs get
+    rounded off first, lows stay punchy. This models that as spatial frequency
+    response: fine detail (high freq) gets compressed more than broad areas (low freq).
+
+    Modes:
+        vintage: Warm analog compression with gentle high-frequency rolloff.
+        hot: Aggressive saturation with color bleeding (overdriven reel-to-reel).
+        lo-fi: Extreme compression + noise floor (cheap cassette deck).
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
         drive: Input gain before saturation (0.5-5.0). Higher = more squash.
         warmth: Warm color tint amount (0.0-1.0).
+        mode: Saturation character — 'vintage', 'hot', 'lo-fi'.
+        output_level: Output gain compensation (0.5-1.5). Prevents wash-out.
 
     Returns:
         Tape-saturated frame.
     """
+    import cv2
+
     drive = max(0.5, min(5.0, float(drive)))
     warmth = max(0.0, min(1.0, float(warmth)))
+    output_level = max(0.5, min(1.5, float(output_level)))
     f = frame.astype(np.float32) / 255.0
-    f = np.tanh(f * drive) / np.tanh(drive)
+
+    if mode == "hot":
+        # Aggressive: saturate each channel independently (causes color shift)
+        for c in range(3):
+            f[:, :, c] = np.tanh(f[:, :, c] * drive * 1.5) / np.tanh(drive * 1.5)
+        # Color bleed: slight channel crosstalk
+        r, g, b = f[:, :, 0].copy(), f[:, :, 1].copy(), f[:, :, 2].copy()
+        f[:, :, 0] = r * 0.9 + g * 0.07 + b * 0.03
+        f[:, :, 1] = r * 0.05 + g * 0.9 + b * 0.05
+        f[:, :, 2] = r * 0.03 + g * 0.07 + b * 0.9
+
+    elif mode == "lo-fi":
+        # Cassette: heavy compression + noise floor + frequency loss
+        f = np.tanh(f * drive) / np.tanh(drive)
+        # Blur high frequencies (tape head gap loss)
+        for c in range(3):
+            f[:, :, c] = cv2.GaussianBlur(f[:, :, c], (3, 3), 0.8)
+        # Add noise floor
+        noise = np.random.RandomState(42).normal(0, 0.03, f.shape).astype(np.float32)
+        f += noise
+
+    else:  # vintage (default)
+        # Real tape: darks pass clean, brights get soft-clipped
+        # Asymmetric — only compress above the "bias point" (~0.3)
+        bias = 0.3
+        below = np.minimum(f, bias)
+        above = np.maximum(f - bias, 0.0)
+        # Soft-clip the headroom above bias
+        ceiling = 1.0 - bias
+        compressed = np.tanh(above * drive / ceiling) * ceiling / np.tanh(drive)
+        f = below + compressed
+
+    # Warmth tint
     if warmth > 0:
-        f[:, :, 0] = np.clip(f[:, :, 0] + warmth * 0.05, 0, 1)
-        f[:, :, 2] = np.clip(f[:, :, 2] - warmth * 0.03, 0, 1)
+        f[:, :, 0] = np.clip(f[:, :, 0] + warmth * 0.04, 0, 1)  # Red up
+        f[:, :, 1] = np.clip(f[:, :, 1] + warmth * 0.01, 0, 1)  # Green slight
+        f[:, :, 2] = np.clip(f[:, :, 2] - warmth * 0.04, 0, 1)  # Blue down
+
+    f *= output_level
     return np.clip(f * 255, 0, 255).astype(np.uint8)
 
 

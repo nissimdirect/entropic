@@ -8,11 +8,33 @@ gradscii-art (optimization), pic2ascii (edge detection).
 
 import numpy as np
 
-# Character sets ordered by visual density (darkest → lightest)
+# Character sets ordered by visual density (lightest → darkest)
 CHARSETS = {
     "dense": " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
     "basic": " .:-=+*#%@",
     "block": " ░▒▓█",
+    "digits": " .123456789",
+    "symbols": " ·•◦○◎●◉⬤",
+    "binary": "01",
+    "katakana": " ｦｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ",
+    "box": " ╴╵╶╷┌─┐│└┘├┤┬┴┼╔═╗║╚╝█",
+    "runic": " ᛫ᛁᛚᛉᛏᛒᛗᛞᚨᚲᚺᛊᛈᛟᛜᛠ",
+    "shade": " ░▒▓▄▀▌▐▖▗▘▝▚▞█",
+    "gothic": " ·†‡§¶‖║╬█",
+    "currency": " ¢·°€£¥₹₩₿$",
+    "math": " ·+−×÷≈∑∏∫∞",
+    "arrows": " ·→↗↑↙↓↘↔↕⇒⇔",
+    "stars": " ·⋆✧☆★✦✶✸⬤",
+    "chess": " ·♙♟♘♞♗♝♖♜♕♛",
+    "dots": " ⠁⠂⠃⠄⠅⠆⠇⡀⡁⣀⣁⣂⣃⣄⣅⣆⣇⣏⣟⣿",
+    "emoji": " ·○◐◑●◉⦿⊕⊗⬤",
+    "matrix": " .:0ｦ1ｱ2ｲ3ｳ4ｴ5ｵ6ｶ7ｷ8ｸ9ｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ*#",
+    "code": " .-:;=+/|()[]<>{}*&#%@!",
+    "virus": " ·░¿¡×÷±≠▒§¶†‡▓█",
+    "daemon": " ·†‡¤§¶‖║╫╬▓█",
+    "hex": " 1C7FE32A54D6908B",
+    "octal": " 17352460",
+    "base64": " /+1lijtfcr7IvnuxzJLCTYEFUVS32e5sAkPaq469dXbhZpwoy8gGKNDQRHBWMm0O",
 }
 
 # Braille dot bit positions: 2-wide × 4-tall grid per character
@@ -143,6 +165,54 @@ def _render_text_pillow(lines, width, height, font_scale=1.0, color=(255, 255, 2
     return np.array(canvas)
 
 
+def _render_ascii_colored(lines, small_frame, out_w, out_h, ascii_h, ascii_w):
+    """Render ASCII with per-character color sampled from the source image."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    canvas = Image.new("RGB", (out_w, out_h), (0, 0, 0))
+    if not lines:
+        return np.array(canvas)
+
+    draw = ImageDraw.Draw(canvas)
+    num_lines = len(lines)
+    max_line_len = max(len(line) for line in lines) if lines else 1
+
+    font_size = max(6, min(int(out_h / num_lines * 0.85), int(out_w / max_line_len * 1.8)))
+    font = None
+    for fp in ["/System/Library/Fonts/Menlo.ttc",
+               "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"]:
+        try:
+            font = ImageFont.truetype(fp, font_size)
+            break
+        except (OSError, IOError):
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+
+    bbox = draw.textbbox((0, 0), "X", font=font)
+    char_w = max(1, bbox[2] - bbox[0])
+    char_h = max(1, bbox[3] - bbox[1])
+    line_spacing = int(char_h * 1.15)
+    y_start = max(0, (out_h - num_lines * line_spacing) // 2)
+
+    for row_idx, line in enumerate(lines):
+        y = y_start + row_idx * line_spacing
+        if y > out_h:
+            break
+        for col_idx, ch in enumerate(line):
+            if ch == ' ':
+                continue
+            # Sample color from source
+            src_y = min(row_idx, small_frame.shape[0] - 1)
+            src_x = min(col_idx, small_frame.shape[1] - 1)
+            color = tuple(int(c) for c in small_frame[src_y, src_x])
+            x = 2 + col_idx * char_w
+            if x < out_w:
+                draw.text((x, y), ch, fill=color, font=font)
+
+    return np.array(canvas)
+
+
 def ascii_art(frame: np.ndarray, charset: str = "basic", width: int = 80,
               invert: bool = False, color_mode: str = "mono", edge_mix: float = 0.0,
               seed: int = 42, **kwargs) -> np.ndarray:
@@ -150,12 +220,13 @@ def ascii_art(frame: np.ndarray, charset: str = "basic", width: int = 80,
 
     Args:
         frame: (H, W, 3) uint8 BGR array.
-        charset: Character set — "basic" (10), "dense" (69), "block" (5 Unicode).
+        charset: Character set — "basic", "dense", "block", "digits",
+                 "symbols", "binary", "katakana".
         width: ASCII width in characters (controls detail level).
         invert: Invert brightness mapping (swap light/dark chars).
-        color_mode: "mono" (white on black), "green" (matrix), "amber" (retro terminal),
-                    "original" (sample colors from source image).
-        edge_mix: Blend in edge detection (0.0 = none, 1.0 = full). Enhances outlines.
+        color_mode: "mono" (white on black), "green" (matrix), "amber" (retro),
+                    "original" (per-cell color from source), "rainbow" (hue gradient).
+        edge_mix: Blend in edge detection (0.0 = none, 1.0 = full).
         seed: Random seed (unused but kept for interface consistency).
 
     Returns:
@@ -207,10 +278,14 @@ def ascii_art(frame: np.ndarray, charset: str = "basic", width: int = 80,
     }
 
     if color_mode == "original":
-        # Render with per-line average color (approximation for non-OpenCV text)
-        # For simplicity, use dominant color of frame
-        avg = frame.mean(axis=(0, 1)).astype(int)
-        text_color = tuple(int(c) for c in avg)
+        # Per-cell color from source image — render with Pillow for color per character
+        return _render_ascii_colored(lines, small, w, h, ascii_height, width)
+    elif color_mode == "rainbow":
+        # Rainbow hue gradient across the frame
+        import colorsys
+        hue = (kwargs.get("frame_index", 0) * 0.02) % 1.0
+        r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+        text_color = (int(r * 255), int(g * 255), int(b * 255))
         bg = (0, 0, 0)
     else:
         text_color = color_map.get(color_mode, (255, 255, 255))

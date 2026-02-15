@@ -389,6 +389,9 @@ def pixel_elastic(
     force_type: str = "turbulence",
     force_strength: float = 5.0,
     damping: float = 0.9,
+    concentrate_x: float = 0.5,
+    concentrate_y: float = 0.5,
+    concentrate_radius: float = 0.0,
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
@@ -404,9 +407,12 @@ def pixel_elastic(
         stiffness: Spring stiffness (0.05-0.8). Higher = snappier return.
         mass: Pixel mass (0.5-3.0). Heavier = slower, more momentum.
         force_type: What pushes pixels ("turbulence", "brightness",
-                    "edges", "radial").
+                    "edges", "radial", "vortex", "wave").
         force_strength: How hard the push (1-20).
         damping: Energy loss per frame (0.8-0.99).
+        concentrate_x: Force center X (0-1). Only used when concentrate_radius > 0.
+        concentrate_y: Force center Y (0-1). Only used when concentrate_radius > 0.
+        concentrate_radius: Focus force to a region (0 = full frame, 0.1-1.0 = radius).
     """
     h, w = frame.shape[:2]
     key = f"elastic_{seed}"
@@ -458,9 +464,37 @@ def pixel_elastic(
             fx = dx / dist * pulse * 0.3
             fy = dy / dist * pulse * 0.3
 
+        elif force_type == "vortex":
+            # Spinning force — pixels orbit around center
+            y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+            cx, cy = w / 2, h / 2
+            dx = x_grid - cx
+            dy = y_grid - cy
+            dist = np.sqrt(dx * dx + dy * dy) + 1.0
+            spin_speed = np.sin(t * 2) * force_strength
+            fx = -dy / dist * spin_speed * 0.3
+            fy = dx / dist * spin_speed * 0.3
+
+        elif force_type == "wave":
+            # Directional sine wave push
+            y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+            fx = force_strength * np.sin(y_grid / 20.0 + t * 4 + phase_x)
+            fy = force_strength * 0.3 * np.cos(x_grid / 25.0 + t * 3 + phase_y)
+
         else:
             fx = np.zeros((h, w), dtype=np.float32)
             fy = np.zeros((h, w), dtype=np.float32)
+
+        # Apply spatial concentration mask
+        if concentrate_radius > 0:
+            cy_px = int(max(0.0, min(1.0, float(concentrate_y))) * h)
+            cx_px = int(max(0.0, min(1.0, float(concentrate_x))) * w)
+            r_px = max(1, int(concentrate_radius * max(h, w)))
+            y_grid_c, x_grid_c = np.mgrid[0:h, 0:w].astype(np.float32)
+            dist_c = np.sqrt((x_grid_c - cx_px) ** 2 + (y_grid_c - cy_px) ** 2)
+            mask = np.exp(-(dist_c ** 2) / (r_px ** 2 * 2))
+            fx *= mask
+            fy *= mask
 
         # Spring physics: F_spring = -stiffness * displacement
         spring_fx = -stiffness * state["dx"]
@@ -1830,6 +1864,7 @@ def pixel_xerox(
     halftone_size: int = 4,
     edge_fuzz: float = 1.5,
     toner_skip: float = 0.05,
+    style: str = "copy",
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
@@ -1841,6 +1876,12 @@ def pixel_xerox(
     black and white, noise accumulates, edges get fuzzy, toner skips
     leave white gaps. Progressive degradation over the clip duration.
 
+    Styles:
+        copy: Standard copier degradation (default).
+        faded: Low-toner office copier — lighter, more grain, more toner skip.
+        harsh: High-contrast mode — crushes to near B&W faster.
+        zine: DIY zine aesthetic — heavy halftone, max degradation.
+
     Args:
         generations: How many copy generations to simulate (1-30).
         contrast_gain: Per-generation contrast boost (1.0-1.5). Crushes midtones.
@@ -1848,10 +1889,28 @@ def pixel_xerox(
         halftone_size: Dot screen size for halftone pattern (2-8).
         edge_fuzz: Edge blur per generation (0-4).
         toner_skip: Probability of white toner gaps per generation (0-0.2).
+        style: Copier character — 'copy', 'faded', 'harsh', 'zine'.
     """
     h, w = frame.shape[:2]
     rng = np.random.default_rng(seed + frame_index)
     progress = frame_index / max(total_frames - 1, 1)
+
+    # Style presets override base params
+    if style == "faded":
+        contrast_gain = min(contrast_gain, 1.08)
+        noise_amount = max(noise_amount, 0.1)
+        toner_skip = max(toner_skip, 0.12)
+        edge_fuzz = max(edge_fuzz, 2.5)
+    elif style == "harsh":
+        contrast_gain = max(contrast_gain, 1.3)
+        noise_amount = min(noise_amount, 0.03)
+        halftone_size = max(2, halftone_size)
+    elif style == "zine":
+        contrast_gain = max(contrast_gain, 1.25)
+        noise_amount = max(noise_amount, 0.08)
+        halftone_size = max(6, halftone_size)
+        toner_skip = max(toner_skip, 0.08)
+        generations = max(generations, 12)
 
     # Number of generations scales with progress
     current_gens = max(1, int(generations * progress + 1))
@@ -2015,6 +2074,16 @@ def pixel_fax(
     return np.clip(result, 0, 255).astype(np.uint8)
 
 
+_RISOGRAPH_PALETTES = {
+    "classic": ((0, 90, 180), (220, 50, 50)),       # Blue + Red
+    "zine": ((0, 0, 0), (0, 160, 80)),              # Black + Green
+    "punk": ((230, 50, 130), (255, 220, 0)),         # Hot pink + Yellow
+    "ocean": ((0, 60, 120), (0, 180, 180)),          # Navy + Teal
+    "sunset": ((200, 60, 20), (240, 160, 0)),        # Rust + Gold
+    "custom": None,  # Use color_a/color_b directly
+}
+
+
 def pixel_risograph(
     frame: np.ndarray,
     ink_bleed: float = 2.5,
@@ -2022,6 +2091,7 @@ def pixel_risograph(
     paper_grain: float = 0.3,
     ink_coverage: float = 0.85,
     num_colors: int = 2,
+    palette: str = "classic",
     color_a: tuple = (0, 90, 180),
     color_b: tuple = (220, 50, 50),
     seed: int = 42,
@@ -2041,11 +2111,16 @@ def pixel_risograph(
         paper_grain: Paper texture visibility (0-1).
         ink_coverage: How much ink the drum lays down (0.5-1.0). Lower = more white.
         num_colors: Color separation layers (1-3).
-        color_a: First ink color RGB (e.g., blue).
-        color_b: Second ink color RGB (e.g., red/pink).
+        palette: Color preset — 'classic', 'zine', 'punk', 'ocean', 'sunset', 'custom'.
+        color_a: First ink color RGB (used when palette='custom').
+        color_b: Second ink color RGB (used when palette='custom').
     """
     h, w = frame.shape[:2]
     rng = np.random.default_rng(seed)
+
+    # Apply palette preset (overrides color_a/color_b unless custom)
+    if palette in _RISOGRAPH_PALETTES and _RISOGRAPH_PALETTES[palette] is not None:
+        color_a, color_b = _RISOGRAPH_PALETTES[palette]
 
     # Handle list/tuple color args
     color_a = tuple(int(c) for c in color_a)
