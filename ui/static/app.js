@@ -461,6 +461,12 @@ async function uploadVideo(file) {
 
     try {
         const res = await fetch(`${API}/api/upload`, { method: 'POST', body: form });
+        if (!res.ok) {
+            const errBody = await res.text();
+            showErrorToast(`Upload failed: ${res.status} ${res.statusText}`);
+            console.error('Upload error response:', errBody);
+            return;
+        }
         const data = await res.json();
 
         videoLoaded = true;
@@ -1039,7 +1045,10 @@ function setupLayerReorder() {
 function renderHistory() {
     const list = document.getElementById('history-list');
 
-    list.innerHTML = history.map((entry, i) => {
+    // Render most recent first (reverse display order)
+    const indices = history.map((_, i) => i).reverse();
+    list.innerHTML = indices.map(i => {
+        const entry = history[i];
         let cls = '';
         if (i === historyIndex) cls = 'current';
         else if (i > historyIndex) cls = 'future';

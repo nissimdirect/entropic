@@ -27,6 +27,17 @@ def scanlines(frame: np.ndarray, line_width: int = 2, opacity: float = 0.3,
     # Clamp parameters to prevent crashes
     line_width = max(1, int(line_width))
     opacity = max(0.0, min(1.0, float(opacity)))
+    flicker = bool(flicker)
+
+    # Normalize color to 3-element RGB — UI may send [value, 0] from 'xy' knob
+    if isinstance(color, (int, float)):
+        color = (int(color), int(color), int(color))
+    elif isinstance(color, (tuple, list)):
+        if len(color) < 3:
+            color = list(color) + [0] * (3 - len(color))
+        color = tuple(int(max(0, min(255, c))) for c in color[:3])
+    else:
+        color = (0, 0, 0)
 
     line_color = np.array(color, dtype=np.float32)
 

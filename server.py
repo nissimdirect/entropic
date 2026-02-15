@@ -105,7 +105,10 @@ async def list_effects():
             elif isinstance(v, float):
                 params[k] = {"type": "float", "default": v, "min": 0.0, "max": max(v * 4, 2.0), "step": 0.01}
             elif isinstance(v, tuple):
-                params[k] = {"type": "xy", "default": list(v), "min": -100, "max": 100}
+                if len(v) == 3 and all(isinstance(c, (int, float)) and 0 <= c <= 255 for c in v):
+                    params[k] = {"type": "rgb", "default": list(v)}
+                else:
+                    params[k] = {"type": "xy", "default": list(v), "min": -100, "max": 100}
             elif isinstance(v, str):
                 params[k] = {"type": "string", "default": v}
         result.append({
@@ -374,7 +377,10 @@ async def preview_effect(chain: EffectChain):
 
         if chain.effects:
             original = frame.copy() if chain.mix < 1.0 else None
-            frame = apply_chain(frame, chain.effects, watermark=False)
+            frame = apply_chain(frame, chain.effects,
+                                frame_index=chain.frame_number,
+                                total_frames=_state["video_info"].get("total_frames", 1),
+                                watermark=False)
             # Wet/dry mix
             if original is not None:
                 mix = max(0.0, min(1.0, chain.mix))
@@ -435,11 +441,17 @@ async def preview_timeline(req: TimelinePreviewRequest):
                     if mw > 0 and mh > 0:
                         # Extract sub-region, apply effects, composite back
                         sub_frame = processed[my:my+mh, mx:mx+mw].copy()
-                        sub_frame = apply_chain(sub_frame, effects, watermark=False)
+                        sub_frame = apply_chain(sub_frame, effects,
+                                                frame_index=req.frame_number,
+                                                total_frames=_state["video_info"].get("total_frames", 1),
+                                                watermark=False)
                         processed[my:my+mh, mx:mx+mw] = sub_frame
                 else:
                     # Full frame
-                    processed = apply_chain(processed, effects, watermark=False)
+                    processed = apply_chain(processed, effects,
+                                            frame_index=req.frame_number,
+                                            total_frames=_state["video_info"].get("total_frames", 1),
+                                            watermark=False)
 
         # Wet/dry mix
         if req.mix < 1.0:
@@ -540,10 +552,16 @@ async def export_timeline(req: TimelineExportRequest):
                         mh = min(h - my, int(mask.get("h", 1) * h))
                         if mw > 0 and mh > 0:
                             sub_frame = processed[my:my+mh, mx:mx+mw].copy()
-                            sub_frame = apply_chain(sub_frame, effects, watermark=True)
+                            sub_frame = apply_chain(sub_frame, effects,
+                                                    frame_index=i,
+                                                    total_frames=len(frame_files),
+                                                    watermark=True)
                             processed[my:my+mh, mx:mx+mw] = sub_frame
                     else:
-                        processed = apply_chain(processed, effects, watermark=True)
+                        processed = apply_chain(processed, effects,
+                                                frame_index=i,
+                                                total_frames=len(frame_files),
+                                                watermark=True)
 
             # Wet/dry mix
             if req.mix < 1.0:
@@ -846,7 +864,10 @@ async def render_video(req: RenderRequest):
                 # Apply automation overrides
                 effects = auto_session.apply_to_chain(req.effects, i) if auto_session else req.effects
                 original = frame.copy() if req.mix < 1.0 else None
-                frame = apply_chain(frame, effects, watermark=True)
+                frame = apply_chain(frame, effects,
+                                    frame_index=i,
+                                    total_frames=len(frame_files),
+                                    watermark=True)
                 if original is not None:
                     mix = max(0.0, min(1.0, req.mix))
                     frame = np.clip(
@@ -949,7 +970,10 @@ async def export_video(export: ExportSettings):
             # Apply effects with mix
             if export.effects:
                 original = frame.copy() if export.mix < 1.0 else None
-                frame = apply_chain(frame, export.effects, watermark=True)
+                frame = apply_chain(frame, export.effects,
+                                    frame_index=i,
+                                    total_frames=len(frame_files),
+                                    watermark=True)
                 if original is not None:
                     mix = max(0.0, min(1.0, export.mix))
                     frame = np.clip(
@@ -1291,7 +1315,10 @@ async def perform_frame(req: PerformFrameRequest):
                 continue
             layer_frame = frame.copy()
             if layer.effects:
-                layer_frame = apply_chain(layer_frame, layer.effects, watermark=False)
+                layer_frame = apply_chain(layer_frame, layer.effects,
+                                          frame_index=_state.get("perf_frame_count", 0),
+                                          total_frames=_state["video_info"].get("total_frames", 1),
+                                          watermark=False)
             frame_dict[layer.layer_id] = layer_frame
 
         # --- 5. Composite using LayerStack (respects z-order + computed opacity) ---

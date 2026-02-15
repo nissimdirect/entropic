@@ -25,7 +25,10 @@ BRAILLE_DOTS = [
 
 
 def _render_text_to_frame(lines, width, height, font_scale=1.0, color=(255, 255, 255), bg_color=(0, 0, 0)):
-    """Render list of text lines back into an image frame using OpenCV putText.
+    """Render list of ASCII text lines back into an image frame using OpenCV putText.
+
+    Note: OpenCV putText only supports ASCII. For Unicode (braille, block chars),
+    use _render_text_pillow() instead.
 
     Returns (H, W, 3) uint8 BGR array matching original dimensions.
     """
@@ -73,6 +76,67 @@ def _render_text_to_frame(lines, width, height, font_scale=1.0, color=(255, 255,
         cv2.putText(canvas, line, (2, y), font, scale, color, thickness, cv2.LINE_AA)
 
     return canvas
+
+
+def _render_text_pillow(lines, width, height, font_scale=1.0, color=(255, 255, 255), bg_color=(0, 0, 0)):
+    """Render Unicode text lines into an image frame using Pillow.
+
+    Pillow supports Unicode (braille U+2800-U+28FF, block elements, etc.)
+    unlike OpenCV's putText which only handles ASCII.
+
+    Returns (H, W, 3) uint8 RGB array matching original dimensions.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    bg_rgb = (int(bg_color[0]), int(bg_color[1]), int(bg_color[2]))
+    canvas = Image.new("RGB", (width, height), bg_rgb)
+
+    if not lines:
+        return np.array(canvas)
+
+    draw = ImageDraw.Draw(canvas)
+    num_lines = len(lines)
+    max_line_len = max(len(line) for line in lines) if lines else 1
+
+    # Calculate font size to fit all lines and width
+    font_size = max(6, int(height / num_lines * 0.85 * font_scale))
+    width_font_size = max(6, int(width / max_line_len * 1.8 * font_scale))
+    font_size = min(font_size, width_font_size)
+
+    # Try monospace fonts that support braille Unicode
+    font = None
+    mono_fonts = [
+        "/System/Library/Fonts/Menlo.ttc",
+        "/System/Library/Fonts/Monaco.dfont",
+        "/System/Library/Fonts/Courier.dfont",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+    ]
+    for font_path in mono_fonts:
+        try:
+            font = ImageFont.truetype(font_path, font_size)
+            break
+        except (OSError, IOError):
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+
+    text_color = (int(color[0]), int(color[1]), int(color[2]))
+
+    bbox = draw.textbbox((0, 0), "X", font=font)
+    char_h = bbox[3] - bbox[1]
+    line_spacing = int(char_h * 1.15)
+
+    total_text_h = num_lines * line_spacing
+    y_start = max(0, (height - total_text_h) // 2)
+
+    for i, line in enumerate(lines):
+        y = y_start + i * line_spacing
+        if y > height:
+            break
+        draw.text((2, y), line, fill=text_color, font=font)
+
+    return np.array(canvas)
 
 
 def ascii_art(frame: np.ndarray, charset: str = "basic", width: int = 80,
@@ -233,4 +297,6 @@ def braille_art(frame: np.ndarray, width: int = 80, threshold: int = 128,
     }
     text_color = color_map.get(color_mode, (255, 255, 255))
 
-    return _render_text_to_frame(lines, w, h, color=text_color, bg_color=(0, 0, 0))
+    # Use Pillow renderer — braille characters are Unicode (U+2800-U+28FF)
+    # and OpenCV's putText only supports ASCII
+    return _render_text_pillow(lines, w, h, color=text_color, bg_color=(0, 0, 0))

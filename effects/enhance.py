@@ -29,11 +29,29 @@ def solarize(
     return np.array(result)
 
 
-def _clamp_rgb(color: tuple) -> tuple:
-    """Clamp an RGB tuple to valid 0-255 range."""
-    if not isinstance(color, (tuple, list)) or len(color) != 3:
-        return (128, 128, 128)  # Safe default
-    return tuple(max(0, min(255, int(c))) for c in color)
+def _clamp_rgb(color, default=(128, 128, 128)) -> tuple:
+    """Normalize and clamp a color value to a valid RGB (R, G, B) tuple.
+
+    Handles various input types from the UI:
+    - tuple/list with 3 elements: standard RGB
+    - tuple/list with 2 elements: from 'xy' knob (pad with 0)
+    - single number: grayscale (repeat to all channels)
+    - None/invalid: returns default
+    """
+    if color is None:
+        return tuple(default)
+    if isinstance(color, (int, float)):
+        v = max(0, min(255, int(color)))
+        return (v, v, v)
+    if isinstance(color, (tuple, list)):
+        if len(color) >= 3:
+            return tuple(max(0, min(255, int(c))) for c in color[:3])
+        if len(color) == 2:
+            return (max(0, min(255, int(color[0]))), max(0, min(255, int(color[1]))), 0)
+        if len(color) == 1:
+            v = max(0, min(255, int(color[0])))
+            return (v, v, v)
+    return tuple(default)
 
 
 def duotone(
