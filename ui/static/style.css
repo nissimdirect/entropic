@@ -1552,6 +1552,44 @@ h3 .count {
     gap: 4px;
 }
 
+/* Color picker for RGB params */
+.color-picker-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+}
+.color-picker-container label {
+    font-size: 9px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 60px;
+}
+.param-color-picker {
+    width: 36px;
+    height: 24px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 3px;
+    padding: 0;
+    cursor: pointer;
+    background: none;
+}
+.param-color-picker::-webkit-color-swatch-wrapper {
+    padding: 1px;
+}
+.param-color-picker::-webkit-color-swatch {
+    border: none;
+    border-radius: 2px;
+}
+.color-hex-value {
+    font-size: 8px;
+    color: var(--text-dim);
+    font-family: monospace;
+}
+
 /* CSS Tooltips — replaces native title */
 [data-tooltip] {
     position: relative;

@@ -1892,6 +1892,7 @@ function renderChain() {
     document.querySelectorAll('.knob').forEach(setupKnobInteraction);
     document.querySelectorAll('.param-dropdown').forEach(setupDropdownInteraction);
     document.querySelectorAll('.param-toggle').forEach(setupToggleInteraction);
+    document.querySelectorAll('.param-color-picker').forEach(setupColorPickerInteraction);
 
     // Setup device reordering
     setupDeviceReorder();
@@ -2068,13 +2069,69 @@ function renderHistory() {
 
 function createControl(deviceId, paramName, spec, value, ctrlType, ctrlSpec) {
     const label = ctrlSpec?.label || paramName;
-    if (ctrlType === 'dropdown') {
+    // Auto-detect color-picker for RGB params
+    if (ctrlType === 'color-picker' || spec.type === 'rgb') {
+        return createColorPicker(deviceId, paramName, spec, value, label);
+    } else if (ctrlType === 'dropdown') {
         return createDropdown(deviceId, paramName, spec, value, label, ctrlSpec);
     } else if (ctrlType === 'toggle') {
         return createToggle(deviceId, paramName, spec, value, label);
     } else {
         return createKnob(deviceId, paramName, spec, value, label);
     }
+}
+
+function createColorPicker(deviceId, paramName, spec, value, label) {
+    // Convert RGB array [r, g, b] to hex #rrggbb
+    let r = 0, g = 0, b = 0;
+    if (Array.isArray(value)) {
+        r = Math.max(0, Math.min(255, Math.round(value[0] || 0)));
+        g = Math.max(0, Math.min(255, Math.round(value[1] || 0)));
+        b = Math.max(0, Math.min(255, Math.round(value[2] || 0)));
+    } else if (typeof value === 'number') {
+        r = g = b = Math.max(0, Math.min(255, Math.round(value)));
+    }
+    const hex = '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
+    return `
+        <div class="param-control color-picker-container">
+            <label>${label}</label>
+            <input type="color" class="param-color-picker"
+                   data-device="${deviceId}" data-param="${paramName}"
+                   value="${hex}">
+            <span class="color-hex-value">${hex}</span>
+        </div>`;
+}
+
+function setupColorPickerInteraction(inputEl) {
+    inputEl.addEventListener('input', () => {
+        const hex = inputEl.value;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        const rawId = inputEl.dataset.device;
+        const paramName = inputEl.dataset.param;
+
+        // Update hex display
+        const hexSpan = inputEl.parentElement.querySelector('.color-hex-value');
+        if (hexSpan) hexSpan.textContent = hex;
+
+        if (typeof rawId === 'string' && rawId.startsWith('mfx-')) {
+            const fxIdx = parseInt(rawId.slice(4));
+            if (perfMasterEffects[fxIdx]) {
+                perfMasterEffects[fxIdx].params[paramName] = [r, g, b];
+                perfSyncMasterEffects();
+            }
+        } else {
+            const deviceId = parseInt(rawId);
+            const device = chain.find(d => d.id === deviceId);
+            if (device) {
+                device.params[paramName] = [r, g, b];
+                pushHistory(`${device.name}: ${paramName}`);
+                syncChainToRegion();
+            }
+        }
+        schedulePreview();
+    });
 }
 
 function createDropdown(deviceId, paramName, spec, value, label, ctrlSpec) {
@@ -6388,6 +6445,7 @@ renderChain = function() {
     document.querySelectorAll('.knob').forEach(setupKnobInteraction);
     document.querySelectorAll('.param-dropdown').forEach(setupDropdownInteraction);
     document.querySelectorAll('.param-toggle').forEach(setupToggleInteraction);
+    document.querySelectorAll('.param-color-picker').forEach(setupColorPickerInteraction);
 
     // Setup curves canvases
     document.querySelectorAll('.curves-canvas').forEach(setupCurvesCanvas);
