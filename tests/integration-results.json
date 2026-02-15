@@ -1,5 +1,5 @@
 {
-  "passed": 21,
+  "passed": 29,
   "failed": 1,
   "errors": 0,
   "details": [
@@ -46,17 +46,17 @@
     {
       "effect": "bytecorrupt",
       "status": "PASS",
-      "mean_diff": 119.7
+      "mean_diff": 3.9
     },
     {
       "effect": "flowdistort",
       "status": "PASS",
-      "mean_diff": 39.7
+      "mean_diff": 85.3
     },
     {
       "effect": "autolevels",
       "status": "FAIL",
-      "reason": "No change, diff=0.0"
+      "reason": "No change, diff=0.3"
     },
     {
       "effect": "histogrameq",

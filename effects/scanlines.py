@@ -4,11 +4,11 @@ Overlays CRT/VHS-style scan lines with optional flicker.
 """
 
 import numpy as np
-import random
 
 
 def scanlines(frame: np.ndarray, line_width: int = 2, opacity: float = 0.3,
-              flicker: bool = False, color: tuple = (0, 0, 0)) -> np.ndarray:
+              flicker: bool = False, color: tuple = (0, 0, 0),
+              seed: int = 42) -> np.ndarray:
     """Overlay horizontal scan lines.
 
     Args:
@@ -17,6 +17,7 @@ def scanlines(frame: np.ndarray, line_width: int = 2, opacity: float = 0.3,
         opacity: 0.0 (invisible) to 1.0 (fully black lines).
         flicker: Randomize opacity per line for CRT flicker effect.
         color: RGB tuple for line color (default black).
+        seed: Random seed for deterministic flicker.
 
     Returns:
         Frame with scan lines.
@@ -42,12 +43,13 @@ def scanlines(frame: np.ndarray, line_width: int = 2, opacity: float = 0.3,
     line_color = np.array(color, dtype=np.float32)
 
     # Generate scan line pattern
+    rng = np.random.default_rng(seed) if flicker else None
     spacing = line_width * 2  # lines + gaps
     for y in range(0, h, spacing):
         end_y = min(y + line_width, h)
         line_opacity = opacity
         if flicker:
-            line_opacity = opacity * (0.5 + 0.5 * random.random())
+            line_opacity = opacity * (0.5 + 0.5 * rng.random())
 
         result[y:end_y] = result[y:end_y] * (1 - line_opacity) + line_color * line_opacity
 

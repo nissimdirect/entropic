@@ -103,12 +103,16 @@ def _render_text_pillow(lines, width, height, font_scale=1.0, color=(255, 255, 2
     width_font_size = max(6, int(width / max_line_len * 1.8 * font_scale))
     font_size = min(font_size, width_font_size)
 
-    # Try monospace fonts that support braille Unicode
+    # Try monospace fonts that support braille Unicode (U+2800-U+28FF)
+    # macOS: Menlo has braille, Courier New has braille, Apple Symbols as fallback
+    # Linux: DejaVu and Liberation have braille
     font = None
     mono_fonts = [
         "/System/Library/Fonts/Menlo.ttc",
-        "/System/Library/Fonts/Monaco.dfont",
-        "/System/Library/Fonts/Courier.dfont",
+        "/System/Library/Fonts/Supplemental/Courier New.ttf",
+        "/System/Library/Fonts/Supplemental/Andale Mono.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Apple Symbols.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
     ]

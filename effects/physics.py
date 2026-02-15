@@ -418,61 +418,66 @@ def pixel_elastic(
     force_strength = max(1.0, min(20.0, float(force_strength)))
     damping = max(0.8, min(0.99, float(damping)))
 
-    t = frame_index / 30.0
     rng = np.random.default_rng(seed)
+    phase_x = rng.random() * 100
+    phase_y = rng.random() * 100
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
 
-    # Compute external force
-    if force_type == "turbulence":
-        y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
-        phase_x = rng.random() * 100
-        phase_y = rng.random() * 100
-        fx = force_strength * np.sin(x_grid / 30.0 + t * 3 + phase_x) * np.cos(y_grid / 25.0 + t * 2 + phase_y)
-        fy = force_strength * np.cos(x_grid / 25.0 + t * 2.5 + phase_x) * np.sin(y_grid / 30.0 + t * 3.5 + phase_y)
+    for step in range(iterations):
+        t = (frame_index + step) / 30.0
 
-    elif force_type == "brightness":
-        gray = np.mean(frame.astype(np.float32), axis=2)
-        grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=5)
-        grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=5)
-        fx = grad_x * force_strength * 0.01
-        fy = grad_y * force_strength * 0.01
+        # Compute external force
+        if force_type == "turbulence":
+            y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+            fx = force_strength * np.sin(x_grid / 30.0 + t * 3 + phase_x) * np.cos(y_grid / 25.0 + t * 2 + phase_y)
+            fy = force_strength * np.cos(x_grid / 25.0 + t * 2.5 + phase_x) * np.sin(y_grid / 30.0 + t * 3.5 + phase_y)
 
-    elif force_type == "edges":
-        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-        edges = cv2.Canny(gray, 50, 150).astype(np.float32) / 255.0
-        # Edges push outward randomly
-        rand_x = (rng.random((h, w)).astype(np.float32) - 0.5) * 2
-        rand_y = (rng.random((h, w)).astype(np.float32) - 0.5) * 2
-        fx = edges * rand_x * force_strength
-        fy = edges * rand_y * force_strength
+        elif force_type == "brightness":
+            gray = np.mean(frame.astype(np.float32), axis=2)
+            grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=5)
+            grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=5)
+            fx = grad_x * force_strength * 0.01
+            fy = grad_y * force_strength * 0.01
 
-    elif force_type == "radial":
-        y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
-        cx, cy = w / 2, h / 2
-        dx = x_grid - cx
-        dy = y_grid - cy
-        dist = np.sqrt(dx * dx + dy * dy) + 1.0
-        pulse = np.sin(t * 3) * force_strength
-        fx = dx / dist * pulse * 0.3
-        fy = dy / dist * pulse * 0.3
+        elif force_type == "edges":
+            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            edges = cv2.Canny(gray, 50, 150).astype(np.float32) / 255.0
+            edge_rng = np.random.default_rng(seed + step)
+            rand_x = (edge_rng.random((h, w)).astype(np.float32) - 0.5) * 2
+            rand_y = (edge_rng.random((h, w)).astype(np.float32) - 0.5) * 2
+            fx = edges * rand_x * force_strength
+            fy = edges * rand_y * force_strength
 
-    else:
-        fx = np.zeros((h, w), dtype=np.float32)
-        fy = np.zeros((h, w), dtype=np.float32)
+        elif force_type == "radial":
+            y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+            cx, cy = w / 2, h / 2
+            dx = x_grid - cx
+            dy = y_grid - cy
+            dist = np.sqrt(dx * dx + dy * dy) + 1.0
+            pulse = np.sin(t * 3) * force_strength
+            fx = dx / dist * pulse * 0.3
+            fy = dy / dist * pulse * 0.3
 
-    # Spring physics: F_spring = -stiffness * displacement
-    spring_fx = -stiffness * state["dx"]
-    spring_fy = -stiffness * state["dy"]
+        else:
+            fx = np.zeros((h, w), dtype=np.float32)
+            fy = np.zeros((h, w), dtype=np.float32)
 
-    # F_total = F_external + F_spring
-    # acceleration = F_total / mass
-    ax = (fx * 0.1 + spring_fx) / mass
-    ay = (fy * 0.1 + spring_fy) / mass
+        # Spring physics: F_spring = -stiffness * displacement
+        spring_fx = -stiffness * state["dx"]
+        spring_fy = -stiffness * state["dy"]
 
-    # Update velocity and position (Euler integration)
-    state["vx"] = (state["vx"] + ax) * damping
-    state["vy"] = (state["vy"] + ay) * damping
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+        # F_total = F_external + F_spring
+        # Non-linear mass scaling: mass=1 → divisor 1.0, mass=3 → divisor 1.6, mass=5 → divisor 2.2
+        # Keeps high-mass visible instead of dividing linearly
+        mass_divisor = 0.4 + mass * 0.6
+        ax = (fx * 0.1 + spring_fx) / mass_divisor
+        ay = (fy * 0.1 + spring_fy) / mass_divisor
+
+        # Update velocity and position (Euler integration)
+        state["vx"] = (state["vx"] + ax) * damping
+        state["vy"] = (state["vy"] + ay) * damping
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
 
     max_disp = max(h, w) * 0.3
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
@@ -770,69 +775,88 @@ def pixel_magnetic(
     state = _get_state(key, h, w)
 
     rng = np.random.default_rng(seed)
-    t = frame_index / 30.0
-    angle = t * rotation_speed
+    # Seed-based field variation: offset center and tilt angle
+    seed_offset_x = (rng.random() - 0.5) * 0.15
+    seed_offset_y = (rng.random() - 0.5) * 0.15
+    seed_angle = rng.random() * 0.5
 
-    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
-    cx, cy = w / 2, h / 2
-    nx = (x_grid - cx) / max(w, 1)
-    ny = (y_grid - cy) / max(h, 1)
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
+    for step in range(iterations):
+        t = (frame_index + step) / 30.0
+        angle = t * rotation_speed + seed_angle
 
-    # Rotate field over time
-    rnx = nx * np.cos(angle) - ny * np.sin(angle)
-    rny = nx * np.sin(angle) + ny * np.cos(angle)
+        y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+        cx, cy = w / 2, h / 2
+        nx = (x_grid - cx) / max(w, 1) - seed_offset_x
+        ny = (y_grid - cy) / max(h, 1) - seed_offset_y
 
-    if field_type == "dipole":
-        r = np.sqrt(rnx * rnx + rny * rny) + 0.01
-        bx = 3.0 * rnx * rny / (r ** 4) * strength
-        by = (2.0 * rny * rny - rnx * rnx) / (r ** 4) * strength
+        # Rotate field over time
+        rnx = nx * np.cos(angle) - ny * np.sin(angle)
+        rny = nx * np.sin(angle) + ny * np.cos(angle)
 
-    elif field_type == "quadrupole":
-        bx = np.zeros((h, w), dtype=np.float32)
-        by = np.zeros((h, w), dtype=np.float32)
-        for p in range(poles):
-            theta = p * 2 * np.pi / poles
-            px = 0.25 * np.cos(theta)
-            py = 0.25 * np.sin(theta)
-            ddx = rnx - px
-            ddy = rny - py
-            r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
-            sign = (-1) ** p
-            bx += sign * ddx / (r ** 3) * strength * 0.3
-            by += sign * ddy / (r ** 3) * strength * 0.3
+        if field_type == "dipole":
+            # Multi-pole dipole: `poles` adds additional dipole sources
+            bx = np.zeros((h, w), dtype=np.float32)
+            by = np.zeros((h, w), dtype=np.float32)
+            for p in range(max(1, poles)):
+                theta = p * 2 * np.pi / max(1, poles)
+                px = 0.2 * np.cos(theta) if poles > 1 else 0.0
+                py = 0.2 * np.sin(theta) if poles > 1 else 0.0
+                ddx = rnx - px
+                ddy = rny - py
+                r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
+                sign = (-1) ** p
+                bx += sign * 3.0 * ddx * ddy / (r ** 4) * strength
+                by += sign * (2.0 * ddy * ddy - ddx * ddx) / (r ** 4) * strength
 
-    elif field_type == "toroidal":
-        r = np.sqrt(rnx * rnx + rny * rny) + 0.01
-        ring_dist = np.abs(r - 0.3)
-        ring_force = np.exp(-ring_dist * 10) * strength
-        bx = -rny / r * ring_force
-        by = rnx / r * ring_force
+        elif field_type == "quadrupole":
+            bx = np.zeros((h, w), dtype=np.float32)
+            by = np.zeros((h, w), dtype=np.float32)
+            for p in range(poles):
+                theta = p * 2 * np.pi / poles
+                px = 0.25 * np.cos(theta)
+                py = 0.25 * np.sin(theta)
+                ddx = rnx - px
+                ddy = rny - py
+                r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
+                sign = (-1) ** p
+                bx += sign * ddx / (r ** 3) * strength * 0.3
+                by += sign * ddy / (r ** 3) * strength * 0.3
 
-    else:  # chaotic
-        bx = np.zeros((h, w), dtype=np.float32)
-        by = np.zeros((h, w), dtype=np.float32)
-        for _ in range(5):
-            rpx = (rng.random() - 0.5) * 0.8
-            rpy = (rng.random() - 0.5) * 0.8
-            ddx = rnx - rpx
-            ddy = rny - rpy
-            r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
-            bx += ddy / (r ** 3) * strength * 0.2
-            by += -ddx / (r ** 3) * strength * 0.2
+        elif field_type == "toroidal":
+            r = np.sqrt(rnx * rnx + rny * rny) + 0.01
+            ring_dist = np.abs(r - 0.3)
+            ring_force = np.exp(-ring_dist * 10) * strength
+            # Seed-based ring radius variation
+            bx = -rny / r * ring_force
+            by = rnx / r * ring_force
 
-    # Lorentz-like force: F perpendicular to v
-    if frame_index == 0:
-        state["vx"] = bx * 0.01
-        state["vy"] = by * 0.01
-    else:
-        b_mag = np.sqrt(bx * bx + by * by) + 0.01
-        fx = state["vy"] * b_mag * 0.1 + bx * 0.01
-        fy = -state["vx"] * b_mag * 0.1 + by * 0.01
-        state["vx"] = state["vx"] * damping + fx
-        state["vy"] = state["vy"] * damping + fy
+        else:  # chaotic
+            field_rng = np.random.default_rng(seed)
+            bx = np.zeros((h, w), dtype=np.float32)
+            by = np.zeros((h, w), dtype=np.float32)
+            for _ in range(5):
+                rpx = (field_rng.random() - 0.5) * 0.8
+                rpy = (field_rng.random() - 0.5) * 0.8
+                ddx = rnx - rpx
+                ddy = rny - rpy
+                r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
+                bx += ddy / (r ** 3) * strength * 0.2
+                by += -ddx / (r ** 3) * strength * 0.2
 
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+        # Lorentz-like force: F perpendicular to v
+        if frame_index == 0 and step == 0:
+            state["vx"] = bx * 0.01
+            state["vy"] = by * 0.01
+        else:
+            b_mag = np.sqrt(bx * bx + by * by) + 0.01
+            fx = state["vy"] * b_mag * 0.1 + bx * 0.01
+            fy = -state["vx"] * b_mag * 0.1 + by * 0.01
+            state["vx"] = state["vx"] * damping + fx
+            state["vy"] = state["vy"] * damping + fy
+
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
 
     max_disp = max(h, w) * 0.4
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
@@ -1146,42 +1170,47 @@ def pixel_quantum(
     state = _get_state(key, h, w)
 
     rng = np.random.default_rng(seed)
-    t = frame_index / 30.0
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
 
-    y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+    for step in range(iterations):
+        t = (frame_index + step) / 30.0
 
-    # Barrier positions (vertical slices with subtle drift)
-    barrier_positions = []
-    for i in range(barrier_count):
-        bx = (i + 1) * w / (barrier_count + 1)
-        bx += np.sin(t * 0.5 + i * 1.3) * w * 0.03
-        barrier_positions.append(bx)
+        y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
 
-    barrier_width_px = barrier_width * w
+        # Barrier positions (vertical slices with subtle drift)
+        barrier_positions = []
+        for i in range(barrier_count):
+            bx = (i + 1) * w / (barrier_count + 1)
+            bx += np.sin(t * 0.5 + i * 1.3) * w * 0.03
+            barrier_positions.append(bx)
 
-    fx_total = np.zeros((h, w), dtype=np.float32)
-    fy_total = np.zeros((h, w), dtype=np.float32)
+        barrier_width_px = barrier_width * w
 
-    for bx in barrier_positions:
-        dist_to_barrier = x_grid - bx
-        in_barrier = np.exp(-(dist_to_barrier ** 2) / (barrier_width_px ** 2))
+        fx_total = np.zeros((h, w), dtype=np.float32)
+        fy_total = np.zeros((h, w), dtype=np.float32)
 
-        # Tunnel: random pixels near barrier get pushed through
-        tunnel_rng = np.random.default_rng(seed + frame_index + int(bx))
-        tunnel_mask = tunnel_rng.random((h, w)).astype(np.float32) < tunnel_prob
-        tunnel_push = in_barrier * tunnel_mask * np.sign(dist_to_barrier) * barrier_width_px * 2
-        fx_total += tunnel_push * 0.3
+        for bx in barrier_positions:
+            dist_to_barrier = x_grid - bx
+            in_barrier = np.exp(-(dist_to_barrier ** 2) / (barrier_width_px ** 2))
 
-    # Heisenberg uncertainty: random displacement grows over time
-    uncertainty_t = uncertainty * min(1.0, frame_index / max(total_frames * 0.3, 1))
-    unc_rng = np.random.default_rng(seed + frame_index * 7)
-    fx_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.2
-    fy_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.2
+            # Tunnel: random pixels near barrier get pushed through
+            tunnel_rng = np.random.default_rng(seed + frame_index + step + int(bx))
+            tunnel_mask = tunnel_rng.random((h, w)).astype(np.float32) < tunnel_prob
+            tunnel_push = in_barrier * tunnel_mask * np.sign(dist_to_barrier) * barrier_width_px * 2
+            fx_total += tunnel_push * 0.3
 
-    state["vx"] = state["vx"] * 0.85 + fx_total * 0.08
-    state["vy"] = state["vy"] * 0.85 + fy_total * 0.08
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+        # Heisenberg uncertainty: minimum 20% even at frame 0 so params are visible in preview
+        sim_frame = frame_index + step
+        sim_total = max(total_frames, iterations * 2) if _is_preview(frame_index, total_frames) else total_frames
+        uncertainty_t = uncertainty * max(0.2, min(1.0, sim_frame / max(sim_total * 0.3, 1)))
+        unc_rng = np.random.default_rng(seed + sim_frame * 7)
+        fx_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.2
+        fy_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.2
+
+        state["vx"] = state["vx"] * 0.85 + fx_total * 0.08
+        state["vy"] = state["vy"] * 0.85 + fy_total * 0.08
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
 
     max_disp = max(h, w) * 0.4
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)

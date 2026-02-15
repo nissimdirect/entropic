@@ -157,7 +157,7 @@ EFFECTS = {
     "scanlines": {
         "fn": scanlines,
         "category": "texture",
-        "params": {"line_width": 2, "opacity": 0.3, "flicker": False, "color": (0, 0, 0)},
+        "params": {"line_width": 2, "opacity": 0.3, "flicker": False, "color": (0, 0, 0), "seed": 42},
         "description": "CRT/VHS scan line overlay",
     },
     "vhs": {
