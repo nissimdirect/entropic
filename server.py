@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import tempfile
 import base64
+import time
 from pathlib import Path
 from io import BytesIO
 
@@ -57,8 +58,13 @@ _state = {
 }
 _state_lock = asyncio.Lock()
 
-# Freeze cache: track_idx -> {frame_num: numpy_array}
+# Freeze cache: track_idx -> {frames: {frame_num: numpy_array}, lock: asyncio.Lock, last_access: float, flattened: bool}
 _freeze_cache = {}
+_freeze_cache_lock = asyncio.Lock()  # Global lock for cache eviction
+
+# Cache limits
+MAX_TRACKS = 8
+FREEZE_CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024  # 2GB
 
 # Render progress tracking (polled by frontend during export)
 _render_progress = {
@@ -82,6 +88,10 @@ ERROR_RECOVERY = {
     "processing_failed": {"code": "PROCESSING_FAILED", "hint": "Try removing the last effect or resetting parameters.", "action": "undo"},
     "preset_not_found": {"code": "PRESET_NOT_FOUND", "hint": "The preset may have been deleted. Refresh the preset list.", "action": "refresh"},
     "render_failed": {"code": "RENDER_FAILED", "hint": "Try exporting at a lower resolution or shorter duration.", "action": "retry"},
+    "invalid_track": {"code": "INVALID_TRACK", "hint": "Track index out of bounds.", "action": None},
+    "invalid_blend_mode": {"code": "INVALID_BLEND_MODE", "hint": "Use a valid blend mode (normal, multiply, screen, add, overlay, darken, lighten).", "action": None},
+    "not_frozen": {"code": "NOT_FROZEN", "hint": "Freeze the track before flattening.", "action": "freeze"},
+    "no_frames": {"code": "NO_FRAMES", "hint": "Track has no cached frames.", "action": "freeze"},
 }
 
 
@@ -515,14 +525,18 @@ async def preview_effect(chain: EffectChain):
         if warning:
             result["warning"] = warning
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         import logging
         logging.exception("Preview failed")
         # Try to identify which effect caused the error
         effect_name = ""
-        if filtered_effects:
-            # The last effect in the chain is most likely the culprit
-            effect_name = filtered_effects[-1].get("name", "") if isinstance(filtered_effects[-1], dict) else ""
+        try:
+            if filtered_effects:
+                effect_name = filtered_effects[-1].get("name", "") if isinstance(filtered_effects[-1], dict) else ""
+        except NameError:
+            pass
         raise HTTPException(status_code=500, detail=_error_detail(
             "processing_failed", f"Effect processing failed: {str(e)[:100]}", effect_name=effect_name))
 
@@ -538,8 +552,23 @@ async def preview_multitrack(req: MultiTrackPreviewRequest):
     if _state["video_path"] is None:
         raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
 
+    # Blend mode whitelist (SEC-5)
+    ALLOWED_BLEND_MODES = ["normal", "multiply", "screen", "add", "overlay", "darken", "lighten"]
+
     try:
         from core.layer import Layer, LayerStack
+
+        # Validate blend modes
+        for i, track in enumerate(req.tracks):
+            blend_mode = track.get("blend_mode", "normal")
+            if blend_mode not in ALLOWED_BLEND_MODES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=_error_detail(
+                        "invalid_blend_mode",
+                        f"Invalid blend mode '{blend_mode}' on track {i}. Allowed: {', '.join(ALLOWED_BLEND_MODES)}"
+                    )
+                )
 
         # Determine which tracks are audible (solo logic)
         any_solo = any(t.get("solo", False) for t in req.tracks)
@@ -591,8 +620,11 @@ async def preview_multitrack(req: MultiTrackPreviewRequest):
             # Check if this track is frozen — use cached frame if available
             track_data = req.tracks[i]
             if track_data.get("frozen", False) and i in _freeze_cache:
-                cached_frame = _freeze_cache[i].get(req.frame_number)
+                track_cache = _freeze_cache[i]
+                cached_frame = track_cache.get("frames", {}).get(req.frame_number)
                 if cached_frame is not None:
+                    # Update last access time
+                    track_cache["last_access"] = time.time()
                     frame_dict[layer.layer_id] = cached_frame
                     continue
 
@@ -616,10 +648,47 @@ async def preview_multitrack(req: MultiTrackPreviewRequest):
         composited = stack.composite(frame_dict)
         return {"preview": _frame_to_data_url(composited)}
 
+    except HTTPException:
+        raise  # Don't swallow validation errors (blend mode, bounds, etc.)
     except Exception as e:
         import logging
         logging.exception("Multitrack preview failed")
         raise HTTPException(status_code=500, detail=_error_detail("processing_failed", "Multi-track preview failed"))
+
+
+def _get_cache_size_bytes() -> int:
+    """Calculate total memory used by freeze cache."""
+    total = 0
+    for track_idx, track_cache in _freeze_cache.items():
+        if "frames" in track_cache:
+            for frame in track_cache["frames"].values():
+                total += frame.nbytes
+    return total
+
+
+async def _evict_lru_cache(target_bytes: int):
+    """Evict least-recently-used tracks until cache is under target size.
+
+    Args:
+        target_bytes: Target cache size to achieve after eviction.
+    """
+    async with _freeze_cache_lock:
+        current_size = _get_cache_size_bytes()
+
+        if current_size <= target_bytes:
+            return  # Already under limit
+
+        # Sort tracks by last_access (oldest first)
+        sorted_tracks = sorted(
+            _freeze_cache.items(),
+            key=lambda x: x[1].get("last_access", 0)
+        )
+
+        # Evict oldest tracks until under limit
+        for track_idx, _ in sorted_tracks:
+            if _get_cache_size_bytes() <= target_bytes:
+                break
+            del _freeze_cache[track_idx]
 
 
 class FreezeTrackRequest(BaseModel):
@@ -630,6 +699,9 @@ class FreezeTrackRequest(BaseModel):
 @app.post("/api/track/freeze")
 async def freeze_track(req: FreezeTrackRequest):
     """Render all frames with track effects and cache them server-side."""
+    if req.track_index < 0 or req.track_index >= MAX_TRACKS:
+        raise HTTPException(status_code=400, detail=_error_detail("invalid_track", f"Track index {req.track_index} out of bounds (0-{MAX_TRACKS-1})"))
+
     if _state["video_path"] is None:
         raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
 
@@ -645,44 +717,99 @@ async def freeze_track(req: FreezeTrackRequest):
             )
         )
 
-    try:
-        # Clear any existing cache for this track
-        _freeze_cache[req.track_index] = {}
+    # Initialize track cache entry if needed
+    async with _freeze_cache_lock:
+        if req.track_index not in _freeze_cache:
+            _freeze_cache[req.track_index] = {
+                "frames": {},
+                "lock": asyncio.Lock(),
+                "last_access": time.time(),
+                "flattened": False,
+            }
 
-        # Render each frame
-        for frame_num in range(total_frames):
-            frame = extract_single_frame(_state["video_path"], frame_num)
+    track_cache = _freeze_cache[req.track_index]
 
-            # Apply effects chain
-            if req.effects:
-                frame = apply_chain(
-                    frame,
-                    req.effects,
-                    frame_index=frame_num,
-                    total_frames=total_frames,
-                    watermark=False
-                )
+    # Acquire per-track lock to prevent concurrent freezes
+    async with track_cache["lock"]:
+        try:
+            # Estimate memory needed for new frames
+            sample_frame = extract_single_frame(_state["video_path"], 0)
+            bytes_per_frame = sample_frame.nbytes
+            estimated_total = bytes_per_frame * total_frames
 
-            # Store as numpy array (much more efficient than data URL)
-            _freeze_cache[req.track_index][frame_num] = frame
+            # Evict LRU tracks if this would exceed 2GB
+            if _get_cache_size_bytes() + estimated_total > FREEZE_CACHE_MAX_BYTES:
+                await _evict_lru_cache(FREEZE_CACHE_MAX_BYTES - estimated_total)
 
-        return {
-            "status": "ok",
-            "frames_cached": total_frames
-        }
+            # Clear any existing frames for this track
+            track_cache["frames"] = {}
+            track_cache["last_access"] = time.time()
 
-    except Exception as e:
-        import logging
-        logging.exception("Track freeze failed")
-        raise HTTPException(status_code=500, detail=_error_detail("freeze_failed", "Track freeze failed"))
+            # Render each frame
+            for frame_num in range(total_frames):
+                frame = extract_single_frame(_state["video_path"], frame_num)
+
+                # Apply effects chain
+                if req.effects:
+                    frame = apply_chain(
+                        frame,
+                        req.effects,
+                        frame_index=frame_num,
+                        total_frames=total_frames,
+                        watermark=False
+                    )
+
+                # Store as numpy array (much more efficient than data URL)
+                track_cache["frames"][frame_num] = frame
+
+            return {
+                "frozen": True,
+                "frames": total_frames
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            import logging
+            logging.exception("Track freeze failed")
+            raise HTTPException(status_code=500, detail=_error_detail("freeze_failed", "Track freeze failed"))
 
 
 @app.post("/api/track/unfreeze")
 async def unfreeze_track(track_index: int):
     """Clear freeze cache for a track."""
-    if track_index in _freeze_cache:
-        del _freeze_cache[track_index]
-    return {"status": "ok"}
+    if track_index < 0 or track_index >= MAX_TRACKS:
+        raise HTTPException(status_code=400, detail=_error_detail("invalid_track", f"Track index {track_index} out of bounds (0-{MAX_TRACKS-1})"))
+
+    async with _freeze_cache_lock:
+        if track_index in _freeze_cache:
+            del _freeze_cache[track_index]
+
+    return {"frozen": False}
+
+
+@app.post("/api/track/flatten")
+async def flatten_track(track_index: int):
+    """Commit frozen frames as the new source for this track.
+
+    Marks the track as flattened. Frontend should clear its effect chain.
+    """
+    if track_index < 0 or track_index >= MAX_TRACKS:
+        raise HTTPException(status_code=400, detail=_error_detail("invalid_track", f"Track index {track_index} out of bounds (0-{MAX_TRACKS-1})"))
+
+    async with _freeze_cache_lock:
+        if track_index not in _freeze_cache:
+            raise HTTPException(status_code=400, detail=_error_detail("not_frozen", f"Track {track_index} is not frozen"))
+
+        track_cache = _freeze_cache[track_index]
+        if not track_cache.get("frames"):
+            raise HTTPException(status_code=400, detail=_error_detail("no_frames", f"Track {track_index} has no cached frames"))
+
+        # Mark as flattened
+        track_cache["flattened"] = True
+        track_cache["last_access"] = time.time()
+
+    return {"flattened": True}
 
 
 class TimelinePreviewRequest(BaseModel):
@@ -788,6 +915,9 @@ async def freeze_region(req: FreezeRegionRequest):
 
     Returns path to the pre-rendered video file for frozen playback.
     """
+    if req.region_id < 0:
+        raise HTTPException(status_code=400, detail=_error_detail("invalid_track", f"Region ID {req.region_id} must be >= 0"))
+
     if _state["video_path"] is None:
         raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
 
@@ -865,6 +995,8 @@ async def freeze_region(req: FreezeRegionRequest):
 @app.delete("/api/timeline/freeze/{region_id}")
 async def unfreeze_region(region_id: int):
     """Delete a frozen region's pre-rendered video."""
+    if region_id < 0:
+        raise HTTPException(status_code=400, detail=_error_detail("invalid_track", f"Region ID {region_id} must be >= 0"))
     freeze_path = EXPORT_DIR / "frozen" / f"freeze_region_{region_id}.mp4"
     if freeze_path.exists():
         freeze_path.unlink()
@@ -1422,8 +1554,8 @@ async def export_video(export: ExportSettings):
 
     info = _state["video_info"]
     source_w, source_h = info["width"], info["height"]
-    target_w, target_h = export.get_target_dimensions(source_w, source_h)
-    output_fps = export.get_output_fps(info["fps"])
+    target_w, target_h = export.resolution.resolve_dimensions(source_w, source_h)
+    output_fps = export.frame_rate.resolve_numeric(info["fps"])
 
     # Load LFO modulation if provided
     lfo_mod = LfoModulator(export.lfo_config) if export.lfo_config else None
@@ -1482,6 +1614,20 @@ async def export_video(export: ExportSettings):
         mt_stack = None
         if use_multitrack:
             from core.layer import Layer, LayerStack
+
+            # Validate blend modes (SEC-5)
+            ALLOWED_BLEND_MODES = ["normal", "multiply", "screen", "add", "overlay", "darken", "lighten"]
+            for ti, track in enumerate(export.tracks):
+                blend_mode = track.get("blend_mode", "normal")
+                if blend_mode not in ALLOWED_BLEND_MODES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=_error_detail(
+                            "invalid_blend_mode",
+                            f"Invalid blend mode '{blend_mode}' on track {ti}. Allowed: {', '.join(ALLOWED_BLEND_MODES)}"
+                        )
+                    )
+
             any_solo = any(t.get("solo", False) for t in export.tracks)
             mt_layers = []
             for ti, track in enumerate(export.tracks):
@@ -1560,7 +1706,7 @@ async def export_video(export: ExportSettings):
                         "bicubic": Image.BICUBIC,
                         "nearest": Image.NEAREST,
                     }
-                    algo = algo_map.get(export.scale_algorithm.value, Image.LANCZOS)
+                    algo = algo_map.get(export.resolution.get_scale_algorithm(source_w, source_h).value, Image.LANCZOS)
                     img = img.resize((target_w, target_h), algo)
                     frame = np.array(img)
 
@@ -1598,14 +1744,15 @@ async def export_video(export: ExportSettings):
 
         elif export.format == ExportFormat.GIF:
             output_path = EXPORT_DIR / output_name
-            gif_fps = export.gif_fps or min(output_fps, 15)
+            gif_fps = export.gif.fps or min(output_fps, 15)
+            dither_val = export.gif.dither.value
             cmd = [
                 shutil.which("ffmpeg") or "ffmpeg", "-y",
                 "-framerate", str(output_fps),
                 "-i", str(processed_dir / "frame_%06d.png"),
-                "-vf", f"fps={gif_fps},split[s0][s1];[s0]palettegen=max_colors={export.gif_colors}[p];[s1][p]paletteuse" +
-                       (":dither=floyd_steinberg" if export.gif_dithering else ":dither=none"),
-                "-loop", str(export.gif_loop),
+                "-vf", f"fps={gif_fps},split[s0][s1];[s0]palettegen=max_colors={export.gif.max_colors}[p];[s1][p]paletteuse" +
+                       (f":dither={dither_val}" if dither_val != "none" else ":dither=none"),
+                "-loop", str(export.gif.loop_count),
                 str(output_path),
             ]
             subprocess.run(cmd, capture_output=True, check=True, timeout=300)
@@ -1616,11 +1763,11 @@ async def export_video(export: ExportSettings):
                 shutil.which("ffmpeg") or "ffmpeg", "-y",
                 "-framerate", str(output_fps),
                 "-i", str(processed_dir / "frame_%06d.png"),
-                "-c:v", "libvpx-vp9", "-crf", str(export.webm_crf),
+                "-c:v", "libvpx-vp9", "-crf", str(export.webm.crf),
                 "-b:v", "0", "-pix_fmt", "yuv420p",
                 str(output_path),
             ]
-            if export.audio_mode != "strip" and info.get("has_audio"):
+            if export.audio.mode.value != "strip" and info.get("has_audio"):
                 cmd = cmd[:-1] + [
                     "-i", _state["video_path"], "-map", "0:v", "-map", "1:a?",
                     "-c:a", "libopus", "-shortest", str(output_path)
@@ -1632,7 +1779,7 @@ async def export_video(export: ExportSettings):
             profile_map = {
                 "proxy": "0", "lt": "1", "422": "2", "422hq": "3", "4444": "4",
             }
-            profile_num = profile_map.get(export.prores_profile.value, "2")
+            profile_num = profile_map.get(str(export.prores.profile.value), "2")
             cmd = [
                 shutil.which("ffmpeg") or "ffmpeg", "-y",
                 "-framerate", str(output_fps),
@@ -1640,9 +1787,9 @@ async def export_video(export: ExportSettings):
                 "-c:v", "prores_ks", "-profile:v", profile_num,
                 "-pix_fmt", "yuv422p10le" if profile_num != "4" else "yuva444p10le",
             ]
-            if export.audio_mode != "strip" and info.get("has_audio"):
+            if export.audio.mode.value != "strip" and info.get("has_audio"):
                 cmd += ["-i", _state["video_path"], "-map", "0:v", "-map", "1:a?",
-                        "-c:a", "aac", "-b:a", export.audio_bitrate, "-shortest"]
+                        "-c:a", "aac", "-b:a", export.audio.bitrate, "-shortest"]
             cmd.append(str(output_path))
             subprocess.run(cmd, capture_output=True, check=True, timeout=600)
 
@@ -1653,17 +1800,17 @@ async def export_video(export: ExportSettings):
                 "-framerate", str(output_fps),
                 "-i", str(processed_dir / "frame_%06d.png"),
                 "-c:v", "libx264",
-                "-crf", str(export.h264_crf),
-                "-preset", export.h264_preset.value,
+                "-crf", str(export.h264.crf),
+                "-preset", export.h264.preset.value,
                 "-pix_fmt", "yuv420p",
             ]
-            if export.audio_mode != "strip" and info.get("has_audio"):
-                if export.audio_mode == "copy":
+            if export.audio.mode.value != "strip" and info.get("has_audio"):
+                if export.audio.mode.value == "copy":
                     cmd += ["-i", _state["video_path"], "-map", "0:v", "-map", "1:a?",
                             "-c:a", "copy", "-shortest"]
                 else:
                     cmd += ["-i", _state["video_path"], "-map", "0:v", "-map", "1:a?",
-                            "-c:a", "aac", "-b:a", export.audio_bitrate, "-shortest"]
+                            "-c:a", "aac", "-b:a", export.audio.bitrate, "-shortest"]
             cmd.append(str(output_path))
             subprocess.run(cmd, capture_output=True, check=True, timeout=600)
 

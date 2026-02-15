@@ -14,7 +14,7 @@ Thumbs.db
 .idea/
 
 # Test outputs
-tests/test_input.mp4
+# test_input.mp4 is tracked — needed for test fixtures
 tests/output/
 
 # Entropic project data (user-specific)
@@ -39,6 +39,9 @@ dist/
 build/
 *.dmg
 *.spec
+
+# User presets (created at runtime, may contain test artifacts)
+user_presets/
 
 # Temp
 *.tmp

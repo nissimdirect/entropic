@@ -1124,7 +1124,6 @@ function renderBrowserFavorites() {
                     ${gripHTML()}
                     <span class="name">${esc(name)}</span>
                     <span class="fav-star active" onclick="event.stopPropagation();toggleFavorite('${esc(name)}')" title="Remove from favorites">&#9733;</span>
-                    <span class="effect-desc">${esc(desc.slice(0, 60))}</span>
                 </div>`;
     }
     list.innerHTML = html;
@@ -1161,7 +1160,6 @@ function _effectItemHTML(name, desc) {
                 ${gripHTML()}
                 <span class="name">${esc(name)}</span>
                 <span class="fav-star${isFav ? ' active' : ''}" onclick="event.stopPropagation();toggleFavorite('${esc(name)}')" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${isFav ? '&#9733;' : '&#9734;'}</span>
-                <span class="effect-desc">${esc(shortDesc.slice(0, 60))}</span>
             </div>`;
 }
 
@@ -1458,6 +1456,9 @@ async function uploadVideo(file) {
         videoFps = data.info.fps || 30;
         currentFrame = 0;
         _clearPersistedHistory();
+        // L2: Clear active MIDI notes on new video load
+        activeNotes.forEach(note => dispatchMidiNote(note, 0, 0));
+        activeNotes.clear();
 
         const slider = document.getElementById('frame-slider');
         slider.max = totalFrames - 1;
@@ -1466,31 +1467,31 @@ async function uploadVideo(file) {
 
         showPreview(data.preview);
         updateFrameInfo(data.info);
-        // Fetch histogram for color analysis (fires even if panel is collapsed — data is cached)
-        fetchHistogram();
+
         const infoStr = data.info.duration
             ? `${file.name} — ${data.info.width}x${data.info.height}, ${totalFrames} frames`
             : `${file.name} — ${data.info.width}x${data.info.height}`;
         showToast(`Loaded: ${infoStr}`, 'success');
 
-        // Suggest perform toggle (toast with action)
-        if (appMode === 'timeline' && !performToggleActive) {
-            showToast('Try the Perform mixer?', 'info', {
-                label: 'Open Mixer',
-                fn: "function(){togglePerformPanel()}",
-            }, 5000);
-        }
+        // Non-critical post-upload sync — wrapped to prevent secondary error toasts
+        try {
+            fetchHistogram();
+        } catch (_) { /* histogram fetch is non-critical */ }
 
-        // Sync timeline with loaded video
-        if (window.timelineEditor) {
-            timelineEditor.fps = data.info.fps || 30;
-            timelineEditor.totalFrames = totalFrames;
-            // Create a full-length region on Video 1
-            timelineEditor.tracks[0].regions = [
-                new Region(timelineEditor.nextRegionId++, 0, 0, totalFrames - 1)
-            ];
-            timelineEditor.playhead = 0;
-            timelineEditor.fitToWindow();
+        try {
+            if (window.timelineEditor) {
+                timelineEditor.fps = data.info.fps || 30;
+                timelineEditor.totalFrames = totalFrames;
+                if (timelineEditor.tracks[0]) {
+                    timelineEditor.tracks[0].regions = [
+                        new Region(timelineEditor.nextRegionId++, 0, 0, totalFrames - 1)
+                    ];
+                }
+                timelineEditor.playhead = 0;
+                timelineEditor.fitToWindow();
+            }
+        } catch (syncErr) {
+            console.warn('Timeline sync error (non-critical):', syncErr);
         }
 
         // Initialize Track 1 if no tracks exist
@@ -1993,22 +1994,24 @@ async function initWebMidi() {
 }
 
 function handleMidiMessage(msg) {
-    const [status, data1, data2] = msg.data;
+    if (!msg.data || msg.data.length < 2) return;
+    const [status, data1, data2 = 0] = msg.data;
     const messageType = status & 0xf0;
     const channel = status & 0x0f;
 
+    // Bounds validation — MIDI data bytes must be 0-127
+    const note = Math.max(0, Math.min(127, data1 & 0x7f));
+    const value = Math.max(0, Math.min(127, (data2 || 0) & 0x7f));
+
     // Note On (0x90) or Note Off (0x80)
     if (messageType === 0x90 || messageType === 0x80) {
-        const note = data1;
-        const velocity = (messageType === 0x90 && data2 > 0) ? data2 : 0;
+        const velocity = (messageType === 0x90 && value > 0) ? value : 0;
         dispatchMidiNote(note, velocity, channel);
     }
 
     // Control Change (0xB0)
     else if (messageType === 0xB0) {
-        const cc = data1;
-        const value = data2;
-        handleMidiCC(cc, value, channel);
+        handleMidiCC(note, value, channel);
     }
 }
 
@@ -2032,12 +2035,39 @@ function handleMidiCC(cc, value, channel) {
 }
 
 function applyMidiMapping(mapping, value) {
-    // This is a placeholder for applying MIDI CC to parameters
-    // In a full implementation, this would update the parameter in the timeline/chain
-    console.log(`Apply MIDI: track ${mapping.trackIdx}, device ${mapping.deviceIdx}, param ${mapping.paramName} = ${value}`);
+    const { trackIdx, deviceIdx, paramName } = mapping;
 
-    // TODO: Wire this into the actual parameter system once tracks/devices are accessible
-    // For now, just log it
+    // Find the device in the appropriate track's chain
+    let targetChain = chain;
+    if (typeof trackIdx === 'number' && trackIdx >= 0 && trackIdx < tracks.length) {
+        targetChain = tracks[trackIdx].effects;
+    }
+
+    const device = typeof deviceIdx === 'number'
+        ? targetChain.find(d => d.id === deviceIdx)
+        : null;
+
+    if (!device || !paramName) return;
+
+    // Get param range from effect definition
+    const def = effectDefs.find(e => e.name === device.name);
+    const paramDef = def?.params?.[paramName];
+    if (paramDef) {
+        const min = paramDef.min ?? 0;
+        const max = paramDef.max ?? 1;
+        device.params[paramName] = min + value * (max - min);
+    } else {
+        device.params[paramName] = value;
+    }
+
+    // Update knob UI if visible
+    const knobEl = document.querySelector(`[data-device="${device.id}"][data-param="${paramName}"]`);
+    if (knobEl) {
+        knobEl.value = device.params[paramName];
+        knobEl.dispatchEvent(new Event('input'));
+    }
+
+    schedulePreview();
 }
 
 function enterMidiLearn(trackIdx, deviceIdx, paramName) {
@@ -2187,6 +2217,15 @@ function removeFromChain(deviceId) {
     if (selectedLayerId === deviceId) {
         selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
     }
+    // L1: Clear any MIDI Learn mappings that reference the removed device
+    for (const [cc, mapping] of midiMappings.entries()) {
+        if (mapping.deviceIdx === deviceId) {
+            midiMappings.delete(cc);
+        }
+    }
+    if (midiLearnActive && midiLearnTarget?.deviceIdx === deviceId) {
+        exitMidiLearn();
+    }
     pushHistory(`Remove ${device?.name || 'effect'}`);
     syncChainToRegion();
     renderChain();
@@ -2230,22 +2269,103 @@ function releasePerformSlot(deviceId, slotIdx) {
 }
 
 function executePerformAction(slot, performDevice) {
-    if (slot.action === 'none' || !slot.active) return;
+    if (!slot.action || slot.action === 'none' || !slot.active) return;
 
-    // TODO: Implement action dispatch
-    // - toggle_track: Toggle track visibility
-    // - trigger_effect: Toggle effect bypass in current track
-    // - set_param: Set parameter value
-    console.log('[Perform] Execute action:', slot.action, slot.target);
+    switch (slot.action) {
+        case 'toggle_track': {
+            const trackIdx = parseInt(slot.target);
+            if (trackIdx >= 0 && trackIdx < tracks.length) {
+                toggleTrackMute(trackIdx);
+            }
+            break;
+        }
+        case 'trigger_effect': {
+            const deviceId = parseInt(slot.target);
+            if (!isNaN(deviceId)) {
+                toggleBypass(deviceId);
+            }
+            break;
+        }
+        case 'set_param': {
+            if (slot.target_device && slot.target_param) {
+                const device = _findItemInChain(chain, parseInt(slot.target_device));
+                if (device) {
+                    device.params[slot.target_param] = slot.active ? (slot.target_value ?? 1.0) : (slot.default_value ?? 0);
+                    schedulePreview();
+                }
+            }
+            break;
+        }
+        default:
+            console.warn('[Perform] Unknown action:', slot.action);
+    }
 }
 
 function performSlotContextMenu(event, deviceId, slotIdx) {
-    // TODO: Right-click menu to configure slot
-    // - Change label
-    // - Set action type + target
-    // - Adjust ADSR
-    // - Change trigger mode
-    console.log('[Perform] Context menu for slot', slotIdx);
+    event.preventDefault();
+    event.stopPropagation();
+
+    const device = _findItemInChain(chain, deviceId);
+    if (!device || !device.slots) return;
+    const slot = device.slots[slotIdx] || {};
+
+    const menu = document.getElementById('ctx-menu');
+    if (!menu) return;
+
+    // Build target options for track toggle
+    const trackOptions = tracks.map((t, i) =>
+        `<option value="${i}" ${slot.target == i ? 'selected' : ''}>${esc(t.name)}</option>`
+    ).join('');
+
+    // Build effect options from current chain
+    const effectOptions = chain.filter(d => d.name !== 'perform').map(d =>
+        `<option value="${d.id}" ${slot.target == d.id ? 'selected' : ''}>${esc(d.name)}</option>`
+    ).join('');
+
+    menu.innerHTML = `
+        <div class="ctx-section" style="padding:8px;">
+            <label style="font-size:11px;color:var(--text-dim);">Label</label>
+            <input type="text" value="${esc(slot.label || `Slot ${slotIdx + 1}`)}"
+                   onclick="event.stopPropagation()"
+                   onchange="updatePerformSlot(${deviceId}, ${slotIdx}, 'label', this.value)"
+                   style="width:100%;margin:2px 0 6px;">
+            <label style="font-size:11px;color:var(--text-dim);">Action</label>
+            <select onchange="updatePerformSlot(${deviceId}, ${slotIdx}, 'action', this.value);renderChain()"
+                    onclick="event.stopPropagation()" style="width:100%;margin:2px 0 6px;">
+                <option value="none" ${slot.action === 'none' ? 'selected' : ''}>None</option>
+                <option value="toggle_track" ${slot.action === 'toggle_track' ? 'selected' : ''}>Toggle Track</option>
+                <option value="trigger_effect" ${slot.action === 'trigger_effect' ? 'selected' : ''}>Trigger Effect</option>
+                <option value="set_param" ${slot.action === 'set_param' ? 'selected' : ''}>Set Parameter</option>
+            </select>
+            <label style="font-size:11px;color:var(--text-dim);">Target</label>
+            <select onchange="updatePerformSlot(${deviceId}, ${slotIdx}, 'target', this.value)"
+                    onclick="event.stopPropagation()" style="width:100%;margin:2px 0 6px;">
+                ${slot.action === 'toggle_track' ? trackOptions : effectOptions}
+            </select>
+            <label style="font-size:11px;color:var(--text-dim);">Mode</label>
+            <select onchange="updatePerformSlot(${deviceId}, ${slotIdx}, 'mode', this.value)"
+                    onclick="event.stopPropagation()" style="width:100%;margin:2px 0 6px;">
+                <option value="toggle" ${slot.mode === 'toggle' ? 'selected' : ''}>Toggle</option>
+                <option value="hold" ${slot.mode === 'hold' ? 'selected' : ''}>Hold</option>
+                <option value="one-shot" ${slot.mode === 'one-shot' ? 'selected' : ''}>One-Shot</option>
+                <option value="retrigger" ${slot.mode === 'retrigger' ? 'selected' : ''}>Retrigger</option>
+            </select>
+        </div>
+    `;
+
+    menu.style.display = 'block';
+    menu.style.left = event.clientX + 'px';
+    menu.style.top = event.clientY + 'px';
+}
+
+function updatePerformSlot(deviceId, slotIdx, key, value) {
+    const device = _findItemInChain(chain, deviceId);
+    if (!device) return;
+    if (!device.slots) device.slots = [];
+    while (device.slots.length <= slotIdx) {
+        device.slots.push({ label: `Slot ${device.slots.length + 1}`, action: 'none', mode: 'toggle', target: '', active: false });
+    }
+    device.slots[slotIdx][key] = value;
 }
 
 function toggleBypass(deviceId) {
@@ -2751,8 +2871,10 @@ function setupLayerReorder() {
 // ============ TRACK STRIP UI (Multi-track system) ============
 
 function renderTrackList() {
-    const wrapper = document.getElementById('timeline-canvas-wrapper');
-    if (!wrapper) return;
+    // CRITICAL: Render into #track-list-container, NOT #timeline-canvas-wrapper
+    // Setting innerHTML on the canvas wrapper destroys the timeline <canvas>
+    const container = document.getElementById('track-list-container');
+    if (!container) return;
 
     migrateChainToTracks();
 
@@ -2763,44 +2885,40 @@ function renderTrackList() {
         const selected = idx === selectedTrackIdx;
         const effectCount = track.effects.length;
         const effectSummary = effectCount > 0
-            ? track.effects.map(e => e.name).slice(0, 3).join(', ') + (effectCount > 3 ? '...' : '')
-            : 'Empty';
-        const frozenClass = track.frozen ? 'frozen' : '';
-        const frozenIcon = track.frozen ? '&#10052; ' : '';  // Snowflake
+            ? track.effects.map(e => esc(e.name)).slice(0, 3).join(', ') + (effectCount > 3 ? '...' : '')
+            : '';
+        const frozenClass = track.frozen ? 'track-frozen' : '';
+        const frozenIcon = track.frozen ? '<span class="track-freeze-icon">&#10052;</span>' : '';
 
         html += `
             <div class="track-strip ${selected ? 'selected' : ''} ${frozenClass}" data-track-idx="${idx}"
                  onclick="selectTrack(${idx})" oncontextmenu="showTrackContextMenu(event, ${idx})">
+                <div class="track-color-strip" style="background: ${track.color};"></div>
                 <div class="track-header">
-                    <div class="track-color-strip" style="background: ${track.color};"></div>
-                    <button class="track-collapse" onclick="event.stopPropagation(); toggleTrackCollapse(${idx})"
-                            title="${track.collapsed ? 'Expand' : 'Collapse'}">
-                        ${track.collapsed ? '&#9654;' : '&#9660;'}
-                    </button>
-                    ${frozenIcon ? `<span style="margin-left: 4px; color: #6af;" title="Frozen">${frozenIcon}</span>` : ''}
-                    <input type="text" class="track-name" value="${esc(track.name)}"
-                           onclick="event.stopPropagation()"
-                           ondblclick="this.select()"
-                           onchange="renameTrack(${idx}, this.value)"
-                           spellcheck="false">
-                    <input type="range" class="track-opacity-slider" min="0" max="100" value="${Math.round(track.opacity * 100)}"
-                           onclick="event.stopPropagation()"
-                           oninput="updateTrackOpacity(${idx}, this.value)"
-                           title="Opacity: ${Math.round(track.opacity * 100)}%">
-                    <span class="track-opacity-value">${Math.round(track.opacity * 100)}%</span>
-                    <button class="track-solo ${track.solo ? 'active' : ''}" onclick="event.stopPropagation(); toggleTrackSolo(${idx})"
-                            title="Solo">S</button>
-                    <button class="track-mute ${track.mute ? 'active' : ''}" onclick="event.stopPropagation(); toggleTrackMute(${idx})"
-                            title="Mute">M</button>
-                    <select class="track-blend" onclick="event.stopPropagation()" onchange="updateTrackBlend(${idx}, this.value)">
-                        ${DEFAULT_BLEND_MODES.map(mode =>
-                            `<option value="${mode}" ${track.blendMode === mode ? 'selected' : ''}>${mode}</option>`
-                        ).join('')}
-                    </select>
+                    <div class="track-header-top">
+                        <button class="track-collapse" onclick="event.stopPropagation(); toggleTrackCollapse(${idx})">
+                            ${track.collapsed ? '&#9654;' : '&#9660;'}
+                        </button>
+                        ${frozenIcon}
+                        <span class="track-name" data-track-idx="${idx}">${esc(track.name)}</span>
+                    </div>
+                    <div class="track-controls">
+                        <button class="track-solo ${track.solo ? 'active' : ''}" onclick="event.stopPropagation(); toggleTrackSolo(${idx})">S</button>
+                        <button class="track-mute ${track.mute ? 'active' : ''}" onclick="event.stopPropagation(); toggleTrackMute(${idx})">M</button>
+                        <input type="range" class="track-opacity-slider" min="0" max="100" value="${Math.round(track.opacity * 100)}"
+                               onclick="event.stopPropagation()"
+                               oninput="updateTrackOpacity(${idx}, this.value)">
+                        <span class="track-opacity-value">${Math.round(track.opacity * 100)}%</span>
+                        <select class="track-blend" onclick="event.stopPropagation()" onchange="updateTrackBlend(${idx}, this.value)">
+                            ${DEFAULT_BLEND_MODES.map(mode =>
+                                `<option value="${mode}" ${track.blendMode === mode ? 'selected' : ''}>${mode}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
                 </div>
-                ${!track.collapsed ? `
+                ${!track.collapsed && effectCount > 0 ? `
                 <div class="track-content">
-                    <div class="track-effects">${effectSummary} (${effectCount})</div>
+                    <div class="track-effects">${effectSummary}</div>
                 </div>
                 ` : ''}
             </div>
@@ -2810,7 +2928,7 @@ function renderTrackList() {
     html += '<div class="track-add-button" onclick="addTrack()"><span>+</span> Add Track</div>';
     html += '</div>';
 
-    wrapper.innerHTML = html;
+    container.innerHTML = html;
 }
 
 function selectTrack(idx) {
@@ -2829,8 +2947,33 @@ function toggleTrackCollapse(idx) {
 function renameTrack(idx, newName) {
     if (newName.trim()) {
         tracks[idx].name = newName.trim();
+        pushHistory(`Rename → ${newName.trim()}`);
         renderTrackList();
     }
+}
+
+function startTrackRename(idx) {
+    hideContextMenu();
+    // Replace the span with an input for inline editing
+    const nameEl = document.querySelector(`.track-strip[data-track-idx="${idx}"] .track-name`);
+    if (!nameEl) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'track-name-edit';
+    input.value = tracks[idx].name;
+    input.spellcheck = false;
+    input.onclick = (e) => e.stopPropagation();
+    input.onkeydown = (e) => {
+        if (e.key === 'Enter') { input.blur(); }
+        if (e.key === 'Escape') { input.value = tracks[idx].name; input.blur(); }
+        e.stopPropagation();
+    };
+    input.onblur = () => {
+        renameTrack(idx, input.value);
+    };
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
 }
 
 function updateTrackOpacity(idx, value) {
@@ -2883,6 +3026,8 @@ function showTrackContextMenu(event, idx) {
     const canUnfreeze = track.frozen;
 
     menu.innerHTML = `
+        <button onclick="startTrackRename(${idx})">Rename</button>
+        <hr>
         <button onclick="addTrackAt(${idx})">Add Above</button>
         <button onclick="addTrackAt(${idx + 1})">Add Below</button>
         <button onclick="duplicateTrack(${idx})">Duplicate</button>
@@ -2969,14 +3114,13 @@ async function freezeTrack(idx) {
 
     showLoading('Freezing track...');
     try {
-        const res = await fetch(`${API}/api/track/freeze`, {
+        const res = await fetchWithRetry(`${API}/api/track/${idx}/freeze`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                track_index: idx,
                 effects: track.effects
             })
-        });
+        }, { context: 'Freeze track' });
 
         if (!res.ok) {
             const err = await res.json();
@@ -3017,7 +3161,10 @@ async function unfreezeTrack(idx) {
 
     try {
         // Clear server-side cache
-        await fetch(`${API}/api/track/unfreeze?track_index=${idx}`, { method: 'POST' });
+        await fetchWithRetry(`${API}/api/track/${idx}/unfreeze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }, { context: 'Unfreeze' });
 
         track.frozen = false;
         pushHistory(`Unfreeze ${track.name}`);

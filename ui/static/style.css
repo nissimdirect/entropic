@@ -2116,12 +2116,7 @@ h3 .count {
     background: var(--bg-hover);
 }
 
-#timeline-canvas-wrapper {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    position: relative;
-}
+/* timeline-canvas-wrapper styled in track system section below */
 
 #timeline-canvas {
     width: 100%;
@@ -2137,11 +2132,36 @@ h3 .count {
     gap: 0;
 }
 
+/* Timeline body: tracks left, canvas right */
+#timeline-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
+}
+
+#track-list-container {
+    width: 200px;
+    min-width: 140px;
+    max-width: 280px;
+    overflow-y: auto;
+    border-right: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+#timeline-canvas-wrapper {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
 .track-strip {
     background: var(--bg-darker);
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     transition: background 0.1s ease;
+    position: relative;
+    display: flex;
 }
 
 .track-strip:hover {
@@ -2150,24 +2170,34 @@ h3 .count {
 
 .track-strip.selected {
     background: rgba(255, 61, 61, 0.1);
-    border-left: 3px solid var(--accent);
+}
+
+.track-color-strip {
+    width: 4px;
+    flex-shrink: 0;
 }
 
 .track-header {
     display: flex;
-    align-items: center;
-    padding: 6px 8px;
-    gap: 6px;
+    flex-direction: column;
+    padding: 4px 6px;
+    gap: 3px;
     font-size: 11px;
-    position: relative;
+    flex: 1;
+    min-width: 0;
 }
 
-.track-color-strip {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 4px;
+.track-header-top {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.track-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-left: 18px;
 }
 
 .track-collapse {
@@ -2177,7 +2207,6 @@ h3 .count {
     font-size: 10px;
     cursor: pointer;
     padding: 2px 4px;
-    margin-left: 4px;
 }
 
 .track-collapse:hover {
@@ -2186,25 +2215,48 @@ h3 .count {
 
 .track-name {
     flex: 1;
-    background: transparent;
-    border: 1px solid transparent;
     color: var(--text-primary);
     font-size: 11px;
     font-family: inherit;
-    padding: 2px 6px;
-    min-width: 80px;
-    max-width: 140px;
-    border-radius: 2px;
+    padding: 2px 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    min-width: 0;
 }
 
-.track-name:hover {
-    border-color: var(--border);
-}
-
-.track-name:focus {
-    outline: none;
-    border-color: var(--accent);
+.track-name-edit {
+    flex: 1;
     background: var(--bg-light);
+    border: 1px solid var(--accent);
+    color: var(--text-primary);
+    font-size: 11px;
+    font-family: inherit;
+    padding: 2px 4px;
+    border-radius: 2px;
+    outline: none;
+    min-width: 0;
+}
+
+.track-freeze-icon {
+    color: #6af;
+    font-size: 12px;
+    margin-right: 2px;
+}
+
+.track-frozen {
+    opacity: 0.7;
+}
+
+.track-frozen .track-header {
+    background: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 4px,
+        rgba(100, 170, 255, 0.05) 4px,
+        rgba(100, 170, 255, 0.05) 8px
+    );
 }
 
 .track-opacity-slider {
@@ -2303,17 +2355,13 @@ h3 .count {
     font-style: italic;
 }
 
-/* Frozen track styling */
-.track-strip.frozen .track-header {
-    background: rgba(100, 150, 255, 0.08);
-}
-
-.track-strip.frozen .track-content {
+/* Frozen track content — grayed out + non-interactive */
+.track-frozen .track-content {
     opacity: 0.4;
     pointer-events: none;
 }
 
-.track-strip.frozen .layer-item {
+.track-frozen .layer-item {
     opacity: 0.4;
     pointer-events: none;
 }

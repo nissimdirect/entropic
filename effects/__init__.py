@@ -443,6 +443,21 @@ EFFECTS = {
         "param_ranges": {"rate": {"min": 0.1, "max": 20.0}, "depth": {"min": 0.0, "max": 1.0}},
         "description": "LFO — controller that oscillates any parameter over time (not an effect itself). Targets: brightness, displacement, channelshift, blur, moire, glitch, invert, posterize. Waveforms: sine, square, saw, triangle, random.",
     },
+    "perform": {
+        "fn": lambda frame, **params: frame,
+        "category": "operators",
+        "params": {
+            "mode": "toggle",
+            "slots": 1,
+        },
+        "param_options": {"mode": ["toggle", "one-shot", "hold", "retrigger"]},
+        "param_ranges": {"slots": {"min": 1, "max": 8}},
+        "param_descriptions": {
+            "mode": "Trigger mode: toggle (on/off), one-shot (momentary), hold (sustained), retrigger (reset)",
+            "slots": "Number of mappable parameter slots (1-8)",
+        },
+        "description": "Performance trigger device — maps keyboard/MIDI to effect parameters (pass-through, no visual effect)",
+    },
 
     # === MODULATION ===
     "wavefold": {
