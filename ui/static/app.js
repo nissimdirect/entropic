@@ -1038,6 +1038,8 @@ function setupFileInput() {
     const input = document.getElementById('file-input');
     input.addEventListener('change', () => {
         if (input.files.length > 0) uploadVideo(input.files[0]);
+        // Reset so re-selecting the same file triggers change event
+        input.value = '';
     });
 
     // Frame scrubber
@@ -1110,7 +1112,9 @@ async function uploadVideo(file) {
                     try { resolve(JSON.parse(xhr.responseText)); }
                     catch (e) { reject(new Error('Invalid server response')); }
                 } else {
-                    reject(new Error(`${xhr.status} ${xhr.statusText}`));
+                    let detail = `${xhr.status} ${xhr.statusText}`;
+                    try { const err = JSON.parse(xhr.responseText); detail = err.detail || detail; } catch (_) {}
+                    reject(new Error(detail));
                 }
             };
             xhr.onerror = () => reject(new Error('Network error'));
@@ -1161,6 +1165,7 @@ async function uploadVideo(file) {
             timelineEditor.fitToWindow();
         }
     } catch (err) {
+        console.error('Upload failed:', err);
         hideLoading();
         showErrorToast(`Upload failed: ${err.message}`, err.stack);
         fileNameEl.classList.remove('uploading');
@@ -1803,8 +1808,8 @@ function _renderDeviceHTML(device) {
                     <button class="device-power ${powerClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                     <span class="group-name" ondblclick="event.stopPropagation(); renameGroup(${device.id})">${esc(device.name)}</span>
                     <span class="group-badge">${childCount} fx</span>
-                    <span class="device-mix" title="Group Mix: ${mixPct}% — 0% = bypass group, 100% = full effect chain">
-                        <label>Mix</label>
+                    <span class="device-mix" title="Group Dry/Wet: ${mixPct}% — 0% = bypass group, 100% = full effect chain">
+                        <label>Dry/Wet</label>
                         <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
                                data-device="${device.id}"
                                oninput="event.stopPropagation(); updateDeviceMix(${device.id}, this.value)"
@@ -1861,8 +1866,8 @@ function _renderDeviceHTML(device) {
                 <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                 <span class="device-name">${esc(device.name)}</span>
                 ${presetDropdown}
-                <span class="device-mix" title="Mix: ${mixPct}% — 0% = original frame, 100% = full effect">
-                    <label>Mix</label>
+                <span class="device-mix" title="Dry/Wet Mix: ${mixPct}% — 0% = dry (original), 100% = wet (full effect)">
+                    <label>Dry/Wet</label>
                     <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
                            data-device="${device.id}"
                            oninput="updateDeviceMix(${device.id}, this.value)"
@@ -6425,8 +6430,8 @@ renderChain = function() {
                     ${gripHTML()}
                     <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                     <span class="device-name">${esc(device.name)}</span>
-                    <span class="device-mix" title="Mix: ${mixPct}% — 0% = original frame, 100% = full effect">
-                        <label>Mix</label>
+                    <span class="device-mix" title="Dry/Wet Mix: ${mixPct}% — 0% = dry (original), 100% = wet (full effect)">
+                        <label>Dry/Wet</label>
                         <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
                                data-device="${device.id}"
                                oninput="updateDeviceMix(${device.id}, this.value)"
