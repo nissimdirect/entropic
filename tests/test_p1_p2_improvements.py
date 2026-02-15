@@ -38,21 +38,52 @@ def frame_pair():
 
 
 # ---------------------------------------------------------------------------
-# P1-6: Sidechain aliases removed
+# B14/P1-6: Sidechain crossfeed + interference now registered
 # ---------------------------------------------------------------------------
 
-class TestAliasRemoval:
-    def test_sidechaincrossfeed_removed(self):
-        assert "sidechaincrossfeed" not in EFFECTS
+class TestSidechainRegistration:
+    def test_sidechaincrossfeed_registered(self):
+        assert "sidechaincrossfeed" in EFFECTS
+        assert EFFECTS["sidechaincrossfeed"]["category"] == "sidechain"
 
-    def test_sidechaininterference_removed(self):
-        assert "sidechaininterference" not in EFFECTS
+    def test_sidechaininterference_registered(self):
+        assert "sidechaininterference" in EFFECTS
+        assert EFFECTS["sidechaininterference"]["category"] == "sidechain"
 
     def test_sidechaincross_still_exists(self):
         assert "sidechaincross" in EFFECTS
 
     def test_sidechainduck_still_exists(self):
         assert "sidechainduck" in EFFECTS
+
+    def test_crossfeed_self_interference(self):
+        """Crossfeed should work without key_frame (self-interference mode)."""
+        frame = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+        result = EFFECTS["sidechaincrossfeed"]["fn"](
+            frame, frame_index=0, total_frames=1,
+        )
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_interference_phase_mode(self):
+        """Interference should produce output in phase mode."""
+        frame = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+        key = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+        result = EFFECTS["sidechaininterference"]["fn"](
+            frame, mode="phase", strength=0.7,
+            frame_index=0, total_frames=1, key_frame=key,
+        )
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_crossfeed_all_channel_maps(self):
+        """All channel_map options should work without crash."""
+        frame = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+        for m in ["rgb_shift", "blend", "multiply", "screen", "difference"]:
+            result = EFFECTS["sidechaincrossfeed"]["fn"](
+                frame, channel_map=m, frame_index=0, total_frames=1,
+            )
+            assert result.shape == frame.shape, f"channel_map={m} failed"
 
 
 # ---------------------------------------------------------------------------

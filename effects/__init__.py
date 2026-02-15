@@ -59,7 +59,8 @@ from effects.destruction import (
 from effects.ascii import ascii_art, braille_art
 from effects.sidechain import (
     sidechain_duck, sidechain_pump, sidechain_gate,
-    sidechain_cross, sidechain_operator,
+    sidechain_cross, sidechain_crossfeed, sidechain_interference,
+    sidechain_operator,
 )
 from effects.dsp_filters import (
     video_flanger, video_phaser, spatial_flanger, channel_phaser,
@@ -594,6 +595,26 @@ EFFECTS = {
                    "lookahead": 0},
         "param_descriptions": {"source": "What drives the sidechain (brightness/motion/edges)", "threshold": "Activation level (0=always on, 1=only peaks)", "softness": "Crossover smoothness", "mode": "How videos combine (blend/reveal/mask)", "strength": "Overall effect amount", "invert": "Flip which video shows", "pre_a": "Pre-process main video", "pre_b": "Pre-process sidechain video", "attack": "Envelope attack time", "decay": "Envelope decay time", "sustain": "Sustain level", "release": "Release time", "lookahead": "Frame lookahead for timing"},
         "description": "Cross-video sidechain — one video busts through another with ADSR envelope and pre-processing",
+        "alias_of": "sidechainoperator",
+    },
+    "sidechaincrossfeed": {
+        "fn": sidechain_crossfeed,
+        "category": "sidechain",
+        "params": {"channel_map": "rgb_shift", "strength": 0.7},
+        "param_ranges": {"strength": {"min": 0.0, "max": 1.0}},
+        "param_options": {"channel_map": ["rgb_shift", "blend", "multiply", "screen", "difference", "color_steal", "luminance_steal", "displace", "spectral_split", "phase", "beat"]},
+        "param_descriptions": {"channel_map": "How channels cross-feed between videos", "strength": "Effect intensity"},
+        "description": "Cross-channel feed — mix color channels between two videos (self-interference when solo)",
+        "alias_of": "sidechainoperator",
+    },
+    "sidechaininterference": {
+        "fn": sidechain_interference,
+        "category": "sidechain",
+        "params": {"mode": "phase", "strength": 0.7},
+        "param_ranges": {"strength": {"min": 0.0, "max": 1.0}},
+        "param_options": {"mode": ["phase", "beat", "spectral_split", "difference"]},
+        "param_descriptions": {"mode": "Interference type (phase=FFT ghosting, beat=additive)", "strength": "Effect intensity"},
+        "description": "Signal interference — FFT phase blending, beat patterns, spectral splits between videos",
         "alias_of": "sidechainoperator",
     },
     "sidechainoperator": {
