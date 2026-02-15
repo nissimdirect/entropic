@@ -2177,6 +2177,13 @@ function createKnob(deviceId, paramName, spec, value, label) {
     const zoneLen = (sweetMax - sweetMin) * arcLen * 0.75;
     const zoneOffset = -arcLen * 0.125 - zoneStart;
 
+    // Danger zone arcs (red at extreme ends: 0-5% and 95-100%)
+    const dangerEndStart = 0.95 * arcLen * 0.75;
+    const dangerEndLen = 0.05 * arcLen * 0.75;
+    const dangerEndOffset = -arcLen * 0.125 - dangerEndStart;
+    const dangerStartLen = 0.05 * arcLen * 0.75;
+    const dangerStartOffset = -arcLen * 0.125;
+
     return `
         <div class="knob-container" data-tooltip="${tooltip}">
             <label>${label}</label>
@@ -2189,9 +2196,17 @@ function createKnob(deviceId, paramName, spec, value, label) {
                         stroke-dasharray="${arcLen * 0.75} ${arcLen}"
                         stroke-dashoffset="${-arcLen * 0.125}"
                         transform="rotate(135 24 24)"/>
+                    <circle class="arc-danger" cx="24" cy="24" r="20"
+                        stroke-dasharray="${dangerStartLen} ${arcLen}"
+                        stroke-dashoffset="${dangerStartOffset}"
+                        transform="rotate(135 24 24)"/>
                     <circle class="arc-zone" cx="24" cy="24" r="20"
                         stroke-dasharray="${zoneLen} ${arcLen}"
                         stroke-dashoffset="${zoneOffset}"
+                        transform="rotate(135 24 24)"/>
+                    <circle class="arc-danger" cx="24" cy="24" r="20"
+                        stroke-dasharray="${dangerEndLen} ${arcLen}"
+                        stroke-dashoffset="${dangerEndOffset}"
                         transform="rotate(135 24 24)"/>
                     <circle class="arc-fill" cx="24" cy="24" r="20"
                         stroke-dasharray="${dashLen} ${arcLen}"
@@ -2237,23 +2252,34 @@ function setupKnobInteraction(knobEl) {
         knobEl.dataset.value = newValue;
         updateKnobVisual(knobEl, newValue, fullMin, fullMax, type);
 
-        // Update chain data
-        const deviceId = parseInt(knobEl.dataset.device);
+        // Update data model
+        const rawDeviceId = knobEl.dataset.device;
         const paramName = knobEl.dataset.param;
-        const device = chain.find(d => d.id === deviceId);
-        if (device) {
-            const def = effectDefs.find(e => e.name === device.name);
-            const spec = def?.params[paramName];
-            if (spec?.type === 'xy') {
-                device.params[paramName] = [newValue, 0];
-            } else if (spec?.type === 'bool') {
-                device.params[paramName] = newValue > 0.5;
-            } else {
-                device.params[paramName] = newValue;
+
+        if (typeof rawDeviceId === 'string' && rawDeviceId.startsWith('mfx-')) {
+            // Master bus effect knob
+            const fxIdx = parseInt(rawDeviceId.slice(4));
+            if (perfMasterEffects[fxIdx]) {
+                perfMasterEffects[fxIdx].params[paramName] = newValue;
+                perfSyncMasterEffects();
             }
-            // Automation recording: capture knob movements during playback
-            if (autoRecording && perfPlaying) {
-                autoRecordParam(deviceId, paramName, newValue, fullMin, fullMax);
+        } else {
+            const deviceId = parseInt(rawDeviceId);
+            const device = chain.find(d => d.id === deviceId);
+            if (device) {
+                const def = effectDefs.find(e => e.name === device.name);
+                const spec = def?.params[paramName];
+                if (spec?.type === 'xy') {
+                    device.params[paramName] = [newValue, 0];
+                } else if (spec?.type === 'bool') {
+                    device.params[paramName] = newValue > 0.5;
+                } else {
+                    device.params[paramName] = newValue;
+                }
+                // Automation recording: capture knob movements during playback
+                if (autoRecording && perfPlaying) {
+                    autoRecordParam(deviceId, paramName, newValue, fullMin, fullMax);
+                }
             }
         }
 
@@ -2267,12 +2293,17 @@ function setupKnobInteraction(knobEl) {
         document.removeEventListener('touchend', onUp);
 
         // Push history after knob adjustment is done
-        const deviceId = parseInt(knobEl.dataset.device);
-        const paramName = knobEl.dataset.param;
-        const device = chain.find(d => d.id === deviceId);
-        if (device) {
-            pushHistory(`${device.name}: ${paramName}`);
-            syncChainToRegion();
+        const rawId = knobEl.dataset.device;
+        if (typeof rawId === 'string' && rawId.startsWith('mfx-')) {
+            // Master bus — no chain history needed
+        } else {
+            const deviceId = parseInt(rawId);
+            const paramName = knobEl.dataset.param;
+            const device = chain.find(d => d.id === deviceId);
+            if (device) {
+                pushHistory(`${device.name}: ${paramName}`);
+                syncChainToRegion();
+            }
         }
     };
 
@@ -4659,12 +4690,25 @@ function renderMixer() {
             </div>
             ${perfMasterExpanded ? `
             <div class="master-fx-list">
-                ${perfMasterEffects.map((fx, idx) => `
+                ${perfMasterEffects.map((fx, idx) => {
+                    const def = effectDefs.find(e => e.name === fx.name);
+                    let paramsHtml = '';
+                    if (def && def.params) {
+                        for (const [key, spec] of Object.entries(def.params)) {
+                            if (spec.type === 'string') continue; // skip dropdowns in compact view
+                            const value = fx.params[key] ?? spec.default;
+                            paramsHtml += createKnob(`mfx-${idx}`, key, spec, value, key);
+                        }
+                    }
+                    return `
                     <div class="master-fx-item">
-                        <span class="master-fx-name">${esc(fx.name)}</span>
-                        <button class="master-fx-remove" onclick="perfRemoveMasterEffect(${idx})" title="Remove">×</button>
-                    </div>
-                `).join('')}
+                        <div class="master-fx-item-header">
+                            <span class="master-fx-name">${esc(fx.name)}</span>
+                            <button class="master-fx-remove" onclick="perfRemoveMasterEffect(${idx})" title="Remove">×</button>
+                        </div>
+                        ${paramsHtml ? `<div class="master-fx-params">${paramsHtml}</div>` : ''}
+                    </div>`;
+                }).join('')}
                 <select class="master-fx-add" onchange="perfAddMasterEffect(this.value); this.selectedIndex=0;">
                     <option value="">+ Add effect...</option>
                     ${effectDefs.map(e => `<option value="${e.name}">${e.name}</option>`).join('')}
@@ -4680,6 +4724,9 @@ function renderMixer() {
     </div>`;
 
     mixer.innerHTML = html;
+
+    // Bind master bus effect knobs
+    mixer.querySelectorAll('.master-fx-params .knob').forEach(setupKnobInteraction);
 }
 
 // --- Layer Triggers (3-tier feedback) ---

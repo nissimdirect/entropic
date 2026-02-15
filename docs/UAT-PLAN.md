@@ -897,7 +897,36 @@ End-to-end workflows that test multiple features working together.
 
 **Result:** ____
 
-### L12. Choke Group + ADSR Integration
+### L12. Master Bus Effects Workflow
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | Load video → Perform mode | Mixer visible |
+| 2 | Trigger layers 1 and 2 | Both active |
+| 3 | Expand Bus FX on master strip | Dropdown visible |
+| 4 | Add `blur` as master effect | Blur knobs appear |
+| 5 | Adjust blur radius knob | Both layers blurred, preview updates |
+| 6 | Add `scanlines` as second master effect | Stacks on top of blur |
+| 7 | Remove blur (click ×) | Only scanlines remains |
+| 8 | Save session → reload | Master effects preserved with param values |
+
+**Result:** ____
+
+### L13. Per-Layer LFO → Export
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | Load video → Perform mode | Ready |
+| 2 | Trigger layer 1 (always_on) | Layer visible |
+| 3 | Click LFO button on L1 strip | LFO indicator lights |
+| 4 | Set rate=2, depth=1, waveform=square | Config panel shows values |
+| 5 | Play (Space) | L1 opacity pulses on/off at 2Hz |
+| 6 | Enable LFO on L2 with sine, rate=0.5 | L2 oscillates slowly |
+| 7 | Render performance | Exported video shows both LFO patterns |
+
+**Result:** ____
+
+### L14. Choke Group + ADSR Integration (was L12)
 
 | Step | Action | Verify |
 |------|--------|--------|
@@ -999,6 +1028,181 @@ Press ? to open shortcut overlay. Verify ALL shortcuts listed:
 
 ---
 
+## Part O: Master Bus Effects
+
+### O1. Adding & Removing
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| O1.1 | Add effect | Expand Bus FX → select from dropdown | Effect appears with param knobs | |
+| O1.2 | Multiple effects | Add 3 effects | All listed with names and remove buttons | |
+| O1.3 | Remove effect | Click × on a master effect | Effect removed, list updates | |
+| O1.4 | Max 10 | Try adding 11th effect | Toast: "Max 10 master bus effects" | |
+| O1.5 | Collapse/expand | Click Bus FX header | List toggles between hidden/visible | |
+| O1.6 | Effect count badge | Add 3 effects | Header shows "Bus FX (3)" | |
+
+### O2. Param Knobs
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| O2.1 | Knobs render | Add effect with params | Knobs appear below effect name | |
+| O2.2 | Knob drag | Drag master effect knob up/down | Value changes, syncs to server | |
+| O2.3 | Fine adjust | Shift+drag knob | Value changes at 1/5th speed | |
+| O2.4 | Preview updates | Adjust knob | Preview shows effect applied to composite output | |
+| O2.5 | Defaults from defs | Add effect | Knob values match effectDefs defaults | |
+| O2.6 | Persist on save | Add master effects → Cmd+S → reload | Master effects restored with param values | |
+
+### O3. Signal Flow
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| O3.1 | Chain order | Add blur then scanlines | Preview shows both effects in order | |
+| O3.2 | Affects all layers | Trigger multiple layers → add master blur | All layer outputs blurred | |
+
+---
+
+## Part P: Per-Layer Opacity LFO
+
+### P1. LFO Controls
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| P1.1 | Toggle on | Click LFO button on a channel strip | LFO indicator lights up | |
+| P1.2 | Toggle off | Click LFO button again | Indicator dims, opacity returns to manual | |
+| P1.3 | Waveform select | Click gear icon → change waveform dropdown | Opacity oscillation shape changes | |
+| P1.4 | Rate adjust | Change Rate slider | Speed of opacity oscillation changes | |
+| P1.5 | Depth adjust | Change Depth slider | Amplitude of opacity oscillation changes | |
+| P1.6 | All waveforms | Try each: sine, square, saw, triangle, bin, ramp_up, ramp_down | Each produces distinct opacity pattern | |
+
+### P2. LFO Integration
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| P2.1 | During playback | Enable LFO → Play | Layer opacity visibly oscillates | |
+| P2.2 | Multiple layers | Enable LFO on L1 and L2 with different rates | Each oscillates independently | |
+| P2.3 | Save/load | Enable LFO → save session → reload | LFO state preserved (waveform, rate, depth) | |
+| P2.4 | Muted layer | Mute layer with LFO enabled | LFO pauses while muted | |
+
+---
+
+## Part Q: Session Persistence
+
+### Q1. Perform Session Save/Load
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| Q1.1 | Save session | Cmd+S during perform mode | File picker → session saved to JSON | |
+| Q1.2 | Load session | Load saved session file | All layers, effects, LFO state, master FX restored | |
+| Q1.3 | Layer state | Save with layers triggered → load | Trigger states and opacities restored | |
+| Q1.4 | Master effects | Save with master bus effects → load | Master chain and param values restored | |
+| Q1.5 | Recording data | Record events → save → load | Event buffer and count preserved | |
+
+### Q2. Preset/Project State
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| Q2.1 | Effect presets | Save param preset → reload → load preset | Values match saved preset | |
+| Q2.2 | Favorites persist | Star effects → reload app | Same effects starred | |
+| Q2.3 | Sidebar state | Collapse sidebar → reload | Sidebar state remembered | |
+| Q2.4 | Category expand | Expand 2 categories → reload | Same categories expanded on next load | |
+
+---
+
+## Part R: Knob UX Features
+
+### R1. Visual Indicators
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| R1.1 | Sweet spot zone | Inspect any knob | Green arc visible between ~10-90% of range | |
+| R1.2 | Danger zones | Inspect any knob | Red arcs at 0-5% and 95-100% of range | |
+| R1.3 | Fill arc | Drag knob | Cyan fill arc tracks value position | |
+| R1.4 | Track arc | Look at knob | Grey background arc shows full range | |
+
+### R2. Interaction Modes
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| R2.1 | Direct input | Click on knob value text | Input field appears for typing a number | |
+| R2.2 | Input commit | Type value → Enter | Knob updates, preview refreshes | |
+| R2.3 | Input cancel | Type value → Escape | Reverts to previous value | |
+| R2.4 | Log scaling | Knob on wide-range param (e.g., frequency 1-1000) | Middle of knob travel = geometric mean, not arithmetic | |
+| R2.5 | Double-click reset | Double-click on knob | Value returns to default | |
+
+### R3. Tooltips
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| R3.1 | Knob tooltip | Hover over any knob | Shows "param: value (range: min–max)" + description | |
+| R3.2 | Effect tooltip | Hover over effect in browser | Shows effect description, wraps properly | |
+| R3.3 | Long tooltip | Hover over effect with long description | Tooltip wraps within 280px, readable | |
+| R3.4 | Master FX tooltip | Hover over master bus knob | Tooltip appears correctly | |
+
+---
+
+## Part S: Recipes & Packages
+
+### S1. Recipe Browser
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| S1.1 | Packages tab | Click Packages/Recipes tab in browser | Package list appears with categories | |
+| S1.2 | Recipe drag | Drag a recipe to chain | All effects in recipe added as a chain | |
+| S1.3 | Recipe descriptions | Hover over recipe item | Description tooltip appears | |
+| S1.4 | Package count | Check package list | 16+ packages visible | |
+
+---
+
+## Part T: Export Pipeline
+
+### T1. Standard Export
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| T1.1 | MP4 export | Cmd+E → select output → click Export | MP4 file created in ~/Movies/Entropic/ | |
+| T1.2 | Progress indicator | During export | Progress bar or percentage visible | |
+| T1.3 | Success toast | After export completes | Toast notification with file path | |
+| T1.4 | Export with effects | Add 3 effects → export | All effects baked into output | |
+| T1.5 | Export with LFO | Map LFO to param → export | LFO modulation rendered frame-by-frame | |
+
+### T2. Perform Render
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| T2.1 | Bake + render | Record performance → Bake → switch to timeline → export | Performance events rendered into video | |
+| T2.2 | Master FX in render | Add master bus effects → export from perform | Master effects applied to exported video | |
+
+### T3. Edge Cases
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| T3.1 | Large video export | Export 1080p 60s video | Completes without OOM, progress shown | |
+| T3.2 | Image export | Load image → add effects → export | Single frame exported as image or MP4 | |
+| T3.3 | No overwrite | Export same filename twice | Incremented filename or confirmation prompt | |
+
+---
+
+## Part U: Layer Management
+
+### U1. Layer Reordering
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| U1.1 | Drag to reorder | Drag channel strip to new position | Layer order changes | |
+| U1.2 | Visual update | After reorder | Strip positions reflect new order | |
+| U1.3 | Render order | Reorder → play | Composite renders in new layer order | |
+
+### U2. Per-Layer Effects
+
+| ID | Test | Steps | Expected | Result |
+|----|------|-------|----------|--------|
+| U2.1 | Select layer | Click layer strip | Effect chain shows that layer's effects | |
+| U2.2 | Edit effects | Select layer → modify chain | Changes apply only to selected layer | |
+| U2.3 | Blend modes | Change blend mode dropdown | Composite blend changes (overlay, multiply, etc.) | |
+| U2.4 | Opacity | Drag opacity fader | Layer transparency changes | |
+
+---
+
 ## Scoring Summary
 
 ### Category Scores
@@ -1015,15 +1219,22 @@ Press ? to open shortcut overlay. Verify ALL shortcuts listed:
 | I. Perform Mode | 38 | | | | /38 |
 | J. Performance Features | 37 | | | | /37 |
 | K. Safety & Edge Cases | 15 | | | | /15 |
-| L. UIT Workflows | 12 | | | | /12 |
+| L. UIT Workflows | 14 | | | | /14 |
 | M. Info View | 8 | | | | /8 |
 | N. Shortcut Reference | 33 | | | | /33 |
-| **TOTAL** | **362** | | | | **/362** |
+| O. Master Bus Effects | 11 | | | | /11 |
+| P. Per-Layer LFO | 10 | | | | /10 |
+| Q. Session Persistence | 9 | | | | /9 |
+| R. Knob UX Features | 12 | | | | /12 |
+| S. Recipes & Packages | 4 | | | | /4 |
+| T. Export Pipeline | 8 | | | | /8 |
+| U. Layer Management | 7 | | | | /7 |
+| **TOTAL** | **425** | | | | **/425** |
 
 ### Pass Rate
 
-- **Target:** 90%+ (326/362)
-- **Actual:** ____/362 = ____%
+- **Target:** 90%+ (383/425)
+- **Actual:** ____/425 = ____%
 
 ### Critical Failures
 
@@ -1043,7 +1254,10 @@ These are known from previous UAT cycles and may still apply:
 - Some pixel physics effects produce RuntimeWarning (divide by zero) with zero params — visual output still correct
 - `braille_art` may show question marks on systems without braille font support
 - Sidechain effects require a second video source — skip if no second video available
+- Pixel physics effects (gravity, vortex, etc.) require multi-frame rendering — single-frame preview may show no change
+- Parameter sensitivity: many effects have narrow "sweet spot" ranges (see UAT Findings S2/S3)
+- Quick mode flagged off per architecture decision (A2)
 
 ---
 
-*UAT Plan v2.0 | 2026-02-15 | Rewritten from scratch to consolidate 4 UAT cycles into unified plan with UIT*
+*UAT Plan v3.0 | 2026-02-16 | Added Parts O-U: master bus effects, per-layer LFO, session persistence, knob UX, recipes, export pipeline, layer management. 423 total tests.*

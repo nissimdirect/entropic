@@ -519,9 +519,9 @@ def pixel_elastic(
         spring_fy = -stiffness * state["dy"]
 
         # F_total = F_external + F_spring
-        # Exponential mass scaling: mass=1 → factor 0.61, mass=3 → 0.22, mass=5 → 0.08
-        # High mass still moves visibly (exponential decay instead of dead zone)
-        mass_factor = np.exp(-mass * 0.5)
+        # Inverse mass: mass=0.5→1.33, mass=1→0.8, mass=3→0.4, mass=5→0.29
+        # High mass is sluggish but still visibly moves (no dead zone)
+        mass_factor = 1.0 / (0.5 + mass * 0.5)
         ax = (fx * 0.1 + spring_fx) * mass_factor
         ay = (fy * 0.1 + spring_fy) * mass_factor
 
@@ -854,10 +854,11 @@ def pixel_magnetic(
             # Multi-pole dipole: `poles` adds additional dipole sources
             bx = np.zeros((h, w), dtype=np.float32)
             by = np.zeros((h, w), dtype=np.float32)
+            pole_spread = 0.35  # wider spread makes poles visually distinct
             for p in range(max(1, poles)):
                 theta = p * 2 * np.pi / max(1, poles)
-                px = 0.2 * np.cos(theta) if poles > 1 else 0.0
-                py = 0.2 * np.sin(theta) if poles > 1 else 0.0
+                px = pole_spread * np.cos(theta) if poles > 1 else 0.0
+                py = pole_spread * np.sin(theta) if poles > 1 else 0.0
                 ddx = rnx - px
                 ddy = rny - py
                 r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
@@ -868,10 +869,11 @@ def pixel_magnetic(
         elif field_type == "quadrupole":
             bx = np.zeros((h, w), dtype=np.float32)
             by = np.zeros((h, w), dtype=np.float32)
+            pole_spread = 0.35
             for p in range(poles):
                 theta = p * 2 * np.pi / poles
-                px = 0.25 * np.cos(theta)
-                py = 0.25 * np.sin(theta)
+                px = pole_spread * np.cos(theta)
+                py = pole_spread * np.sin(theta)
                 ddx = rnx - px
                 ddy = rny - py
                 r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
@@ -901,13 +903,14 @@ def pixel_magnetic(
                 by += -ddx / (r ** 3) * strength * 0.2
 
         # Lorentz-like force: F perpendicular to v
+        # Stronger scaling so poles/damping/rotation produce visible changes
         if frame_index == 0 and step == 0:
-            state["vx"] = bx * 0.01
-            state["vy"] = by * 0.01
+            state["vx"] = bx * 0.05
+            state["vy"] = by * 0.05
         else:
             b_mag = np.sqrt(bx * bx + by * by) + 0.01
-            fx = state["vy"] * b_mag * 0.1 + bx * 0.01
-            fy = -state["vx"] * b_mag * 0.1 + by * 0.01
+            fx = state["vy"] * b_mag * 0.3 + bx * 0.05
+            fy = -state["vx"] * b_mag * 0.3 + by * 0.05
             state["vx"] = state["vx"] * damping + fx
             state["vy"] = state["vy"] * damping + fy
 
@@ -1265,16 +1268,18 @@ def pixel_quantum(
             tunnel_push = in_barrier * tunnel_mask * np.sign(dist_to_barrier) * barrier_width_px * 2
             fx_total += tunnel_push * 0.3
 
-        # Heisenberg uncertainty: ramps up over time (no artificial floor)
+        # Heisenberg uncertainty: starts at 30% and ramps to full
+        # (was starting at 0 which made uncertainty slider appear dead)
         sim_frame = frame_index + step
         sim_total = max(total_frames, iterations * 2) if _is_preview(frame_index, total_frames) else total_frames
-        uncertainty_t = uncertainty * min(1.0, sim_frame / max(sim_total * 0.3, 1))
+        ramp = min(1.0, sim_frame / max(sim_total * 0.3, 1))
+        uncertainty_t = uncertainty * (0.3 + 0.7 * ramp)
         unc_rng = np.random.default_rng(seed + sim_frame * 7)
-        fx_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.2
-        fy_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.2
+        fx_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.4
+        fy_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.4
 
-        state["vx"] = state["vx"] * 0.85 + fx_total * 0.08
-        state["vy"] = state["vy"] * 0.85 + fy_total * 0.08
+        state["vx"] = state["vx"] * 0.85 + fx_total * 0.15
+        state["vy"] = state["vy"] * 0.85 + fy_total * 0.15
         state["dx"] += state["vx"]
         state["dy"] += state["vy"]
 
@@ -1286,14 +1291,17 @@ def pixel_quantum(
 
     # Superposition: ghost copies at offset positions
     if superposition > 0:
-        # Scale decoherence by total_frames so ghosts persist through full render
-        effective_decoherence = decoherence * (100.0 / max(total_frames, 1))
-        ghost_strength = superposition * max(0, 1.0 - effective_decoherence * frame_index)
+        # Decoherence: fraction of render duration before ghosts fade
+        # decoherence=0.02 → ghosts last ~50 frames; =0.1 → ~10 frames
+        ghost_decay_frames = max(1.0, 1.0 / max(decoherence, 0.001))
+        ghost_strength = superposition * max(0, 1.0 - frame_index / ghost_decay_frames)
         if ghost_strength > 0.01:
             result = result.astype(np.float32)
+            # Wider ghost offsets so superposition is clearly visible
+            ghost_spread = max(uncertainty_t * 5, 8.0)
             for copy_i in range(2):
-                offset_x = np.sin(t * (1.5 + copy_i) + copy_i * 2.5) * uncertainty_t * 3
-                offset_y = np.cos(t * (1.2 + copy_i) + copy_i * 1.8) * uncertainty_t * 3
+                offset_x = np.sin(t * (1.5 + copy_i) + copy_i * 2.5) * ghost_spread
+                offset_y = np.cos(t * (1.2 + copy_i) + copy_i * 1.8) * ghost_spread
                 ghost = _remap_frame(frame, state["dx"] + offset_x, state["dy"] + offset_y, boundary)
                 result += ghost.astype(np.float32) * ghost_strength * 0.5
             result /= (1.0 + ghost_strength)

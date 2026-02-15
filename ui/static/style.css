@@ -1518,9 +1518,38 @@ h3 .count {
 
 .knob .arc-zone {
     fill: none;
-    stroke: rgba(76, 175, 80, 0.3);
+    stroke: rgba(76, 175, 80, 0.25);
     stroke-width: 3;
     stroke-linecap: round;
+}
+.knob .arc-danger {
+    fill: none;
+    stroke: rgba(255, 60, 60, 0.25);
+    stroke-width: 3;
+    stroke-linecap: round;
+}
+
+/* Master bus effect param knobs */
+.master-fx-params {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 0;
+}
+.master-fx-params .knob-container {
+    flex: 0 0 auto;
+    transform: scale(0.85);
+    transform-origin: top left;
+}
+.master-fx-item {
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    padding: 4px 0;
+}
+.master-fx-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
 }
 
 /* CSS Tooltips — replaces native title */
@@ -1539,10 +1568,9 @@ h3 .count {
     border-radius: 4px;
     font-size: 11px;
     line-height: 1.4;
-    white-space: nowrap;
+    white-space: normal;
     max-width: 280px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    word-wrap: break-word;
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.15s;

@@ -235,3 +235,35 @@ class TestLfoModulator:
         result = mod.apply_to_chain(chain, frame_index=15, fps=30)
         # Both should be modulated identically (same LFO value)
         assert result[0]["params"]["threshold"] == result[1]["params"]["decay"]
+
+    def test_int_params_stay_int(self):
+        """Integer params should remain int after modulation (e.g. block_size)."""
+        chain = [{"name": "displacement", "params": {"block_size": 16, "intensity": 10.0}}]
+        mod = LfoModulator({
+            "rate": 1.0, "depth": 0.5, "waveform": "saw",
+            "mappings": [
+                {"effect_idx": 0, "param": "block_size",
+                 "base_value": 16, "min": 1, "max": 32},
+                {"effect_idx": 0, "param": "intensity",
+                 "base_value": 10.0, "min": 0.0, "max": 20.0},
+            ]
+        })
+        result = mod.apply_to_chain(chain, frame_index=15, fps=30)
+        assert isinstance(result[0]["params"]["block_size"], int), \
+            f"block_size should be int, got {type(result[0]['params']['block_size'])}"
+        assert isinstance(result[0]["params"]["intensity"], float), \
+            f"intensity should be float, got {type(result[0]['params']['intensity'])}"
+
+    def test_bool_params_not_cast_to_int(self):
+        """Bool params should not be affected by int casting logic."""
+        chain = [{"name": "noise", "params": {"animate": True, "amount": 0.3}}]
+        mod = LfoModulator({
+            "rate": 1.0, "depth": 0.5, "waveform": "sine",
+            "mappings": [
+                {"effect_idx": 0, "param": "amount",
+                 "base_value": 0.3, "min": 0.0, "max": 1.0},
+            ]
+        })
+        result = mod.apply_to_chain(chain, frame_index=10, fps=30)
+        # animate is not mapped, should be untouched
+        assert result[0]["params"]["animate"] is True
