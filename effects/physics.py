@@ -404,6 +404,12 @@ def pixel_elastic(
     key = f"elastic_{seed}"
     state = _get_state(key, h, w)
 
+    # Clamp parameters to useful ranges
+    mass = max(0.1, min(5.0, float(mass)))
+    stiffness = max(0.05, min(0.8, float(stiffness)))
+    force_strength = max(1.0, min(20.0, float(force_strength)))
+    damping = max(0.8, min(0.99, float(damping)))
+
     t = frame_index / 30.0
     rng = np.random.default_rng(seed)
 

@@ -23,7 +23,7 @@ from pydantic import BaseModel
 import numpy as np
 from PIL import Image
 
-from effects import EFFECTS, CATEGORIES, apply_chain, is_video_level
+from effects import EFFECTS, CATEGORIES, CATEGORY_ORDER, apply_chain, is_video_level
 from packages import PACKAGES
 from core.video_io import probe_video, extract_single_frame
 from core.export_models import ExportSettings
@@ -99,8 +99,8 @@ async def get_file_types():
 
 @app.get("/api/effects")
 async def list_effects():
-    """List all available effects with their parameters."""
-    result = []
+    """List all available effects grouped by category with ordering."""
+    effects = []
     for name, entry in EFFECTS.items():
         params = {}
         for k, v in entry["params"].items():
@@ -117,13 +117,17 @@ async def list_effects():
                     params[k] = {"type": "xy", "default": list(v), "min": -100, "max": 100}
             elif isinstance(v, str):
                 params[k] = {"type": "string", "default": v}
-        result.append({
+        effects.append({
             "name": name,
             "category": entry.get("category", "other"),
             "description": entry["description"],
             "params": params,
         })
-    return result
+    return {
+        "effects": effects,
+        "categories": CATEGORIES,
+        "category_order": CATEGORY_ORDER,
+    }
 
 
 @app.get("/api/packages")

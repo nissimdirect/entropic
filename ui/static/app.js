@@ -132,6 +132,8 @@ function esc(str) {
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 let effectDefs = [];      // Effect definitions from server
+let categoryOrder = [];   // Server-provided category ordering
+let categoryLabels = {};  // Server-provided category display names
 let controlMap = null;    // UI control type mapping (loaded from control-map.json)
 let chain = [];           // Current effect chain: [{name, params, bypassed, id}, ...]
 let videoLoaded = false;
@@ -255,7 +257,15 @@ async function init() {
         fetch(`${API}/api/effects`),
         fetch('/static/control-map.json').catch(() => null),
     ]);
-    effectDefs = await effectsRes.json();
+    const effectsData = await effectsRes.json();
+    // Support both new { effects, categories, category_order } and legacy flat array
+    if (Array.isArray(effectsData)) {
+        effectDefs = effectsData;
+    } else {
+        effectDefs = effectsData.effects || [];
+        categoryOrder = effectsData.category_order || [];
+        categoryLabels = effectsData.categories || {};
+    }
     if (controlsRes && controlsRes.ok) {
         controlMap = await controlsRes.json();
     }
@@ -747,9 +757,9 @@ function setupKeyboard() {
             return;
         }
 
-        // P = Refresh preview
-        if (e.key === 'p') {
-            e.preventDefault(); previewChain(); return;
+        // P = Toggle Perform panel (in timeline mode)
+        if (e.key === 'p' && appMode === 'timeline') {
+            e.preventDefault(); togglePerformPanel(); return;
         }
 
         // Left/Right = Prev/next frame

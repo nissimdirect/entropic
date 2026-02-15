@@ -146,8 +146,8 @@ EFFECTS = {
     "contours": {
         "fn": contour_lines,
         "category": "texture",
-        "params": {"levels": 8},
-        "description": "Topographic contour lines from luminance bands",
+        "params": {"levels": 8, "outline_only": False},
+        "description": "Topographic contour lines from luminance bands (outline_only=True overlays on original)",
     },
     "scanlines": {
         "fn": scanlines,
@@ -182,8 +182,8 @@ EFFECTS = {
     "edges": {
         "fn": edge_detect,
         "category": "texture",
-        "params": {"threshold": 0.3, "mode": "overlay"},
-        "description": "Edge detection (overlay, neon, or edges-only)",
+        "params": {"threshold": 0.3, "mode": "overlay", "edge_color": (255, 255, 255)},
+        "description": "Edge detection (overlay/neon/edges-only, colorizable edges, non-linear threshold)",
     },
     "posterize": {
         "fn": posterize,
@@ -412,8 +412,8 @@ EFFECTS = {
     "solarize": {
         "fn": solarize,
         "category": "enhance",
-        "params": {"threshold": 128},
-        "description": "Partial inversion above threshold (Sabattier/Man Ray effect)",
+        "params": {"threshold": 128, "brightness": 1.0},
+        "description": "Partial inversion above threshold (Sabattier/Man Ray effect, brightness compensation)",
     },
     "duotone": {
         "fn": duotone,
@@ -424,8 +424,8 @@ EFFECTS = {
     "emboss": {
         "fn": emboss,
         "category": "enhance",
-        "params": {"amount": 1.0},
-        "description": "3D raised/carved texture effect",
+        "params": {"amount": 1.0, "transparent_bg": False},
+        "description": "3D raised/carved texture effect (transparent_bg=True makes gray background black for overlay)",
     },
     "autolevels": {
         "fn": auto_levels,
@@ -466,7 +466,7 @@ EFFECTS = {
     "bytecorrupt": {
         "fn": byte_corrupt,
         "category": "destruction",
-        "params": {"amount": 20, "jpeg_quality": 75, "seed": 42},
+        "params": {"amount": 50, "jpeg_quality": 75, "seed": 42},
         "description": "JPEG data bending — corrupt compressed bytes for authentic glitch",
     },
     "blockcorrupt": {
@@ -526,8 +526,8 @@ EFFECTS = {
     "framesmash": {
         "fn": frame_smash,
         "category": "destruction",
-        "params": {"aggression": 0.5, "seed": 42},
-        "description": "One-stop apocalypse — rows, blocks, channels, XOR, dissolve combined",
+        "params": {"aggression": 0.5, "color_affect": True, "seed": 42},
+        "description": "One-stop apocalypse — rows, blocks, channels, XOR, dissolve (color_affect=False for geometry-only)",
     },
     "channeldestroy": {
         "fn": channel_destroy,
@@ -803,15 +803,24 @@ EFFECTS = {
 
 # Category display order and labels
 CATEGORIES = {
+    "modulation": "MODULATION",
+    "operators": "OPERATORS",
+    "temporal": "TEMPORAL",
+    "pixel": "PIXEL",
+    "physics": "PHYSICS",
+    "color": "COLOR",
     "glitch": "GLITCH",
     "distortion": "DISTORTION",
     "texture": "TEXTURE",
-    "color": "COLOR",
-    "temporal": "TEMPORAL",
-    "modulation": "MODULATION",
     "enhance": "ENHANCE",
     "destruction": "DESTRUCTION",
+    "dsp_filters": "DSP FILTERS",
+    "sidechain": "SIDECHAIN",
+    "ascii": "ASCII",
 }
+
+# Ordered list for UI folder rendering
+CATEGORY_ORDER = list(CATEGORIES.keys())
 
 
 def get_effect(name: str):

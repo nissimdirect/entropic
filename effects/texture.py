@@ -106,14 +106,15 @@ def posterize(frame: np.ndarray, levels: int = 4) -> np.ndarray:
 
 
 def edge_detect(frame: np.ndarray, threshold: float = 0.3,
-                mode: str = "overlay") -> np.ndarray:
+                mode: str = "overlay", edge_color: tuple = (255, 255, 255)) -> np.ndarray:
     """Detect edges using Sobel-like operators.
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
-        threshold: Edge sensitivity (0.0-1.0, lower = more edges).
-        mode: 'overlay' (edges on original), 'edges_only' (white edges on black),
-              'neon' (colored edges on black).
+        threshold: Edge sensitivity (0.0-1.0, lower = more edges). Non-linear scaling for better control.
+        mode: 'overlay' (edges on original), 'edges_only' (colored edges on black),
+              'neon' (gradient-direction colored edges on black).
+        edge_color: RGB tuple (0-255) for coloring edges in 'edges_only' mode.
 
     Returns:
         Edge-detected frame.
@@ -121,6 +122,10 @@ def edge_detect(frame: np.ndarray, threshold: float = 0.3,
     # Convert to grayscale for edge detection
     gray = np.mean(frame.astype(np.float32), axis=2)
     threshold = max(0.01, min(1.0, threshold))
+
+    # Non-linear threshold scaling for more useful slider range
+    # Maps linear 0-1 to exponential curve: more sensitivity in 0.1-0.5 range
+    threshold_scaled = threshold ** 2
 
     # Simple Sobel approximation
     gx = np.zeros_like(gray)
@@ -132,12 +137,20 @@ def edge_detect(frame: np.ndarray, threshold: float = 0.3,
     # Normalize and threshold
     if magnitude.max() > 0:
         magnitude = magnitude / magnitude.max()
-    edges = (magnitude > threshold).astype(np.float32)
+    edges = (magnitude > threshold_scaled).astype(np.float32)
 
     if mode == "edges_only":
-        result = np.stack([edges * 255] * 3, axis=2)
+        # Colored edges on black background
+        r, g, b = edge_color
+        r = max(0, min(255, r))
+        g = max(0, min(255, g))
+        b = max(0, min(255, b))
+        result = np.zeros_like(frame, dtype=np.float32)
+        result[:, :, 0] = edges * r
+        result[:, :, 1] = edges * g
+        result[:, :, 2] = edges * b
     elif mode == "neon":
-        # Color edges based on gradient direction
+        # Color edges based on gradient direction (original behavior)
         angle = np.arctan2(gy, gx + 1e-7)
         r = ((np.sin(angle) + 1) / 2 * 255 * edges)
         g = ((np.sin(angle + 2.094) + 1) / 2 * 255 * edges)
@@ -287,15 +300,17 @@ def tv_static(frame: np.ndarray, intensity: float = 0.8,
     return np.clip(blended, 0, 255).astype(np.uint8)
 
 
-def contour_lines(frame: np.ndarray, levels: int = 8) -> np.ndarray:
+def contour_lines(frame: np.ndarray, levels: int = 8, outline_only: bool = False) -> np.ndarray:
     """Extract contour lines like a topographic map of luminance.
 
     Quantizes brightness into bands, then highlights the boundaries
-    between bands as bright lines on a darkened frame.
+    between bands as bright lines on a darkened frame (default) or
+    overlaid on the original image (outline_only=True).
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
         levels: Number of luminance bands (2-16).
+        outline_only: If True, overlay contour lines on original image without dimming.
 
     Returns:
         Contour-lined frame.
@@ -307,7 +322,15 @@ def contour_lines(frame: np.ndarray, levels: int = 8) -> np.ndarray:
     dx = np.abs(np.diff(quantized, axis=1, prepend=quantized[:, :1]))
     dy = np.abs(np.diff(quantized, axis=0, prepend=quantized[:1, :]))
     edges = ((dx > 0) | (dy > 0)).astype(np.float32)
-    dark = frame.astype(np.float32) * 0.3
-    lines = edges[:, :, np.newaxis] * 255
-    result = dark + lines
-    return np.clip(result, 0, 255).astype(np.uint8)
+
+    if outline_only:
+        # Overlay white contour lines on original image
+        lines = edges[:, :, np.newaxis] * 255
+        result = frame.astype(np.float32) + lines
+        return np.clip(result, 0, 255).astype(np.uint8)
+    else:
+        # Original behavior: contour lines on darkened frame
+        dark = frame.astype(np.float32) * 0.3
+        lines = edges[:, :, np.newaxis] * 255
+        result = dark + lines
+        return np.clip(result, 0, 255).astype(np.uint8)

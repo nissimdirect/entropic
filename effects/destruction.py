@@ -794,9 +794,13 @@ def flow_distort(
     st = _get_destruction_state(state_key, lambda: {"prev": None})
 
     if frame_index == 0 or st["prev"] is None or st["prev"].shape != frame.shape:
-        st["prev"] = frame.copy()
-        _cleanup_destruction_if_done(state_key, frame_index, total_frames)
-        return frame.copy()
+        # On first frame: synthesize a fake "previous" by shifting the current frame
+        # This allows preview mode to show the effect working
+        shift_x, shift_y = 5, 3
+        M = np.float32([[1, 0, shift_x], [0, 1, shift_y]])
+        prev_synth = cv2.warpAffine(frame, M, (w, h), borderMode=cv2.BORDER_WRAP)
+        st["prev"] = prev_synth
+        # Fall through to process with synthetic prev
 
     prev_gray = cv2.cvtColor(st["prev"], cv2.COLOR_RGB2GRAY)
     curr_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
@@ -1099,6 +1103,7 @@ def pixel_annihilate(
 def frame_smash(
     frame: np.ndarray,
     aggression: float = 0.5,
+    color_affect: bool = True,
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
@@ -1111,6 +1116,8 @@ def frame_smash(
     Args:
         frame: (H, W, 3) uint8 RGB array.
         aggression: How much destruction (0.0 = mild, 1.0 = total apocalypse).
+        color_affect: If True, applies channel separation and XOR corruption (color glitches).
+                      If False, only applies geometric glitches (row shifts, blocks).
         seed: Random seed.
 
     Returns:
@@ -1153,8 +1160,8 @@ def frame_smash(
             else:
                 result[by:by+bh, bx:bx+bw] = 0
 
-    # 3. Channel separation
-    if aggression > 0.3:
+    # 3. Channel separation (color glitch)
+    if color_affect and aggression > 0.3:
         ch_shift = int(w * aggression * 0.15)
         r = np.roll(result[:, :, 0], ch_shift, axis=1)
         b = np.roll(result[:, :, 2], -ch_shift, axis=1)
@@ -1171,8 +1178,8 @@ def frame_smash(
         flat = flat + echo
         result = flat.reshape(result.shape)
 
-    # 5. XOR corruption
-    if aggression > 0.7:
+    # 5. XOR corruption (color glitch)
+    if color_affect and aggression > 0.7:
         xor_val = rng.randint(64, 255)
         mask = rng.random((h, w)) < aggression * 0.4
         for c in range(3):

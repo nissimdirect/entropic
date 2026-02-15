@@ -10,6 +10,7 @@ from PIL import Image, ImageFilter, ImageOps
 def solarize(
     frame: np.ndarray,
     threshold: int = 128,
+    brightness: float = 1.0,
 ) -> np.ndarray:
     """Partially invert pixels above a threshold (Sabattier/Man Ray effect).
 
@@ -19,14 +20,19 @@ def solarize(
     Args:
         frame: Input frame (H, W, 3) uint8.
         threshold: Inversion threshold (0-255).
+        brightness: Brightness compensation (0.5-2.0). 1.0 = no change, >1.0 = brighten.
 
     Returns:
         Solarized frame.
     """
     threshold = max(0, min(255, int(threshold)))
+    brightness = max(0.5, min(2.0, float(brightness)))
     img = Image.fromarray(frame)
     result = ImageOps.solarize(img, threshold=threshold)
-    return np.array(result)
+    result_arr = np.array(result).astype(np.float32)
+    # Apply brightness compensation
+    result_arr = result_arr * brightness
+    return np.clip(result_arr, 0, 255).astype(np.uint8)
 
 
 def _clamp_rgb(color, default=(128, 128, 128)) -> tuple:
@@ -83,12 +89,14 @@ def duotone(
 def emboss(
     frame: np.ndarray,
     amount: float = 1.0,
+    transparent_bg: bool = False,
 ) -> np.ndarray:
     """3D embossed/stamped look by highlighting directional edges.
 
     Args:
         frame: Input frame (H, W, 3) uint8.
         amount: Blend amount (0.0 = original, 1.0 = fully embossed).
+        transparent_bg: If True, makes gray areas (value ~128) black, enabling overlay compositing.
 
     Returns:
         Embossed frame.
@@ -97,14 +105,34 @@ def emboss(
     img = Image.fromarray(frame)
     embossed = img.filter(ImageFilter.EMBOSS)
 
+    embossed_arr = np.array(embossed)
+
+    if transparent_bg:
+        # Make gray areas (neutral emboss background) transparent/black
+        # Emboss filter produces gray (~128) for flat areas, bright/dark for edges
+        gray_threshold = 30  # Distance from 128 to consider "gray"
+        luminance = np.mean(embossed_arr.astype(np.float32), axis=2)
+        gray_mask = np.abs(luminance - 128) < gray_threshold
+        # Set gray areas to black (simulates transparency in RGB-only system)
+        result_arr = embossed_arr.copy()
+        result_arr[gray_mask] = 0
+
+        if amount < 1.0:
+            # Blend with original
+            result_arr = np.clip(
+                frame.astype(np.float32) * (1.0 - amount) + result_arr.astype(np.float32) * amount,
+                0, 255,
+            ).astype(np.uint8)
+        return result_arr
+
     if amount >= 1.0:
-        return np.array(embossed)
+        return embossed_arr
     if amount <= 0.0:
         return frame.copy()
 
     # Blend
     result = np.clip(
-        frame.astype(np.float32) * (1.0 - amount) + np.array(embossed).astype(np.float32) * amount,
+        frame.astype(np.float32) * (1.0 - amount) + embossed_arr.astype(np.float32) * amount,
         0, 255
     ).astype(np.uint8)
     return result

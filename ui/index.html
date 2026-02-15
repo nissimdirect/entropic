@@ -89,7 +89,8 @@
             <!-- Quick mode flagged off (FEATURE_QUICK_MODE=false). Button preserved, hidden. -->
             <button class="mode-btn" data-mode="quick" onclick="setMode('quick')" style="display:none">Quick</button>
             <button class="mode-btn active" data-mode="timeline" onclick="setMode('timeline')">Timeline</button>
-            <button class="mode-btn" data-mode="perform" onclick="setMode('perform')">Perform</button>
+            <!-- Perform mode folded into Timeline toggle (perform-toggle-btn). Button preserved, hidden. -->
+            <button class="mode-btn" data-mode="perform" onclick="setMode('perform')" style="display:none">Perform</button>
         </div>
         <div class="transport">
             <button onclick="randomizeChain()" title="Random effects">Randomize</button>
@@ -388,7 +389,7 @@
             <div class="shortcut-col">
                 <h3 data-shortcut-mode="common">Preview</h3>
                 <div class="sc-row"><kbd>Space</kbd> A/B compare</div>
-                <div class="sc-row"><kbd>P</kbd> Refresh preview</div>
+                <div class="sc-row"><kbd>P</kbd> Toggle Perform panel</div>
                 <div class="sc-row"><kbd>&larr;</kbd> <kbd>&rarr;</kbd> Prev/next frame</div>
                 <div class="sc-row"><kbd>Shift+&larr;</kbd> <kbd>Shift+&rarr;</kbd> Jump 10</div>
                 <h3 data-shortcut-mode="common">File</h3>
