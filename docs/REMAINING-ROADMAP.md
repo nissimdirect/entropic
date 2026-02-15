@@ -52,11 +52,11 @@
 |---|------|--------|--------|--------|-------|
 | P2-1 | **Pixel physics consolidation** — 21 effects → 3 mega-effects with mode selectors. Pixel Dynamics (6 modes), Pixel Cosmos (8 modes), Pixel Organic (3 modes). Shared PhysicsEngine class. | UAT A6 | Large | [ ] | effects/physics.py, app.js |
 | P2-2 | **Modular sidechain operator** — one sidechain operator that maps to any parameter. Current 6 sidechain effects → presets. | UAT A4 | Large | [ ] | effects/sidechain.py, app.js |
-| P2-3 | **Taxonomy reclassification** — added Operators category, moved LFO to operators, reordered CATEGORY_ORDER for logical flow (tools→color→texture→glitch→distortion→destruction→temporal→physics→modulation→operators→sidechain→enhance→whimsy). | UAT A3 | Medium | [~] | effects/__init__.py |
+| P2-3 | **Taxonomy reclassification** — Operators category added, LFO moved, CATEGORY_ORDER reordered, 9 effects moved to tools (levels, curves, hsladjust, colorbalance, histogrameq, clahe, autolevels, chroma_key, luma_key), hueflanger moved to modulation. | UAT A3 | Medium | [x] | effects/__init__.py |
 | P2-4 | **Transparent layer rendering** — render effects to transparent layers. Emboss gray = transparent. Pixel distortion over transparent regions. | UAT S7 | Medium | [ ] | core/layer.py, server.py |
 | P2-5 | **Gravity concentrations** — place attraction points on frame that intensify parameters in that region. Spatial parameter modulation. | UAT S6 | Large | [ ] | new module |
-| P2-6 | **Ring mod reconceptualization** — currently "just black stripes." Needs external modulation source, spectrum value selection. | UAT rework | Medium | [ ] | effects/modulation.py |
-| P2-7 | **Flanger vs Phaser vs LFO differentiation** — define clear differences. Phaser/flanger = resonant peak sweep across spectrum. LFO = periodic modulation of any param. | UAT ARCH-Q | Design | [ ] | docs/ |
+| P2-6 | **Ring mod reconceptualization** — 4 carrier waveforms (sine/square/triangle/saw), spectrum band selection (all/low/mid/high), animation_rate control, temporal direction, depth-bypass fix for phase mode. 23 tests. | UAT rework | Medium | [x] | effects/modulation.py |
+| P2-7 | **Flanger vs Phaser vs LFO differentiation** — MODULATION-GUIDE.md written (5 types, 16 effects classified, ASCII signal flow diagrams, quick reference table). All modulation descriptions updated with type prefix and param_descriptions. | UAT ARCH-Q | Design | [x] | docs/MODULATION-GUIDE.md |
 
 ---
 
@@ -163,4 +163,4 @@
 ---
 
 *Total remaining items: 0 P0 + 0 P1 + 6 P2 + 0 P3 + 0 P4 + 278 P5 + 10 UX = 294 items*
-*P1 done: 9/9. P3 done: 28/28. P4 done: 5/5. P2 partially done: P2-3 taxonomy started (operators category added, reorder done).*
+*P1 done: 9/9. P3 done: 28/28. P4 done: 5/5. P2 Sprint 1 done: P2-3 taxonomy complete, P2-6 ring mod reworked, P2-7 modulation guide written. Remaining P2: P2-1, P2-2, P2-4, P2-5.*

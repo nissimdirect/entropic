@@ -6,6 +6,67 @@ Per-frame effects inspired by audio synthesis modulation techniques.
 import numpy as np
 
 
+_VALID_WAVEFORMS = {"sine", "square", "triangle", "saw"}
+_VALID_DIRECTIONS = {"horizontal", "vertical", "radial", "temporal"}
+_VALID_MODES = {"am", "fm", "phase", "multi"}
+_VALID_SOURCES = {"internal", "luminance"}
+_VALID_BANDS = {"all", "low", "mid", "high"}
+
+
+def _waveform(theta: np.ndarray, shape: str = "sine") -> np.ndarray:
+    """Generate carrier waveform from phase angles.
+
+    Returns values in [0, 1] range (unipolar) for all waveform types.
+    """
+    if shape == "square":
+        return (np.sin(theta) >= 0).astype(np.float32)
+    elif shape == "triangle":
+        return np.abs(2.0 * (theta / (2.0 * np.pi) % 1.0) - 1.0).astype(np.float32)
+    elif shape == "saw":
+        return (theta / (2.0 * np.pi) % 1.0).astype(np.float32)
+    else:  # sine
+        return (0.5 + 0.5 * np.sin(theta)).astype(np.float32)
+
+
+def _apply_spectrum_band(frame_f: np.ndarray, result: np.ndarray, band: str) -> np.ndarray:
+    """Apply ring modulation only to selected frequency band.
+
+    Decomposes via Gaussian blur (low = blurred, high = original - blurred).
+    Returns the recombined frame with only the target band modulated.
+    """
+    if band == "all":
+        return result
+
+    import cv2
+
+    h, w = frame_f.shape[:2]
+    ksize = max(3, (min(h, w) // 8) | 1)  # odd kernel
+
+    low = cv2.GaussianBlur(frame_f, (ksize, ksize), 0)
+    high = frame_f - low
+    mid_ksize = max(3, (ksize // 2) | 1)
+    mid_blur = cv2.GaussianBlur(frame_f, (mid_ksize, mid_ksize), 0)
+    mid = mid_blur - low
+
+    # result is the fully-modulated frame; frame_f is the original
+    # We want: modulated band + unmodulated other bands
+    if band == "low":
+        import cv2 as _cv2
+        mod_low = cv2.GaussianBlur(result, (ksize, ksize), 0)
+        return mod_low + mid + high
+    elif band == "mid":
+        mod_mid_blur = cv2.GaussianBlur(result, (mid_ksize, mid_ksize), 0)
+        mod_low = cv2.GaussianBlur(result, (ksize, ksize), 0)
+        mod_mid = mod_mid_blur - mod_low
+        return low + mod_mid + high
+    elif band == "high":
+        mod_low = cv2.GaussianBlur(result, (ksize, ksize), 0)
+        mod_high = result - mod_low
+        return low + mid + mod_high
+
+    return result
+
+
 def ring_mod(
     frame: np.ndarray,
     frequency: float = 4.0,
@@ -13,13 +74,16 @@ def ring_mod(
     mode: str = "am",
     depth: float = 1.0,
     source: str = "internal",
+    carrier_waveform: str = "sine",
+    spectrum_band: str = "all",
+    animation_rate: float = 1.0,
     frame_index: int = 0,
     total_frames: int = 1,
 ) -> np.ndarray:
     """Ring modulation — multiply frame by a carrier signal.
 
     Modes:
-        am: Classic amplitude modulation (sine carrier on brightness).
+        am: Classic amplitude modulation (carrier on brightness).
         fm: Frequency modulation — brightness modulates carrier frequency.
         phase: Luminance shifts carrier phase per-pixel.
         multi: 3 harmonic carriers per RGB channel (rich color splitting).
@@ -27,10 +91,13 @@ def ring_mod(
     Args:
         frame: Input frame (H, W, 3) uint8.
         frequency: Carrier frequency (cycles across frame width/height).
-        direction: "horizontal", "vertical", or "radial".
+        direction: "horizontal", "vertical", "radial", or "temporal".
         mode: Modulation mode — "am", "fm", "phase", "multi".
         depth: Modulation depth (0.0-1.0). 0 = no effect, 1 = full.
-        source: Carrier source — "internal" (sine) or "luminance" (self-mod).
+        source: Carrier source — "internal" (generated) or "luminance" (self-mod).
+        carrier_waveform: Carrier shape — "sine", "square", "triangle", "saw".
+        spectrum_band: Frequency band to modulate — "all", "low", "mid", "high".
+        animation_rate: Speed multiplier for temporal animation (0.0-5.0).
         frame_index: Current frame number (shifts the pattern over time).
         total_frames: Total frame count.
 
@@ -39,10 +106,22 @@ def ring_mod(
     """
     frequency = max(0.5, min(50.0, float(frequency)))
     depth = max(0.0, min(1.0, float(depth)))
+    animation_rate = max(0.0, min(5.0, float(animation_rate)))
+    if carrier_waveform not in _VALID_WAVEFORMS:
+        carrier_waveform = "sine"
+    if direction not in _VALID_DIRECTIONS:
+        direction = "horizontal"
+    if mode not in _VALID_MODES:
+        mode = "am"
+    if source not in _VALID_SOURCES:
+        source = "internal"
+    if spectrum_band not in _VALID_BANDS:
+        spectrum_band = "all"
+
     h, w = frame.shape[:2]
     f = frame.astype(np.float32)
 
-    phase = frame_index * 0.1
+    phase = frame_index * 0.1 * animation_rate
 
     def _make_coords(freq, ph):
         if direction == "vertical":
@@ -55,61 +134,74 @@ def ring_mod(
             dist = np.sqrt(x**2 + y**2)
             max_dist = np.sqrt(cx**2 + cy**2) + 0.01
             return 2.0 * np.pi * freq * dist / max_dist + ph
-        else:
+        elif direction == "temporal":
+            # Uniform carrier that changes only over time (flashes)
+            return np.full((h, w), 2.0 * np.pi * freq * frame_index / max(total_frames, 1) + ph, dtype=np.float32)
+        else:  # horizontal
             coords = np.arange(w, dtype=np.float32).reshape(1, -1)
             return 2.0 * np.pi * freq * coords / w + ph
 
+    def _ensure_2d(arr):
+        """Ensure carrier array is (h, w)."""
+        if arr.ndim == 1:
+            if direction == "vertical":
+                return np.broadcast_to(arr.reshape(-1, 1), (h, w))
+            else:
+                return np.broadcast_to(arr.reshape(1, -1), (h, w))
+        return arr
+
     if mode == "fm":
-        # Brightness modulates carrier frequency
         lum = np.mean(f, axis=2) / 255.0
         if source == "luminance":
             freq_mod = frequency * (1.0 + lum * depth * 2.0)
         else:
             freq_mod = frequency
         theta = _make_coords(1.0, phase)
-        if theta.ndim == 2:
-            carrier = 0.5 + 0.5 * np.sin(theta * freq_mod)
-        else:
-            carrier = 0.5 + 0.5 * np.sin(theta * freq_mod)
-        carrier = carrier[:, :, np.newaxis] if carrier.ndim == 2 else carrier[:, :, np.newaxis]
+        theta = _ensure_2d(theta) * freq_mod
+        carrier = _waveform(theta, carrier_waveform)
+        carrier = carrier[:, :, np.newaxis]
         carrier = (1.0 - depth) + depth * carrier
-        return np.clip(f * carrier, 0, 255).astype(np.uint8)
+        result = np.clip(f * carrier, 0, 255)
+        result = _apply_spectrum_band(f, result, spectrum_band)
+        return np.clip(result, 0, 255).astype(np.uint8)
 
     elif mode == "phase":
-        # Luminance shifts the phase per-pixel
         lum = np.mean(f, axis=2) / 255.0
         base_theta = _make_coords(frequency, phase)
-        if base_theta.ndim == 1:
-            base_theta = base_theta.reshape(1, -1) if direction != "vertical" else base_theta.reshape(-1, 1)
+        base_theta = _ensure_2d(base_theta)
         phase_shift = lum * np.pi * 2.0 * depth
-        carrier = 0.5 + 0.5 * np.sin(base_theta + phase_shift)
-        carrier = carrier[:, :, np.newaxis]
-        return np.clip(f * carrier, 0, 255).astype(np.uint8)
+        carrier = _waveform(base_theta + phase_shift, carrier_waveform)
+        carrier = (1.0 - depth) + depth * carrier[:, :, np.newaxis]
+        result = np.clip(f * carrier, 0, 255)
+        result = _apply_spectrum_band(f, result, spectrum_band)
+        return np.clip(result, 0, 255).astype(np.uint8)
 
     elif mode == "multi":
-        # 3 harmonic carriers per RGB channel
         result = np.zeros_like(f)
         for c, harmonic in enumerate([1.0, 1.5, 2.0]):
             theta = _make_coords(frequency * harmonic, phase + c * 0.7)
-            if theta.ndim == 1:
-                theta = theta.reshape(1, -1) if direction != "vertical" else theta.reshape(-1, 1)
-            carrier = (1.0 - depth) + depth * (0.5 + 0.5 * np.sin(theta))
+            theta = _ensure_2d(theta)
+            carrier = (1.0 - depth) + depth * _waveform(theta, carrier_waveform)
             result[:, :, c] = f[:, :, c] * carrier
+        result = np.clip(result, 0, 255)
+        result = _apply_spectrum_band(f, result, spectrum_band)
         return np.clip(result, 0, 255).astype(np.uint8)
 
     else:  # am (default)
         theta = _make_coords(frequency, phase)
         if source == "luminance":
             lum = np.mean(f, axis=2) / 255.0
-            carrier = 0.5 + 0.5 * np.sin(theta.reshape(theta.shape[0] if theta.ndim > 1 else 1, -1) * (1.0 + lum))
+            theta = _ensure_2d(theta)
+            carrier = _waveform(theta * (1.0 + lum), carrier_waveform)
             carrier = carrier[:, :, np.newaxis]
         else:
-            carrier = 0.5 + 0.5 * np.sin(theta)
-            if carrier.ndim == 1:
-                carrier = carrier.reshape(1, -1) if direction != "vertical" else carrier.reshape(-1, 1)
+            theta = _ensure_2d(theta)
+            carrier = _waveform(theta, carrier_waveform)
             carrier = carrier[:, :, np.newaxis]
         carrier = (1.0 - depth) + depth * carrier
-        return np.clip(f * carrier, 0, 255).astype(np.uint8)
+        result = np.clip(f * carrier, 0, 255)
+        result = _apply_spectrum_band(f, result, spectrum_band)
+        return np.clip(result, 0, 255).astype(np.uint8)
 
 
 def gate(

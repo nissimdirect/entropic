@@ -86,8 +86,12 @@ class TestTaxonomy:
         assert bad == [], f"Effects with non-dict params: {bad}"
 
     def test_tools_category_contains_image_editing_effects(self):
-        """Tools category should contain levels, curves, hsladjust, colorbalance."""
-        expected_tools = ["levels", "curves", "hsladjust", "colorbalance"]
+        """Tools category should contain all image editing and keying effects."""
+        expected_tools = [
+            "levels", "curves", "hsladjust", "colorbalance",
+            "histogrameq", "clahe", "autolevels",
+            "chroma_key", "luma_key",
+        ]
         for name in expected_tools:
             assert name in EFFECTS, f"Effect '{name}' not found in EFFECTS"
             assert EFFECTS[name]["category"] == "tools", \
