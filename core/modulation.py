@@ -127,6 +127,11 @@ class LfoModulator:
             clamped = max(p_min, min(p_max, modulated))
 
             if param_name in new_effects[idx].get("params", {}):
+                orig = new_effects[idx]["params"][param_name]
+                # Preserve original type: int params stay int (avoids
+                # float→int crashes in effects like displacement/block_size)
+                if isinstance(orig, int) and not isinstance(orig, bool):
+                    clamped = int(round(clamped))
                 new_effects[idx]["params"][param_name] = clamped
 
         return new_effects
