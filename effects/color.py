@@ -238,6 +238,45 @@ def infrared(frame: np.ndarray, vegetation_glow: float = 1.0) -> np.ndarray:
     return np.stack([r, g, b], axis=2).astype(np.uint8)
 
 
+def color_filter(frame: np.ndarray, preset: str = "cyanotype", intensity: float = 1.0) -> np.ndarray:
+    """Color filter presets — curated color grades as a dropdown.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        preset: Filter name — "cyanotype", "infrared", "sepia", "cool", "warm".
+        intensity: Effect strength (0.0 = original, 1.0 = full effect).
+
+    Returns:
+        Color-filtered frame.
+    """
+    intensity = max(0.0, min(1.0, float(intensity)))
+
+    if preset == "cyanotype":
+        return cyanotype(frame, intensity=intensity)
+    elif preset == "infrared":
+        return infrared(frame, vegetation_glow=intensity * 2.0)
+    elif preset == "sepia":
+        gray = np.mean(frame.astype(np.float32), axis=2)
+        r = np.clip(gray * 1.1 + 20, 0, 255)
+        g = np.clip(gray * 0.9, 0, 255)
+        b = np.clip(gray * 0.7, 0, 255)
+        sepia = np.stack([r, g, b], axis=2)
+        result = frame.astype(np.float32) * (1 - intensity) + sepia * intensity
+        return np.clip(result, 0, 255).astype(np.uint8)
+    elif preset == "cool":
+        f = frame.astype(np.float32)
+        f[:, :, 2] = np.clip(f[:, :, 2] * (1 + 0.3 * intensity), 0, 255)
+        f[:, :, 0] = np.clip(f[:, :, 0] * (1 - 0.15 * intensity), 0, 255)
+        return f.astype(np.uint8)
+    elif preset == "warm":
+        f = frame.astype(np.float32)
+        f[:, :, 0] = np.clip(f[:, :, 0] * (1 + 0.3 * intensity), 0, 255)
+        f[:, :, 2] = np.clip(f[:, :, 2] * (1 - 0.15 * intensity), 0, 255)
+        return f.astype(np.uint8)
+    else:
+        return frame.copy()
+
+
 def chroma_key(frame: np.ndarray, hue: float = 120.0, tolerance: float = 30.0,
                softness: float = 10.0, replace_color: str = "black") -> np.ndarray:
     """Green screen / chroma key — makes a specific color range transparent (black).

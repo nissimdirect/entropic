@@ -84,6 +84,7 @@
             <label>Dry/Wet</label>
             <input type="range" id="mix-slider" min="0" max="100" value="100" oninput="onMixChange(this.value)">
             <span id="mix-value">100%</span>
+            <span class="mix-hint">Original &#x2190; &#x2192; Effect</span>
         </div>
         <div class="mode-toggle">
             <!-- Quick mode flagged off (FEATURE_QUICK_MODE=false). Button preserved, hidden. -->
@@ -94,10 +95,10 @@
         </div>
         <div class="transport">
             <button onclick="randomizeChain()" title="Random effects">Randomize</button>
-            <button onclick="undo()" title="Undo (Cmd+Z)">Undo</button>
-            <button onclick="redo()" title="Redo (Cmd+Shift+Z)">Redo</button>
-            <button onclick="previewChain()" class="primary">Update Preview</button>
-            <button onclick="renderVideo()" title="Export video">Export</button>
+            <button onclick="undo()" title="Undo (Cmd+Z)">Undo <kbd>&#8984;Z</kbd></button>
+            <button onclick="redo()" title="Redo (Cmd+Shift+Z)">Redo <kbd>&#8984;&#8679;Z</kbd></button>
+            <button onclick="previewChain()" class="primary">Refresh Preview</button>
+            <button onclick="renderVideo()" title="Export video (Cmd+E)">Export <kbd>&#8984;E</kbd></button>
         </div>
     </div>
 
@@ -130,14 +131,14 @@
             <p class="hint">Drop video, image, GIF — or anything else for creative interpretation</p>
         </div>
         <img id="preview-img" style="display:none">
-        <div id="mode-badge">TIMELINE</div>
         <div id="perf-hud" style="display:none">
             <span id="perf-hud-rec"></span>
             <span id="perf-hud-time"></span>
             <span id="perf-hud-events"></span>
         </div>
         <div id="frame-info"></div>
-        <div id="frame-scrubber">
+        <!-- Frame scrubber hidden: timeline handles all scrubbing -->
+        <div id="frame-scrubber" style="display:none">
             <input type="range" id="frame-slider" min="0" max="100" value="0">
         </div>
     </div>

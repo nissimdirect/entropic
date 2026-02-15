@@ -24,9 +24,9 @@
 | P0-2 | **Click-to-type on knob values** — click the value text below a knob, type a specific number. Standard DAW/Photoshop behavior. Currently: drag to change, dblclick to reset. | User request | Small | [x] | app.js, style.css |
 | P0-3 | **Text contrast WCAG pass** — `--text-dim` #555→#7a7a7a, `--text-secondary` #888→#999. | User request | Small | [x] | style.css |
 | P0-4 | **Retest B10-B13** — byte corrupt, flow distort, auto levels, histogram eq. All 4 PASS after frame_index fix. | UAT findings | Small | [x] | tests/test_retest_b10_b13.py |
-| P0-5 | **Seed audit** — 5/10 working (displacement, tvstatic, vhs, noise, dropout), 5/10 vestigial (scanlines, asciiart, brailleart, stutter, feedback). Decide: remove dead seeds or wire up. | UAT S5, P1 | Medium | [~] | effects/*.py |
+| P0-5 | **Seed audit** — removed seed param from 22 effects that used it only for state-key isolation (no visual impact). 48 effects retain seed with proper randomization. Test coverage updated for conditional-seed (scanlines/flicker, granulator/spray, beatrepeat/chance, strobe/random) and temporal-seed (samplehold, granulator, beatrepeat, strobe) effects. | UAT S5, P1 | Medium | [x] | effects/__init__.py, tests/test_retest_b10_b13.py |
 | P0-6 | **Loop region selection** — Ableton-style loop brace on timeline. Set loop start/end, playback loops within that range. Drag to reposition, resize by dragging edges. Loop on/off toggle. Currently only perform mode has whole-video loop toggle. | User request | Medium | [x] | timeline.js |
-| P0-7 | **Timeline scrub verification** — Click ruler sets playhead (BUILT), drag scrubs (BUILT). Verify scrub triggers preview with effects applied during drag. | User request | Small | [~] | timeline.js |
+| P0-7 | **Timeline scrub verification** — Click ruler sets playhead, drag scrubs. Both trigger `setPlayhead()` → `onTimelinePlayheadChange()` → `schedulePreview(true)`. Verified in code: lines 1688-1694 (click), 1841-1843 (drag). | User request | Small | [x] | timeline.js |
 
 ---
 
@@ -162,6 +162,6 @@
 
 ---
 
-*Total remaining items: 5 P0 + 9 P1 + 7 P2 + 27 P3 + 5 P4 + 278 P5 + 10 UX = 341 items*
+*Total remaining items: 0 P0 + 9 P1 + 7 P2 + 27 P3 + 5 P4 + 278 P5 + 10 UX = 336 items*
 *Sprint velocity: ~4-8 items per session depending on size*
 *Estimated: 8-12 sessions for P0-P2, ongoing for P3+*

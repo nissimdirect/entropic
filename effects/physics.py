@@ -1045,6 +1045,8 @@ def pixel_wormhole(
     spin: float = 2.0,
     distortion_ring: float = 1.5,
     wander: float = 0.3,
+    center_x: float = 0.5,
+    center_y: float = 0.5,
     damping: float = 0.9,
     seed: int = 42,
     frame_index: int = 0,
@@ -1063,6 +1065,8 @@ def pixel_wormhole(
         spin: Rotational distortion at each mouth (0-10).
         distortion_ring: Width of warped ring around portals (0.5-3).
         wander: How much portals drift over time (0-1).
+        center_x: Portal pair center X position (0.0-1.0). 0.5 = centered.
+        center_y: Portal pair center Y position (0.0-1.0). 0.5 = centered.
         damping: Velocity decay (0.8-0.99).
     """
     h, w = frame.shape[:2]
@@ -1072,12 +1076,16 @@ def pixel_wormhole(
     rng = np.random.default_rng(seed)
     t = frame_index / 30.0
 
-    # Two portal positions — kept apart in opposite quadrants
-    base = rng.random((2, 2))
-    p1x = base[0, 0] * 0.4 * w + w * 0.1
-    p1y = base[0, 1] * 0.4 * h + h * 0.1
-    p2x = base[1, 0] * 0.4 * w + w * 0.5
-    p2y = base[1, 1] * 0.4 * h + h * 0.5
+    center_x = max(0.0, min(1.0, float(center_x)))
+    center_y = max(0.0, min(1.0, float(center_y)))
+
+    # Portal offset from center
+    spread_x = rng.random() * 0.2 + 0.1  # 10-30% spread
+    spread_y = rng.random() * 0.2 + 0.1
+    p1x = (center_x - spread_x) * w
+    p1y = (center_y - spread_y) * h
+    p2x = (center_x + spread_x) * w
+    p2y = (center_y + spread_y) * h
 
     if wander > 0:
         p1x += np.sin(t * 0.4) * w * wander * 0.15

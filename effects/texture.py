@@ -169,7 +169,7 @@ def blur(frame: np.ndarray, radius: int = 3, blur_type: str = "box") -> np.ndarr
     Args:
         frame: (H, W, 3) uint8 RGB array.
         radius: Blur radius in pixels (1-20).
-        blur_type: 'box', 'gaussian', 'motion', 'radial', or 'median'.
+        blur_type: 'box', 'gaussian', 'motion', 'radial', 'median', or 'lens'.
 
     Returns:
         Blurred frame.
@@ -180,7 +180,18 @@ def blur(frame: np.ndarray, radius: int = 3, blur_type: str = "box") -> np.ndarr
     radius = max(1, min(20, int(radius)))
     h, w = frame.shape[:2]
 
-    if blur_type == "gaussian":
+    if blur_type == "lens":
+        # Lens/disc blur — circular kernel (bokeh-like)
+        ksize = radius * 2 + 1
+        kernel = np.zeros((ksize, ksize), dtype=np.float32)
+        center = ksize // 2
+        y, x = np.ogrid[-center:ksize - center, -center:ksize - center]
+        mask = x * x + y * y <= center * center
+        kernel[mask] = 1.0
+        kernel /= kernel.sum()
+        return cv2.filter2D(frame, -1, kernel)
+
+    elif blur_type == "gaussian":
         # OpenCV GaussianBlur — radius maps to kernel size
         ksize = radius * 2 + 1
         return cv2.GaussianBlur(frame, (ksize, ksize), 0)

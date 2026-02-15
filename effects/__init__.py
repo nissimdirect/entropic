@@ -20,6 +20,7 @@ from effects.color import (
     tape_saturation,
     cyanotype,
     infrared,
+    color_filter,
     chroma_key,
     luma_key,
     levels,
@@ -47,13 +48,13 @@ from effects.texture import (
     contour_lines,
 )
 from effects.temporal import stutter, frame_drop, time_stretch, feedback, tape_stop, tremolo, delay, decimator, sample_and_hold, granulator, beat_repeat, strobe, lfo
-from effects.modulation import ring_mod, gate, wavefold, am_radio
+from effects.modulation import ring_mod, gate, wavefold
 from effects.enhance import solarize, duotone, emboss, auto_levels, median_filter, false_color, histogram_eq, clahe, parallel_compression
 from effects.destruction import (
     datamosh, byte_corrupt, block_corrupt, row_shift,
     jpeg_artifacts, invert_bands, data_bend, flow_distort,
     film_grain, glitch_repeat, xor_glitch,
-    pixel_annihilate, frame_smash, channel_destroy,
+    frame_smash, channel_destroy,
 )
 from effects.ascii import ascii_art, braille_art
 from effects.sidechain import (
@@ -200,13 +201,13 @@ EFFECTS = {
     "asciiart": {
         "fn": ascii_art,
         "category": "texture",
-        "params": {"charset": "basic", "width": 80, "invert": False, "color_mode": "mono", "edge_mix": 0.0, "seed": 42},
+        "params": {"charset": "basic", "width": 80, "invert": False, "color_mode": "mono", "edge_mix": 0.0},
         "description": "Convert frame to ASCII art (basic/dense/block charset, mono/green/amber/original color)",
     },
     "brailleart": {
         "fn": braille_art,
         "category": "texture",
-        "params": {"width": 80, "threshold": 128, "invert": False, "dither": True, "color_mode": "mono", "seed": 42},
+        "params": {"width": 80, "threshold": 128, "invert": False, "dither": True, "color_mode": "mono"},
         "description": "Convert frame to braille unicode art (2×4 dot grid, 4× resolution, Floyd-Steinberg dither)",
     },
 
@@ -218,17 +219,11 @@ EFFECTS = {
         "param_ranges": {"drive": {"min": 0.5, "max": 5.0}, "warmth": {"min": 0.0, "max": 1.0}},
         "description": "Analog tape saturation curve (tanh soft-clip + warmth)",
     },
-    "cyanotype": {
-        "fn": cyanotype,
+    "colorfilter": {
+        "fn": color_filter,
         "category": "color",
-        "params": {"intensity": 1.0},
-        "description": "Prussian blue cyanotype photographic print simulation",
-    },
-    "infrared": {
-        "fn": infrared,
-        "category": "color",
-        "params": {"vegetation_glow": 1.0},
-        "description": "Infrared film simulation (vegetation glows, sky darkens)",
+        "params": {"preset": "cyanotype", "intensity": 1.0},
+        "description": "Color filter presets (cyanotype, infrared, sepia, cool, warm)",
     },
     "chroma_key": {
         "fn": chroma_key,
@@ -312,7 +307,7 @@ EFFECTS = {
     "stutter": {
         "fn": stutter,
         "category": "temporal",
-        "params": {"repeat": 3, "interval": 8, "seed": 42},
+        "params": {"repeat": 3, "interval": 8},
         "description": "Freeze-stutter: hold frames at intervals (skipping record)",
     },
     "dropout": {
@@ -330,13 +325,13 @@ EFFECTS = {
     "feedback": {
         "fn": feedback,
         "category": "temporal",
-        "params": {"decay": 0.3, "seed": 42},
+        "params": {"decay": 0.3},
         "description": "Ghost trails from previous frames (video echo)",
     },
     "tapestop": {
         "fn": tape_stop,
         "category": "temporal",
-        "params": {"trigger": 0.7, "ramp_frames": 15, "seed": 42},
+        "params": {"trigger": 0.7, "ramp_frames": 15},
         "description": "Freeze and fade to black like a tape machine stopping",
     },
     "tremolo": {
@@ -348,13 +343,13 @@ EFFECTS = {
     "delay": {
         "fn": delay,
         "category": "temporal",
-        "params": {"delay_frames": 5, "decay": 0.4, "seed": 42},
+        "params": {"delay_frames": 5, "decay": 0.4},
         "description": "Ghost echo from N frames ago (video delay line)",
     },
     "decimator": {
         "fn": decimator,
         "category": "temporal",
-        "params": {"factor": 3, "seed": 42},
+        "params": {"factor": 3},
         "description": "Reduce effective framerate (choppy lo-fi motion)",
     },
     "samplehold": {
@@ -406,12 +401,6 @@ EFFECTS = {
         "category": "modulation",
         "params": {"threshold": 0.7, "folds": 3},
         "description": "Audio wavefolding — pixel brightness folds at threshold",
-    },
-    "amradio": {
-        "fn": am_radio,
-        "category": "modulation",
-        "params": {"carrier_freq": 10.0, "depth": 0.8},
-        "description": "AM radio interference bands (sine carrier on rows)",
     },
     "ringmod": {
         "fn": ring_mod,
@@ -538,7 +527,7 @@ EFFECTS = {
     "flowdistort": {
         "fn": flow_distort,
         "category": "destruction",
-        "params": {"strength": 3.0, "direction": "forward", "seed": 42},
+        "params": {"strength": 3.0, "direction": "forward"},
         "description": "Warp frame using optical flow as displacement map",
     },
     "filmgrain": {
@@ -552,12 +541,6 @@ EFFECTS = {
         "category": "destruction",
         "params": {"num_slices": 8, "max_height": 20, "shift": True, "flicker": False, "seed": 42},
         "description": "Repeat and shift random horizontal slices (buffer overflow, flicker=True alternates glitched/clean)",
-    },
-    "pixelannihilate": {
-        "fn": pixel_annihilate,
-        "category": "destruction",
-        "params": {"threshold": 0.5, "mode": "dissolve", "replacement": "black", "seed": 42},
-        "description": "Kill pixels by dissolve, threshold, edge-kill, or channel-rip",
     },
     "framesmash": {
         "fn": frame_smash,
@@ -588,7 +571,7 @@ EFFECTS = {
     "sidechaingate": {
         "fn": sidechain_gate,
         "category": "modulation",
-        "params": {"source": "brightness", "threshold": 0.4, "mode": "freeze", "hold_frames": 5, "seed": 42},
+        "params": {"source": "brightness", "threshold": 0.4, "mode": "freeze", "hold_frames": 5},
         "description": "Sidechain gate — video only passes when signal exceeds threshold",
     },
     "sidechaincross": {
@@ -597,7 +580,7 @@ EFFECTS = {
         "params": {"source": "brightness", "threshold": 0.3, "softness": 0.3, "mode": "blend",
                    "strength": 0.8, "invert": False, "pre_a": "none", "pre_b": "none",
                    "attack": 0.0, "decay": 0.0, "sustain": 1.0, "release": 0.0,
-                   "lookahead": 0, "seed": 42},
+                   "lookahead": 0},
         "description": "Cross-video sidechain — one video busts through another with ADSR envelope and pre-processing",
     },
     "sidechaincrossfeed": {
@@ -752,73 +735,73 @@ EFFECTS = {
     "videoflanger": {
         "fn": video_flanger,
         "category": "modulation",
-        "params": {"rate": 0.5, "depth": 10, "feedback": 0.4, "wet": 0.5, "seed": 42},
+        "params": {"rate": 0.5, "depth": 10, "feedback": 0.4, "wet": 0.5},
         "description": "Temporal flanger — blend with oscillating-delay past frame (comb-filter interference)",
     },
     "videophaser": {
         "fn": video_phaser,
         "category": "modulation",
-        "params": {"rate": 0.3, "stages": 4, "depth": 1.0, "feedback": 0.3, "seed": 42},
+        "params": {"rate": 0.3, "stages": 4, "depth": 1.0, "feedback": 0.3},
         "description": "Spatial phaser — FFT phase sweep creates sweeping notch interference",
     },
     "spatialflanger": {
         "fn": spatial_flanger,
         "category": "modulation",
-        "params": {"rate": 0.8, "depth": 20, "feedback": 0.3, "seed": 42},
+        "params": {"rate": 0.8, "depth": 20, "feedback": 0.3},
         "description": "Per-row horizontal shift with LFO — diagonal sweep flanging",
     },
     "channelphaser": {
         "fn": channel_phaser,
         "category": "modulation",
-        "params": {"r_rate": 0.05, "g_rate": 0.3, "b_rate": 1.2, "stages": 5, "depth": 1.5, "wet": 0.8, "seed": 42},
+        "params": {"r_rate": 0.05, "g_rate": 0.3, "b_rate": 1.2, "stages": 5, "depth": 1.5, "wet": 0.8},
         "description": "Per-channel FFT phase sweep at different rates — color fringing and tearing",
     },
     "brightnessphaser": {
         "fn": brightness_phaser,
         "category": "modulation",
-        "params": {"rate": 0.25, "bands": 6, "depth": 0.3, "strength": 0.8, "seed": 42},
+        "params": {"rate": 0.25, "bands": 6, "depth": 0.3, "strength": 0.8},
         "description": "Sweeping brightness inversion bands — psychedelic solarization sweep",
     },
     "hueflanger": {
         "fn": hue_flanger,
         "category": "color",
-        "params": {"rate": 0.3, "depth": 60.0, "sat_depth": 0.0, "seed": 42},
+        "params": {"rate": 0.3, "depth": 60.0, "sat_depth": 0.0},
         "description": "Blend with hue-rotated copy, rotation oscillates — color interference",
     },
     "resonantfilter": {
         "fn": resonant_filter,
         "category": "modulation",
-        "params": {"rate": 0.2, "q": 50.0, "gain": 3.0, "wet": 0.7, "seed": 42},
+        "params": {"rate": 0.2, "q": 50.0, "gain": 3.0, "wet": 0.7},
         "description": "High-Q bandpass sweep through spatial frequencies — synth filter on video",
     },
     "combfilter": {
         "fn": comb_filter,
         "category": "modulation",
-        "params": {"teeth": 7, "spacing": 8, "rate": 0.3, "depth": 3.0, "wet": 0.7, "seed": 42},
+        "params": {"teeth": 7, "spacing": 8, "rate": 0.3, "depth": 3.0, "wet": 0.7},
         "description": "Multi-tooth spatial comb filter — offset copies create interference patterns",
     },
     "feedbackphaser": {
         "fn": feedback_phaser,
         "category": "modulation",
-        "params": {"rate": 0.3, "stages": 6, "feedback": 0.5, "escalation": 0.01, "seed": 42},
+        "params": {"rate": 0.3, "stages": 6, "feedback": 0.5, "escalation": 0.01},
         "description": "Self-feeding 2D FFT phaser that escalates over time — builds to self-oscillation",
     },
     "spectralfreeze": {
         "fn": spectral_freeze,
         "category": "temporal",
-        "params": {"interval": 30, "blend_peak": 0.7, "envelope_frames": 25, "seed": 42},
+        "params": {"interval": 30, "blend_peak": 0.7, "envelope_frames": 25},
         "description": "Freeze frequency magnitude at intervals, impose on later frames — spectral imprint",
     },
     "visualreverb": {
         "fn": visual_reverb,
         "category": "temporal",
-        "params": {"rate": 0.15, "depth": 0.5, "ir_interval": 30, "seed": 42},
+        "params": {"rate": 0.15, "depth": 0.5, "ir_interval": 30},
         "description": "Convolve frame with past frame as impulse response — visual echo/room",
     },
     "freqflanger": {
         "fn": freq_flanger,
         "category": "modulation",
-        "params": {"rate": 0.5, "depth": 10, "mag_blend": 0.4, "phase_blend": 0.15, "seed": 42},
+        "params": {"rate": 0.5, "depth": 10, "mag_blend": 0.4, "phase_blend": 0.15},
         "description": "2D FFT magnitude+phase blend with delayed frame — spectral ghosting",
     },
 
@@ -1074,6 +1057,27 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
     validate_chain_depth(effects_list)
 
     for effect in effects_list:
+        # Handle nested group items (Ableton-style racks)
+        if effect.get("type") == "group":
+            if effect.get("bypassed", False):
+                continue  # Skip bypassed groups entirely
+            children = effect.get("children", [])
+            if not children:
+                continue
+            group_mix = float(effect.get("mix", 1.0))
+            group_mix = max(0.0, min(1.0, group_mix))
+            original = frame.copy() if group_mix < 1.0 else None
+            frame = apply_chain(frame, children, frame_index=frame_index,
+                                total_frames=total_frames, watermark=False)
+            if original is not None:
+                if group_mix <= 0.0:
+                    frame = original
+                else:
+                    blended = (original.astype(np.float32) * (1.0 - group_mix) +
+                               frame.astype(np.float32) * group_mix)
+                    frame = np.clip(blended, 0, 255).astype(np.uint8)
+            continue
+
         name = effect["name"]
         params = effect.get("params", {})
         envelope = effect.get("envelope")

@@ -98,6 +98,7 @@ def wavefold(
     frame: np.ndarray,
     threshold: float = 0.7,
     folds: int = 3,
+    brightness: float = 1.0,
 ) -> np.ndarray:
     """Audio wavefolding applied to pixel brightness.
 
@@ -108,16 +109,19 @@ def wavefold(
         frame: Input frame (H, W, 3) uint8.
         threshold: Fold-back point (0.1-0.95).
         folds: Number of folding passes (1-8).
+        brightness: Post-fold brightness (0.5-2.0). 1.0 = no change.
 
     Returns:
         Wavefolded frame.
     """
     threshold = max(0.1, min(0.95, float(threshold)))
     folds = max(1, min(8, int(folds)))
+    brightness = max(0.5, min(2.0, float(brightness)))
     f = frame.astype(np.float32) / 255.0
     for _ in range(folds):
         f = np.where(f > threshold, 2.0 * threshold - f, f)
         f = np.abs(f)
+    f *= brightness
     return np.clip(f * 255, 0, 255).astype(np.uint8)
 
 

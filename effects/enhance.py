@@ -11,6 +11,7 @@ def solarize(
     frame: np.ndarray,
     threshold: int = 128,
     brightness: float = 1.0,
+    target: str = "all",
 ) -> np.ndarray:
     """Partially invert pixels above a threshold (Sabattier/Man Ray effect).
 
@@ -21,6 +22,7 @@ def solarize(
         frame: Input frame (H, W, 3) uint8.
         threshold: Inversion threshold (0-255).
         brightness: Brightness compensation (0.5-2.0). 1.0 = no change, >1.0 = brighten.
+        target: Tonal range to solarize — 'all', 'shadows', 'midtones', 'highlights'.
 
     Returns:
         Solarized frame.
@@ -28,11 +30,28 @@ def solarize(
     threshold = max(0, min(255, int(threshold)))
     brightness = max(0.5, min(2.0, float(brightness)))
     img = Image.fromarray(frame)
-    result = ImageOps.solarize(img, threshold=threshold)
-    result_arr = np.array(result).astype(np.float32)
-    # Apply brightness compensation
-    result_arr = result_arr * brightness
-    return np.clip(result_arr, 0, 255).astype(np.uint8)
+    solarized = np.array(ImageOps.solarize(img, threshold=threshold)).astype(np.float32)
+    solarized = solarized * brightness
+
+    if target == "all":
+        return np.clip(solarized, 0, 255).astype(np.uint8)
+
+    # Selective solarization: blend based on luminance zone
+    luminance = np.mean(frame.astype(np.float32), axis=2)
+    if target == "shadows":
+        mask = np.clip(1.0 - luminance / 85.0, 0, 1)
+    elif target == "midtones":
+        mask = 1.0 - 4.0 * ((luminance / 255.0) - 0.5) ** 2
+        mask = np.clip(mask, 0, 1)
+    elif target == "highlights":
+        mask = np.clip((luminance - 170.0) / 85.0, 0, 1)
+    else:
+        mask = np.ones_like(luminance)
+
+    mask = mask[:, :, np.newaxis]
+    original = frame.astype(np.float32)
+    result = original * (1.0 - mask) + solarized * mask
+    return np.clip(result, 0, 255).astype(np.uint8)
 
 
 def _clamp_rgb(color, default=(128, 128, 128)) -> tuple:
@@ -295,6 +314,7 @@ def parallel_compression(
     frame: np.ndarray,
     crush: float = 0.5,
     blend: float = 0.5,
+    mode: str = "luminance",
 ) -> np.ndarray:
     """Blend original with heavily compressed version (New York compression for video).
 
@@ -305,6 +325,8 @@ def parallel_compression(
         frame: Input frame (H, W, 3) uint8.
         crush: Gamma compression amount (0.1-1.0). Lower = more crushed.
         blend: Mix between original and crushed (0.0-1.0).
+        mode: Compression target — 'luminance' (all channels equal), 'per_channel'
+              (compress R/G/B independently), 'saturation' (crush color intensity).
 
     Returns:
         Parallel-compressed frame.
@@ -312,6 +334,18 @@ def parallel_compression(
     crush = max(0.1, min(1.0, float(crush)))
     blend = max(0.0, min(1.0, float(blend)))
     f = frame.astype(np.float32) / 255.0
-    crushed = np.power(f, crush)
+
+    if mode == "per_channel":
+        # Compress each channel independently — creates color shifts
+        crushed = np.power(f, crush)
+    elif mode == "saturation":
+        # Compress saturation: push colors toward/away from gray
+        gray = np.mean(f, axis=2, keepdims=True)
+        diff = f - gray
+        crushed_diff = diff * crush
+        crushed = gray + crushed_diff
+    else:  # luminance (default)
+        crushed = np.power(f, crush)
+
     result = f * (1.0 - blend) + crushed * blend
     return np.clip(result * 255, 0, 255).astype(np.uint8)

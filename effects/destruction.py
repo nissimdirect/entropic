@@ -564,32 +564,41 @@ def row_shift(
     frame: np.ndarray,
     max_shift: int = 30,
     density: float = 0.3,
+    direction: str = "horizontal",
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
 ) -> np.ndarray:
-    """Horizontally shift random rows — creates torn/signal interference look.
+    """Shift random rows or columns — creates torn/signal interference look.
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
-        max_shift: Maximum pixel shift per row (-max to +max). Up to full frame width.
-        density: Fraction of rows to shift (0.0-1.0).
+        max_shift: Maximum pixel shift (-max to +max).
+        density: Fraction of rows/columns to shift (0.0-1.0).
+        direction: 'horizontal' (shift rows), 'vertical' (shift columns), 'both'.
         seed: Random seed.
 
     Returns:
-        Row-shifted frame.
+        Row/column-shifted frame.
     """
     h, w = frame.shape[:2]
-    max_shift = max(1, min(w, int(max_shift)))
+    max_shift = max(1, min(max(h, w), int(max_shift)))
     density = max(0.0, min(1.0, float(density)))
 
     rng = np.random.RandomState(seed + frame_index)
     result = frame.copy()
 
-    for y in range(h):
-        if rng.random() < density:
-            shift = rng.randint(-max_shift, max_shift + 1)
-            result[y] = np.roll(result[y], shift, axis=0)
+    if direction in ("horizontal", "both"):
+        for y in range(h):
+            if rng.random() < density:
+                shift = rng.randint(-max_shift, max_shift + 1)
+                result[y] = np.roll(result[y], shift, axis=0)
+
+    if direction in ("vertical", "both"):
+        for x in range(w):
+            if rng.random() < density:
+                shift = rng.randint(-max_shift, max_shift + 1)
+                result[:, x] = np.roll(result[:, x], shift, axis=0)
 
     return result
 
@@ -657,15 +666,17 @@ def invert_bands(
     frame: np.ndarray,
     band_height: int = 10,
     offset: int = 0,
+    direction: str = "horizontal",
     frame_index: int = 0,
     total_frames: int = 1,
 ) -> np.ndarray:
-    """Invert alternating horizontal bands — CRT/VHS damage simulation.
+    """Invert alternating bands — CRT/VHS damage simulation.
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
-        band_height: Height of each band in pixels (2-100).
-        offset: Vertical offset for band position animation.
+        band_height: Size of each band in pixels (2-100).
+        offset: Band position animation offset.
+        direction: Band orientation — 'horizontal' or 'vertical'.
 
     Returns:
         Band-inverted frame.
@@ -673,14 +684,20 @@ def invert_bands(
     band_height = max(2, min(100, int(band_height)))
 
     result = frame.copy()
-    h = frame.shape[0]
+    h, w = frame.shape[:2]
 
     anim_offset = (offset + frame_index * 2) % (band_height * 2)
 
-    for y in range(0, h, band_height * 2):
-        start = (y + anim_offset) % h
-        end = min(start + band_height, h)
-        result[start:end] = 255 - result[start:end]
+    if direction == "vertical":
+        for x in range(0, w, band_height * 2):
+            start = (x + anim_offset) % w
+            end = min(start + band_height, w)
+            result[:, start:end] = 255 - result[:, start:end]
+    else:  # horizontal (default)
+        for y in range(0, h, band_height * 2):
+            start = (y + anim_offset) % h
+            end = min(start + band_height, h)
+            result[start:end] = 255 - result[start:end]
 
     return result
 
@@ -753,6 +770,22 @@ def data_bend(
             echo = np.zeros_like(flat)
             echo[delay:] = flat[:-delay] * gain
             flat = flat + echo
+
+    elif effect == "tremolo":
+        # Amplitude modulation at audio rate — creates pulsing brightness bands
+        rate = 5.0 + intensity * 45.0  # 5-50 Hz equivalent
+        t = np.arange(len(flat), dtype=np.float32)
+        lfo = 0.5 + 0.5 * np.sin(2.0 * np.pi * rate * t / (frame.shape[1] * 3))
+        depth = intensity * 0.9
+        mod = 1.0 - depth + depth * lfo
+        flat = flat * mod
+
+    elif effect == "ringmod":
+        # Ring modulation — multiply signal by carrier, creates sum/difference tones
+        carrier_freq = 3.0 + intensity * 30.0
+        t = np.arange(len(flat), dtype=np.float32)
+        carrier = np.sin(2.0 * np.pi * carrier_freq * t / (frame.shape[1] * 3))
+        flat = flat * (0.5 + 0.5 * carrier * intensity)
 
     # Reshape back to frame
     result = np.clip(flat * 255.0, 0, 255).astype(np.uint8)

@@ -91,6 +91,20 @@ for name, entry in EFFECTS.items():
         break
 
 
+# Effects where seed affects temporal behavior (hold timing, freeze intervals)
+# rather than per-frame pixel content — need multi-frame testing
+# Effects where seed affects temporal behavior — need multi-frame testing
+_TEMPORAL_SEED_EFFECTS = {"samplehold", "granulator", "beatrepeat", "strobe"}
+
+# Effects where seed only activates with non-default params
+_CONDITIONAL_SEED_EFFECTS = {
+    "scanlines": {"flicker": True},
+    "granulator": {"spray": 0.5},
+    "beatrepeat": {"chance": 0.5, "variation": 0.5},
+    "strobe": {"color": "random"},
+}
+
+
 @pytest.mark.parametrize("effect_name", SEED_EFFECTS)
 def test_seed_changes_output(effect_name):
     """Different seed values should produce different outputs."""
@@ -99,24 +113,49 @@ def test_seed_changes_output(effect_name):
     # Get default params and override seed
     defaults = EFFECTS[effect_name]["params"].copy()
 
+    # Enable conditional seed usage
+    if effect_name in _CONDITIONAL_SEED_EFFECTS:
+        defaults.update(_CONDITIONAL_SEED_EFFECTS[effect_name])
+
     params_seed1 = {**defaults, "seed": 1}
     params_seed42 = {**defaults, "seed": 42}
 
-    chain1 = [{"name": effect_name, "params": params_seed1}]
-    chain42 = [{"name": effect_name, "params": params_seed42}]
-
-    result1 = apply_chain(frame.copy(), chain1, frame_index=5, total_frames=30)
-    result42 = apply_chain(frame.copy(), chain42, frame_index=5, total_frames=30)
-
-    # Both should be valid
-    assert result1 is not None and result42 is not None, f"{effect_name}: returned None"
-
-    # Different seeds should produce different output
-    identical = np.array_equal(result1, result42)
-    if identical:
-        pytest.fail(
-            f"{effect_name}: SEED BROKEN — seed=1 and seed=42 produce identical output"
+    if effect_name in _TEMPORAL_SEED_EFFECTS:
+        # Temporal-seed effects: test across frame sequence for divergence
+        any_diff = False
+        for fi in range(20):
+            f1 = make_test_frame()
+            f2 = make_test_frame()
+            # Vary input slightly per frame to give temporal effects different data
+            f1[fi % 120, :, :] = 255
+            f2[fi % 120, :, :] = 255
+            r1 = apply_chain(f1, [{"name": effect_name, "params": {**params_seed1}}],
+                             frame_index=fi, total_frames=30)
+            r42 = apply_chain(f2, [{"name": effect_name, "params": {**params_seed42}}],
+                              frame_index=fi, total_frames=30)
+            if not np.array_equal(r1, r42):
+                any_diff = True
+                break
+        assert any_diff, (
+            f"{effect_name}: SEED BROKEN — seed=1 and seed=42 produce identical "
+            f"output across 20 frames"
         )
+    else:
+        chain1 = [{"name": effect_name, "params": params_seed1}]
+        chain42 = [{"name": effect_name, "params": params_seed42}]
+
+        result1 = apply_chain(frame.copy(), chain1, frame_index=5, total_frames=30)
+        result42 = apply_chain(frame.copy(), chain42, frame_index=5, total_frames=30)
+
+        # Both should be valid
+        assert result1 is not None and result42 is not None, f"{effect_name}: returned None"
+
+        # Different seeds should produce different output
+        identical = np.array_equal(result1, result42)
+        if identical:
+            pytest.fail(
+                f"{effect_name}: SEED BROKEN — seed=1 and seed=42 produce identical output"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +194,8 @@ def main():
     for effect_name in SEED_EFFECTS:
         frame = make_test_frame()
         defaults = EFFECTS[effect_name]["params"].copy()
+        if effect_name == "scanlines":
+            defaults["flicker"] = True
         try:
             params1 = {**defaults, "seed": 1}
             params42 = {**defaults, "seed": 42}

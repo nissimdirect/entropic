@@ -57,8 +57,40 @@ _state = {
 }
 _state_lock = asyncio.Lock()
 
+# Render progress tracking (polled by frontend during export)
+_render_progress = {
+    "active": False,
+    "current_frame": 0,
+    "total_frames": 0,
+    "phase": "idle",  # "extracting", "processing", "encoding", "idle"
+}
+
 # Safety guard: max frames per render to prevent CPU/memory exhaustion
 MAX_FRAMES_PER_RENDER = 10000
+
+# Structured error recovery hints for user-facing errors
+ERROR_RECOVERY = {
+    "no_video": {"code": "NO_VIDEO", "hint": "Load a video or image file first.", "action": "load_file"},
+    "no_frame": {"code": "NO_FRAME", "hint": "Load a file to generate a frame.", "action": "load_file"},
+    "too_many_effects": {"code": "TOO_MANY_EFFECTS", "hint": "Remove some effects or flatten bypassed ones.", "action": "flatten"},
+    "file_too_large": {"code": "FILE_TOO_LARGE", "hint": "Try a shorter video or lower resolution.", "action": None},
+    "video_too_long": {"code": "VIDEO_TOO_LONG", "hint": f"Maximum {MAX_FRAMES_PER_RENDER} frames. Trim the video or use a region.", "action": "trim"},
+    "upload_failed": {"code": "UPLOAD_FAILED", "hint": "Check the file format and try again.", "action": "retry"},
+    "processing_failed": {"code": "PROCESSING_FAILED", "hint": "Try removing the last effect or resetting parameters.", "action": "undo"},
+    "preset_not_found": {"code": "PRESET_NOT_FOUND", "hint": "The preset may have been deleted. Refresh the preset list.", "action": "refresh"},
+    "render_failed": {"code": "RENDER_FAILED", "hint": "Try exporting at a lower resolution or shorter duration.", "action": "retry"},
+}
+
+
+def _error_detail(key: str, message: str) -> dict:
+    """Build structured error detail dict for frontend handleApiError()."""
+    recovery = ERROR_RECOVERY.get(key, {})
+    return {
+        "detail": message,
+        "code": recovery.get("code", "UNKNOWN"),
+        "hint": recovery.get("hint", ""),
+        "action": recovery.get("action"),
+    }
 
 
 class EffectChain(BaseModel):
@@ -85,6 +117,12 @@ async def index():
 async def health_check():
     """Health check endpoint for desktop app heartbeat."""
     return {"status": "ok"}
+
+
+@app.get("/api/render/progress")
+async def render_progress():
+    """Poll render progress during export. Returns frame counts and phase."""
+    return _render_progress
 
 
 @app.get("/api/file-types")
@@ -148,7 +186,7 @@ async def list_effects():
 async def get_histogram():
     """Compute RGB + luminance histogram of the current frame."""
     if _state["current_frame"] is None:
-        raise HTTPException(status_code=400, detail="No frame loaded")
+        raise HTTPException(status_code=400, detail=_error_detail("no_frame", "No frame loaded"))
     histogram = compute_histogram(_state["current_frame"])
     return JSONResponse(content=histogram)
 
@@ -339,7 +377,7 @@ async def upload_video(file: UploadFile = File(...)):
     except Exception as e:
         tmp.close()
         os.unlink(tmp.name)
-        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail=_error_detail("upload_failed", f"Upload failed: {e}"))
     tmp.close()
 
     try:
@@ -410,9 +448,9 @@ def _filter_video_level_effects(effects: list[dict]) -> tuple[list[dict], list[s
 async def preview_effect(chain: EffectChain):
     """Apply effect chain to a single frame and return preview."""
     if _state["video_path"] is None:
-        raise HTTPException(status_code=400, detail="No video loaded")
+        raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
     if len(chain.effects) > MAX_CHAIN_LENGTH:
-        raise HTTPException(status_code=400, detail=f"Too many effects (max {MAX_CHAIN_LENGTH})")
+        raise HTTPException(status_code=400, detail=_error_detail("too_many_effects", f"Too many effects (max {MAX_CHAIN_LENGTH})"))
 
     try:
         frame = extract_single_frame(_state["video_path"], chain.frame_number)
@@ -454,7 +492,7 @@ async def preview_effect(chain: EffectChain):
     except Exception as e:
         import logging
         logging.exception("Preview failed")
-        raise HTTPException(status_code=500, detail="Effect processing failed")
+        raise HTTPException(status_code=500, detail=_error_detail("processing_failed", "Effect processing failed"))
 
 
 class TimelinePreviewRequest(BaseModel):
@@ -467,7 +505,7 @@ class TimelinePreviewRequest(BaseModel):
 async def preview_timeline(req: TimelinePreviewRequest):
     """Preview a frame with timeline-aware region effects and optional spatial masks."""
     if _state["video_path"] is None:
-        raise HTTPException(status_code=400, detail="No video loaded")
+        raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
 
     try:
         frame = extract_single_frame(_state["video_path"], req.frame_number)
@@ -561,7 +599,7 @@ async def freeze_region(req: FreezeRegionRequest):
     Returns path to the pre-rendered video file for frozen playback.
     """
     if _state["video_path"] is None:
-        raise HTTPException(status_code=400, detail="No video loaded")
+        raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
 
     from core.video_io import extract_frames, reassemble_video, load_frame, save_frame
     from core.automation import AutomationSession
@@ -668,7 +706,7 @@ class TimelineExportRequest(BaseModel):
 async def export_timeline(req: TimelineExportRequest):
     """Export with timeline regions — each region applies its own effects with optional spatial masks."""
     if _state["video_path"] is None:
-        raise HTTPException(status_code=400, detail="No video loaded")
+        raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
 
     from core.video_io import extract_frames, load_frame, save_frame
     from core.modulation import LfoModulator
@@ -712,9 +750,14 @@ async def export_timeline(req: TimelineExportRequest):
         extract_scale = min(1.0, target_w / source_w)
         frame_files = extract_frames(_state["video_path"], str(frames_dir), scale=extract_scale)
         if len(frame_files) > MAX_FRAMES_PER_RENDER:
-            raise HTTPException(status_code=400, detail=f"Video too long ({len(frame_files)} frames, max {MAX_FRAMES_PER_RENDER})")
+            raise HTTPException(status_code=400, detail=_error_detail("video_too_long", f"Video too long ({len(frame_files)} frames, max {MAX_FRAMES_PER_RENDER})"))
+
+        _render_progress["active"] = True
+        _render_progress["total_frames"] = len(frame_files)
+        _render_progress["phase"] = "processing"
 
         for i, fp in enumerate(frame_files):
+            _render_progress["current_frame"] = i
             frame = load_frame(fp)
             h, w = frame.shape[:2]
             original = frame.copy()
@@ -770,6 +813,8 @@ async def export_timeline(req: TimelineExportRequest):
                 processed = np.array(Image.fromarray(processed).resize((target_w, target_h), algo))
 
             save_frame(processed, str(processed_dir / f"frame_{i+1:06d}.png"))
+
+        _render_progress["phase"] = "encoding"
 
         # Build output
         timestamp = int(_time.time())
@@ -833,6 +878,9 @@ async def export_timeline(req: TimelineExportRequest):
                 "frames": len(list(seq_dir.glob("*.png"))),
                 "format": "png_seq", "dimensions": f"{target_w}x{target_h}",
             }
+
+        _render_progress["active"] = False
+        _render_progress["phase"] = "idle"
 
         size_mb = output_path.stat().st_size / (1024 * 1024)
         return {
@@ -1133,7 +1181,7 @@ async def export_video(export: ExportSettings):
     from core.modulation import LfoModulator
 
     if _state["video_path"] is None:
-        raise HTTPException(status_code=400, detail="No video loaded")
+        raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
 
     info = _state["video_info"]
     source_w, source_h = info["width"], info["height"]
@@ -1155,7 +1203,7 @@ async def export_video(export: ExportSettings):
         extract_scale = min(1.0, target_w / source_w)
         frame_files = extract_frames(_state["video_path"], str(frames_dir), scale=extract_scale)
         if len(frame_files) > MAX_FRAMES_PER_RENDER:
-            raise HTTPException(status_code=400, detail=f"Video too long ({len(frame_files)} frames, max {MAX_FRAMES_PER_RENDER})")
+            raise HTTPException(status_code=400, detail=_error_detail("video_too_long", f"Video too long ({len(frame_files)} frames, max {MAX_FRAMES_PER_RENDER})"))
 
         # Apply trim if specified
         start_idx = 0
@@ -1166,8 +1214,13 @@ async def export_video(export: ExportSettings):
             end_idx = max(start_idx + 1, min(export.frame_end + 1, len(frame_files)))
         frame_files = frame_files[start_idx:end_idx]
 
+        _render_progress["active"] = True
+        _render_progress["total_frames"] = len(frame_files)
+        _render_progress["phase"] = "processing"
+
         # Process each frame
         for i, fp in enumerate(frame_files):
+            _render_progress["current_frame"] = i
             frame = load_frame(fp)
 
             # Apply effects with mix
@@ -1294,6 +1347,9 @@ async def export_video(export: ExportSettings):
                             "-c:a", "aac", "-b:a", export.audio_bitrate, "-shortest"]
             cmd.append(str(output_path))
             subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+
+        _render_progress["active"] = False
+        _render_progress["phase"] = "idle"
 
         size_mb = output_path.stat().st_size / (1024 * 1024)
         return {

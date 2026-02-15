@@ -8,14 +8,15 @@ from PIL import Image
 
 
 def wave_distort(frame: np.ndarray, amplitude: float = 10.0,
-                 frequency: float = 0.05, direction: str = "horizontal") -> np.ndarray:
+                 frequency: float = 0.05, direction: str = "horizontal",
+                 frame_index: int = 0, total_frames: int = 1) -> np.ndarray:
     """Apply sine wave distortion to the image.
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
         amplitude: Pixel displacement amount.
         frequency: Wave frequency (higher = more waves).
-        direction: 'horizontal' or 'vertical'.
+        direction: 'horizontal', 'vertical', 'diagonal', or 'circular'.
 
     Returns:
         Distorted frame.
@@ -27,13 +28,23 @@ def wave_distort(frame: np.ndarray, amplitude: float = 10.0,
     if direction == "vertical":
         for x in range(w):
             shift = int(amplitude * np.sin(2 * np.pi * frequency * x))
-            col = frame[:, x, :]
-            result[:, x, :] = np.roll(col, shift, axis=0)
-    else:
+            result[:, x, :] = np.roll(frame[:, x, :], shift, axis=0)
+    elif direction == "diagonal":
+        for y in range(h):
+            shift = int(amplitude * np.sin(2 * np.pi * frequency * (y + y * w / h)))
+            result[y, :, :] = np.roll(frame[y, :, :], shift, axis=0)
+    elif direction == "circular":
+        cx, cy = w / 2.0, h / 2.0
+        y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+        dist = np.sqrt((x_grid - cx) ** 2 + (y_grid - cy) ** 2)
+        angle_offset = np.sin(dist * frequency * 0.1) * amplitude
+        new_x = np.clip(x_grid + angle_offset, 0, w - 1).astype(np.int32)
+        new_y = np.clip(y_grid + angle_offset * 0.5, 0, h - 1).astype(np.int32)
+        result = frame[new_y, new_x]
+    else:  # horizontal
         for y in range(h):
             shift = int(amplitude * np.sin(2 * np.pi * frequency * y))
-            row = frame[y, :, :]
-            result[y, :, :] = np.roll(row, shift, axis=0)
+            result[y, :, :] = np.roll(frame[y, :, :], shift, axis=0)
 
     return result
 
