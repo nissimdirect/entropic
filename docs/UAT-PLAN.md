@@ -1,7 +1,7 @@
 # Entropic Alpha v2 — User Acceptance Testing Plan
 
 > **Date:** 2026-02-09 (updated 2026-02-14)
-> **Version:** v0.6.0 (111 effects, desktop app, timeline editor, spatial masks, **CLI performance mode**, **Web UI Perform Mode**)
+> **Version:** v0.7.0-dev (115 effects, desktop app, timeline editor, spatial masks, **CLI performance mode**, **Web UI Perform Mode**, **Color Suite**, **LFO Map Operator**)
 > **Tester:** nissimdirect
 > **Prepared by:** CTO, Red Team, Mad Scientist, Lenny, Don Norman
 > **Updated:** Sections 22-27 for CLI Performance Mode. **Sections 28-34 for Web UI Perform Mode (v0.6.0).**
@@ -81,7 +81,7 @@ ffmpeg -version
 ```bash
 python3 -c "from effects import EFFECTS; print(f'{len(EFFECTS)} effects loaded')"
 ```
-**You should see:** `109 effects loaded`
+**You should see:** `115 effects loaded`
 **If you see an error (ImportError, ModuleNotFoundError):** A dependency might be missing. Copy the full error and tell Claude.
 
 **Command 4 — Check pygame (needed for performance mode):**
@@ -1836,3 +1836,185 @@ If you're short on time, test in this order:
 - **Timeline Export/Projects (Section 21):** 90%+ pass rate (14+ of 15)
 - **CLI Performance Mode (Sections 22-27):** 90%+ pass rate (53+ of 59), zero failures in 23B (safety) and 27B (stability)
 - **Web UI Perform Mode (Sections 28-34):** 90%+ pass rate (106+ of 117), zero failures in 34A (safety) and 34E (stability). **Test this first for live performance.**
+- **Cycle 2 (Sections 36-40):** 90%+ pass rate, zero failures in color accuracy tests
+
+---
+
+## UAT CYCLE 2 — Bug Fix Re-Tests + New Features (2026-02-15)
+
+> **Context:** These sections cover everything built AFTER UAT Cycle 1.
+> Cycle 1 findings: `docs/UAT-FINDINGS-2026-02-15.md` (116 tracked items).
+> Bug fixes applied, 4 new architecture features shipped, 115 effects total.
+
+---
+
+## SECTION 36: BUG FIX RE-TESTS (from Cycle 1 P0/P1)
+
+> Re-test every bug fixed in the Feb 15 sprint. If any FAIL, it's a regression.
+
+### 36A. P0 Fixes — Must All Pass
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 36A.1 | File upload works | Drag MP4 onto web UI | Video loads, preview shows first frame | |
+| 36A.2 | Upload error shown | Drag non-video file (e.g. .txt) | Error toast appears, no crash | |
+| 36A.3 | History order | Apply 3 effects, check history panel | Most recent at TOP, oldest at bottom | |
+| 36A.4 | Brailleart renders | Add brailleart effect | Braille Unicode chars (not question marks) | |
+| 36A.5 | Duotone reverts | Add duotone, adjust params, move back to defaults | Colors revert to original | |
+| 36A.6 | Scanlines flickr | Add scanlines, move flickr slider full range | No crash, renders at all positions | |
+
+### 36B. Pixel Physics (were broken, now fixed via frame_index)
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 36B.1 | Pixel gravity | Add pixelgravity, export 3-sec clip | Visible gravity displacement in output | |
+| 36B.2 | Pixel haunt | Add pixelhaunt, export 3-sec clip | Visible ghosting/haunting effect | |
+| 36B.3 | Pixel ink drop | Add pixelinkdrop, export 3-sec clip | Visible ink spread | |
+| 36B.4 | Pixel liquify | Add pixelliquify, export 3-sec clip | Visible liquefaction | |
+| 36B.5 | Pixel melt | Add pixelmelt, export 3-sec clip | Visible melting | |
+| 36B.6 | Pixel time warp | Add pixeltimewarp, export 3-sec clip | Visible temporal distortion | |
+| 36B.7 | Pixel vortex | Add pixelvortex, export 3-sec clip | Visible vortex spiral | |
+| 36B.8 | Byte corrupt | Add bytecorrupt, adjust intensity | Visible corruption artifacts | |
+| 36B.9 | Flow distort | Add flowdistort, adjust params | Visible flow displacement | |
+
+**Note:** These effects are STATEFUL — they accumulate over multiple frames. The preview (single frame) may show subtle or no change. **Test by exporting a short clip**, not just preview.
+
+### 36C. Other Fixes
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 36C.1 | Auto levels | Add autolevels to underexposed video | Visible brightness/contrast improvement | |
+| 36C.2 | Histogram EQ | Add histogrameq to low-contrast video | Visible contrast expansion | |
+| 36C.3 | Log slider scaling | Add an effect with wide float range (e.g. resonantfilter Q: 0-200) | Slider more sensitive at low values, less at high | |
+
+---
+
+## SECTION 37: COLOR SUITE (New — 4 effects)
+
+> Photoshop-level color tools. Test with a video that has recognizable colors.
+
+### 37A. Levels
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 37A.1 | Levels default | Add levels effect | No visible change (defaults are passthrough) | |
+| 37A.2 | Black point | Set input_black to 50 | Shadows get crushed (darker areas clip to black) | |
+| 37A.3 | White point | Set input_white to 200 | Highlights clip to white earlier | |
+| 37A.4 | Gamma | Set gamma to 0.5 | Midtones get brighter | |
+| 37A.5 | Gamma dark | Set gamma to 2.0 | Midtones get darker | |
+| 37A.6 | Per-channel | Set channel to "r", adjust input_black to 80 | Only red channel affected, image gets cyan tint | |
+
+### 37B. Curves
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 37B.1 | Curves default | Add curves effect | No visible change | |
+| 37B.2 | S-curve | Set points to [[0,0],[64,32],[128,128],[192,224],[255,255]] | More contrast (darker darks, brighter brights) | |
+| 37B.3 | Inverted | Set points to [[0,255],[255,0]] | Image inverts (negative) | |
+| 37B.4 | Per-channel | Set channel to "b", brighten midpoint | Blue cast in midtones | |
+
+### 37C. HSL Adjust
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 37C.1 | HSL default | Add hsladjust effect | Minimal/no change | |
+| 37C.2 | Hue shift all | Set target_hue "all", hue_shift 90 | All colors rotate 90 degrees | |
+| 37C.3 | Target reds | Set target_hue "reds", saturation -50 | Red areas desaturate, others unchanged | |
+| 37C.4 | Lightness | Set lightness to 30 | Overall image brightens | |
+
+### 37D. Color Balance
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 37D.1 | Color balance default | Add colorbalance effect | No visible change | |
+| 37D.2 | Warm shadows | Adjust shadow_red positive, shadow_blue negative | Shadows get warm/amber | |
+| 37D.3 | Cool highlights | Adjust highlight_blue positive | Highlights get cool/blue | |
+| 37D.4 | Midtone shift | Adjust midtone_green positive | Midtones get green tint | |
+
+---
+
+## SECTION 38: LFO MAP OPERATOR (New)
+
+> Ableton-style parameter modulation. Test requires adding an effect FIRST, then mapping LFO to its params.
+
+### 38A. Map Flow
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 38A.1 | LFO panel visible | Click LFO toggle/button in effects panel | LFO panel appears with waveform selector, rate, depth | |
+| 38A.2 | Map mode enter | Click "Map" button on LFO | UI enters map mode (visual indicator, knobs blink) | |
+| 38A.3 | Map to parameter | In map mode, click a parameter knob on any effect | Knob shows "mapped" indicator, LFO link created | |
+| 38A.4 | Map mode exit | Click "Map" again or press Escape | Map mode exits, mapped knob stays linked | |
+| 38A.5 | LFO modulates param | Set LFO rate=2, depth=0.5, play/export a clip | Parameter value oscillates visibly in output | |
+
+### 38B. Waveforms
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 38B.1 | Sine | Select sine waveform, map to brightness, export | Smooth oscillation | |
+| 38B.2 | Square | Select square waveform | Hard on/off switching | |
+| 38B.3 | Saw | Select saw waveform | Ramp up + instant reset | |
+| 38B.4 | Triangle | Select triangle waveform | Linear ramp up + ramp down | |
+| 38B.5 | Random (S&H) | Select random waveform | Stepped random values | |
+
+### 38C. Multi-Mapping
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 38C.1 | Map to 2 params | Map LFO to param A on effect 1, then param B on effect 2 | Both params modulate simultaneously | |
+| 38C.2 | Unmap | Right-click or unmap a mapped parameter | Parameter returns to static control | |
+| 38C.3 | LFO in export | Export video with LFO active | Modulation baked into output video | |
+
+---
+
+## SECTION 39: UI IMPROVEMENTS (New)
+
+### 39A. Collapsible Category Taxonomy
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 39A.1 | Categories visible | Open effects panel | Effects grouped by collapsible categories | |
+| 39A.2 | Collapse/expand | Click a category header | Category collapses/expands, effects hide/show | |
+| 39A.3 | All categories present | Count categories | Should see: ascii, color, destruction, distortion, dsp_filters, enhance, glitch, modulation, operators, physics, pixel, sidechain, temporal, texture (14 total) | |
+| 39A.4 | Effect count per category | Expand each category | Total across all categories = 115 | |
+
+### 39B. Quick Mode Status
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 39B.1 | Quick mode hidden | Load web UI | No "Quick" mode tab/button visible (flagged off) | |
+| 39B.2 | Timeline default | Load web UI | Timeline is the default/primary mode | |
+
+---
+
+## SECTION 40: REGRESSION SUITE
+
+> Quick smoke tests to confirm nothing broke.
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 40.1 | Server starts | `python3 server.py` | No errors, binds to :7860 | |
+| 40.2 | Upload + preview | Upload video, add pixelsort | Preview shows sorted pixels | |
+| 40.3 | Effect chain | Add blur → pixelsort → scanlines | All 3 visible in chain, preview shows combined | |
+| 40.4 | Export MP4 | Export 3-sec clip with effects | MP4 file created, plays in QuickTime | |
+| 40.5 | Perform mode | Switch to Perform mode, press 1-4 | Layers toggle, mixer responds | |
+| 40.6 | Test suite | `python3 -m pytest tests/ -q` | 811+ passed, 0 failed | |
+
+---
+
+## UPDATED SCORING SUMMARY (Cycle 2)
+
+| Section | Tests | Pass | Fail | Skip |
+|---------|-------|------|------|------|
+| 36. Bug Fix Re-Tests | 18 | | | |
+| 37. Color Suite | 18 | | | |
+| 38. LFO Map Operator | 13 | | | |
+| 39. UI Improvements | 6 | | | |
+| 40. Regression Suite | 6 | | | |
+| **Cycle 2 Total** | **61** | | | |
+| **Grand Total (Cycle 1 + 2)** | **533** | | | |
+
+**Cycle 2 ship criteria:**
+- Sections 36-37: 100% pass (bug fixes + new effects must work)
+- Section 38: 90%+ pass (LFO is new, some polish OK)
+- Section 39-40: 100% pass (UI + regression = must pass)
