@@ -430,7 +430,7 @@ def pixel_elastic(
         stiffness: Spring stiffness (0.05-0.8). Higher = snappier return.
         mass: Pixel mass (0.5-3.0). Heavier = slower, more momentum.
         force_type: What pushes pixels ("turbulence", "brightness",
-                    "edges", "radial", "vortex", "wave").
+                    "edges", "radial", "vortex", "wave", "shatter", "pulse").
         force_strength: How hard the push (1-20).
         damping: Energy loss per frame (0.8-0.99).
         concentrate_x: Force center X (0-1). Only used when concentrate_radius > 0.
@@ -504,6 +504,35 @@ def pixel_elastic(
             fx = force_strength * np.sin(y_grid / 20.0 + t * 4 + phase_x)
             fy = force_strength * 0.3 * np.cos(x_grid / 25.0 + t * 3 + phase_y)
 
+        elif force_type == "shatter":
+            # Fragmented displacement — breaks image into displaced blocks
+            y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+            block_size = max(8, int(30 - force_strength))
+            block_rng = np.random.default_rng(seed + int(t * 5))
+            bx = (x_grid / block_size).astype(int)
+            by = (y_grid / block_size).astype(int)
+            block_id = bx * 97 + by * 31 + seed
+            block_angles = np.vectorize(
+                lambda bid: np.random.default_rng(int(bid) % (2**31)).random() * 2 * np.pi
+            )(block_id).astype(np.float32)
+            block_mag = np.vectorize(
+                lambda bid: np.random.default_rng((int(bid) + 7) % (2**31)).random()
+            )(block_id).astype(np.float32)
+            fx = np.cos(block_angles) * block_mag * force_strength * 2
+            fy = np.sin(block_angles) * block_mag * force_strength * 2
+
+        elif force_type == "pulse":
+            # Concentric rings emanating from center
+            y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+            cx, cy = w / 2, h / 2
+            dx = x_grid - cx
+            dy = y_grid - cy
+            dist = np.sqrt(dx * dx + dy * dy) + 1.0
+            wave_freq = 0.05
+            ring = np.sin(dist * wave_freq - t * 6) * force_strength
+            fx = dx / dist * ring * 0.4
+            fy = dy / dist * ring * 0.4
+
         else:
             fx = np.zeros((h, w), dtype=np.float32)
             fy = np.zeros((h, w), dtype=np.float32)
@@ -523,12 +552,13 @@ def pixel_elastic(
         spring_fx = -stiffness * state["dx"]
         spring_fy = -stiffness * state["dy"]
 
-        # F_total = F_external + F_spring
-        # Inverse mass: mass=0.5→1.33, mass=1→0.8, mass=3→0.4, mass=5→0.29
-        # High mass is sluggish but still visibly moves (no dead zone)
-        mass_factor = 1.0 / (0.5 + mass * 0.5)
-        ax = (fx * 0.1 + spring_fx) * mass_factor
-        ay = (fy * 0.1 + spring_fy) * mass_factor
+        # Mass affects inertia (how sluggish), not force magnitude.
+        # High mass = slower acceleration but same eventual displacement.
+        # mass=0.1 → factor=1.82, mass=1 → factor=1.0, mass=3 → factor=0.5, mass=5 → factor=0.33
+        mass_factor = 1.0 / mass
+        # External force scaled so it visibly displaces even at high mass
+        ax = (fx * 0.15 + spring_fx) * mass_factor
+        ay = (fy * 0.15 + spring_fy) * mass_factor
 
         # Update velocity and position (Euler integration)
         state["vx"] = (state["vx"] + ax) * damping
@@ -862,6 +892,9 @@ def pixel_magnetic(
         rnx = nx * np.cos(angle) - ny * np.sin(angle)
         rny = nx * np.sin(angle) + ny * np.cos(angle)
 
+        # Clamp helper to prevent overflow near singularities
+        field_max = strength * 50.0
+
         if field_type == "dipole":
             # Multi-pole dipole: `poles` adds additional dipole sources
             bx = np.zeros((h, w), dtype=np.float32)
@@ -873,10 +906,12 @@ def pixel_magnetic(
                 py = pole_spread * np.sin(theta) if poles > 1 else 0.0
                 ddx = rnx - px
                 ddy = rny - py
-                r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
+                r = np.sqrt(ddx * ddx + ddy * ddy) + 0.05
                 sign = (-1) ** p
-                bx += sign * 3.0 * ddx * ddy / (r ** 4) * strength
-                by += sign * (2.0 * ddy * ddy - ddx * ddx) / (r ** 4) * strength
+                bx += sign * 3.0 * ddx * ddy / (r ** 3) * strength
+                by += sign * (2.0 * ddy * ddy - ddx * ddx) / (r ** 3) * strength
+            bx = np.clip(bx, -field_max, field_max)
+            by = np.clip(by, -field_max, field_max)
 
         elif field_type == "quadrupole":
             bx = np.zeros((h, w), dtype=np.float32)
@@ -888,18 +923,24 @@ def pixel_magnetic(
                 py = pole_spread * np.sin(theta)
                 ddx = rnx - px
                 ddy = rny - py
-                r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
+                r = np.sqrt(ddx * ddx + ddy * ddy) + 0.05
                 sign = (-1) ** p
-                bx += sign * ddx / (r ** 3) * strength
-                by += sign * ddy / (r ** 3) * strength
+                bx += sign * ddx / (r ** 2.5) * strength
+                by += sign * ddy / (r ** 2.5) * strength
+            bx = np.clip(bx, -field_max, field_max)
+            by = np.clip(by, -field_max, field_max)
 
         elif field_type == "toroidal":
             r = np.sqrt(rnx * rnx + rny * rny) + 0.01
-            ring_dist = np.abs(r - 0.3)
+            # poles controls number of lobes in the toroidal ring
+            ring_radius = 0.3
+            ring_dist = np.abs(r - ring_radius)
             ring_force = np.exp(-ring_dist * 10) * strength
-            # Seed-based ring radius variation
-            bx = -rny / r * ring_force
-            by = rnx / r * ring_force
+            # Multi-lobe: modulate around the ring using poles
+            theta_field = np.arctan2(rny, rnx)
+            lobe_mod = 0.5 + 0.5 * np.cos(theta_field * poles)
+            bx = -rny / r * ring_force * lobe_mod
+            by = rnx / r * ring_force * lobe_mod
 
         else:  # chaotic
             field_rng = np.random.default_rng(seed)
@@ -910,19 +951,26 @@ def pixel_magnetic(
                 rpy = (field_rng.random() - 0.5) * 0.8
                 ddx = rnx - rpx
                 ddy = rny - rpy
-                r = np.sqrt(ddx * ddx + ddy * ddy) + 0.01
-                bx += ddy / (r ** 3) * strength * 0.2
-                by += -ddx / (r ** 3) * strength * 0.2
+                r = np.sqrt(ddx * ddx + ddy * ddy) + 0.05
+                bx += ddy / (r ** 2.5) * strength * 0.3
+                by += -ddx / (r ** 2.5) * strength * 0.3
+            bx = np.clip(bx, -field_max, field_max)
+            by = np.clip(by, -field_max, field_max)
 
         # Lorentz-like force: F perpendicular to v
-        # Stronger scaling so poles/damping/rotation produce visible changes
+        # Clamp velocities to prevent overflow in cross products
+        vel_max = 50.0
+        state["vx"] = np.clip(state["vx"], -vel_max, vel_max)
+        state["vy"] = np.clip(state["vy"], -vel_max, vel_max)
+
         if frame_index == 0 and step == 0:
-            state["vx"] = bx * 0.05
-            state["vy"] = by * 0.05
+            state["vx"] = bx * 0.08
+            state["vy"] = by * 0.08
         else:
             b_mag = np.sqrt(bx * bx + by * by) + 0.01
-            fx = state["vy"] * b_mag * 0.3 + bx * 0.05
-            fy = -state["vx"] * b_mag * 0.3 + by * 0.05
+            b_mag = np.minimum(b_mag, field_max)
+            fx = state["vy"] * b_mag * 0.2 + bx * 0.08
+            fy = -state["vx"] * b_mag * 0.2 + by * 0.08
             state["vx"] = state["vx"] * damping + fx
             state["vy"] = state["vy"] * damping + fy
 
@@ -1284,18 +1332,17 @@ def pixel_quantum(
             tunnel_push = in_barrier * tunnel_mask * np.sign(dist_to_barrier) * barrier_width_px * 2
             fx_total += tunnel_push * 0.3
 
-        # Heisenberg uncertainty: starts at 30% and ramps to full
-        # (was starting at 0 which made uncertainty slider appear dead)
+        # Heisenberg uncertainty: visible from the start, scales with slider
         sim_frame = frame_index + step
         sim_total = max(total_frames, iterations * 2) if _is_preview(frame_index, total_frames) else total_frames
         ramp = min(1.0, sim_frame / max(sim_total * 0.3, 1))
-        uncertainty_t = uncertainty * (0.3 + 0.7 * ramp)
+        uncertainty_t = uncertainty * (0.4 + 0.6 * ramp)
         unc_rng = np.random.default_rng(seed + sim_frame * 7)
-        fx_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.4
-        fy_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 0.4
+        fx_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 1.2
+        fy_total += (unc_rng.random((h, w)).astype(np.float32) - 0.5) * uncertainty_t * 1.2
 
-        state["vx"] = state["vx"] * 0.85 + fx_total * 0.15
-        state["vy"] = state["vy"] * 0.85 + fy_total * 0.15
+        state["vx"] = state["vx"] * 0.85 + fx_total * 0.2
+        state["vy"] = state["vy"] * 0.85 + fy_total * 0.2
         state["dx"] += state["vx"]
         state["dy"] += state["vy"]
 
@@ -1307,20 +1354,25 @@ def pixel_quantum(
 
     # Superposition: ghost copies at offset positions
     if superposition > 0:
-        # Decoherence: fraction of render duration before ghosts fade
-        # decoherence=0.02 → ghosts last ~50 frames; =0.1 → ~10 frames
-        ghost_decay_frames = max(1.0, 1.0 / max(decoherence, 0.001))
-        ghost_strength = superposition * max(0, 1.0 - frame_index / ghost_decay_frames)
+        # Decoherence controls fade rate: low=ghosts persist, high=ghosts vanish fast
+        # decoherence=0.0 → ghosts never fade; =0.02 → fade over ~50 frames; =0.1 → ~10 frames
+        if decoherence > 0:
+            ghost_decay_frames = max(1.0, 1.0 / decoherence)
+            ghost_strength = superposition * max(0.0, 1.0 - frame_index / ghost_decay_frames)
+        else:
+            ghost_strength = superposition
         if ghost_strength > 0.01:
             result = result.astype(np.float32)
-            # Wider ghost offsets so superposition is clearly visible
-            ghost_spread = max(uncertainty_t * 5, 8.0)
-            for copy_i in range(2):
+            # Ghost offset proportional to uncertainty (more uncertain = wider spread)
+            ghost_spread = max(uncertainty_t * 6, 12.0)
+            num_ghosts = 3
+            ghost_weight = ghost_strength * 0.7
+            for copy_i in range(num_ghosts):
                 offset_x = np.sin(t * (1.5 + copy_i) + copy_i * 2.5) * ghost_spread
                 offset_y = np.cos(t * (1.2 + copy_i) + copy_i * 1.8) * ghost_spread
                 ghost = _remap_frame(frame, state["dx"] + offset_x, state["dy"] + offset_y, boundary)
-                result += ghost.astype(np.float32) * ghost_strength * 0.5
-            result /= (1.0 + ghost_strength)
+                result += ghost.astype(np.float32) * ghost_weight
+            result /= (1.0 + ghost_weight * num_ghosts)
 
     # Barrier visualization: faint green vertical lines
     result = result.astype(np.float32)

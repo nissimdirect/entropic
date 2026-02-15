@@ -662,8 +662,8 @@ EFFECTS = {
         "category": "physics",
         "params": {"stiffness": 0.3, "mass": 1.0, "force_type": "turbulence", "force_strength": 5.0, "damping": 0.9, "concentrate_x": 0.5, "concentrate_y": 0.5, "concentrate_radius": 0.0, "seed": 42, "boundary": "mirror"},
         "param_ranges": {"stiffness": {"min": 0.05, "max": 0.8}, "mass": {"min": 0.1, "max": 5.0}, "force_strength": {"min": 1.0, "max": 20.0}, "damping": {"min": 0.8, "max": 0.99}},
-        "param_descriptions": {"stiffness": "Spring return force (high=snappy, low=loose)", "mass": "Pixel inertia (high=slow heavy movement)", "force_type": "turbulence/brightness/edges/radial/vortex/wave", "force_strength": "How hard the force pushes", "damping": "Velocity decay (high=more damped)", "concentrate_x": "Focus point X (0-1)", "concentrate_y": "Focus point Y (0-1)", "concentrate_radius": "Focus area size (0=everywhere)"},
-        "description": "Elastic — springs + 6 forces (turbulence/brightness/edges/radial/vortex/wave) + spatial concentration",
+        "param_descriptions": {"stiffness": "Spring return force (high=snappy, low=loose)", "mass": "Pixel inertia (high=slow heavy movement)", "force_type": "turbulence/brightness/edges/radial/vortex/wave/shatter/pulse", "force_strength": "How hard the force pushes", "damping": "Velocity decay (high=more damped)", "concentrate_x": "Focus point X (0-1)", "concentrate_y": "Focus point Y (0-1)", "concentrate_radius": "Focus area size (0=everywhere)"},
+        "description": "Elastic — springs + 8 forces (turbulence/brightness/edges/radial/vortex/wave/shatter/pulse) + spatial concentration",
         "alias_of": "pixeldynamics",
     },
     "pixelmelt": {

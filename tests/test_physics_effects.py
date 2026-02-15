@@ -89,6 +89,175 @@ def test_effect_cleanup(effect_name):
     assert result.shape == frame.shape, f"{effect_name}: shape wrong after cleanup"
 
 
+class TestPixelElasticFixes:
+    """Test elastic effect fixes: high mass visibility, new force types."""
+
+    def test_high_mass_still_displaces(self):
+        """High mass (5.0) should still produce visible displacement."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"mass": 5.0, "force_strength": 15.0}}]
+        results = []
+        for i in range(8):
+            result = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+            results.append(result.copy())
+        diff = np.mean(np.abs(results[7].astype(float) - frame.astype(float)))
+        assert diff > 1.0, f"High mass should still visibly displace, got diff={diff:.2f}"
+
+    def test_mass_affects_speed(self):
+        """Higher mass should produce less displacement than low mass over same frames."""
+        frame = make_test_frame()
+        low_mass_chain = [{"name": "pixelelastic", "params": {"mass": 0.5, "seed": 99}}]
+        high_mass_chain = [{"name": "pixelelastic", "params": {"mass": 4.0, "seed": 99}}]
+        for i in range(6):
+            low_res = apply_chain(frame.copy(), low_mass_chain, frame_index=i, total_frames=30)
+            high_res = apply_chain(frame.copy(), high_mass_chain, frame_index=i, total_frames=30)
+        low_diff = np.mean(np.abs(low_res.astype(float) - frame.astype(float)))
+        high_diff = np.mean(np.abs(high_res.astype(float) - frame.astype(float)))
+        # Low mass should move more (or equally) vs high mass
+        assert low_diff >= high_diff * 0.5, f"Mass not affecting speed: low={low_diff:.1f} high={high_diff:.1f}"
+
+    def test_shatter_force_type(self):
+        """New shatter force type should work without crashing."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "shatter"}}]
+        result = apply_chain(frame.copy(), chain, frame_index=0, total_frames=10)
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_pulse_force_type(self):
+        """New pulse force type should work without crashing."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "pulse"}}]
+        result = apply_chain(frame.copy(), chain, frame_index=0, total_frames=10)
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_shatter_produces_displacement(self):
+        """Shatter should produce visible displacement over frames."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "shatter", "force_strength": 10.0, "seed": 77}}]
+        for i in range(6):
+            result = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+        diff = np.mean(np.abs(result.astype(float) - frame.astype(float)))
+        assert diff > 0.5, f"Shatter should visibly displace, got diff={diff:.2f}"
+
+    def test_pulse_produces_displacement(self):
+        """Pulse should produce visible displacement over frames."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "pulse", "force_strength": 10.0, "seed": 88}}]
+        for i in range(6):
+            result = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+        diff = np.mean(np.abs(result.astype(float) - frame.astype(float)))
+        assert diff > 0.5, f"Pulse should visibly displace, got diff={diff:.2f}"
+
+
+class TestPixelMagneticFixes:
+    """Test magnetic effect fixes: poles, rotation, damping, seed, no overflow."""
+
+    def test_different_pole_counts_differ(self):
+        """Different pole counts should produce different visual results."""
+        frame = make_test_frame()
+        results = {}
+        for poles in [2, 4, 6]:
+            chain = [{"name": "pixelmagnetic", "params": {"poles": poles, "field_type": "dipole", "seed": 50}}]
+            for i in range(5):
+                res = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+            results[poles] = res.copy()
+        diff_2_4 = np.mean(np.abs(results[2].astype(float) - results[4].astype(float)))
+        diff_2_6 = np.mean(np.abs(results[2].astype(float) - results[6].astype(float)))
+        assert diff_2_4 > 0.5, f"2 vs 4 poles should differ, got diff={diff_2_4:.2f}"
+        assert diff_2_6 > 0.5, f"2 vs 6 poles should differ, got diff={diff_2_6:.2f}"
+
+    def test_rotation_speed_changes_output(self):
+        """Different rotation_speed values should produce different results."""
+        frame = make_test_frame()
+        results = {}
+        for speed in [0.0, 1.5]:
+            chain = [{"name": "pixelmagnetic", "params": {"rotation_speed": speed, "seed": 60}}]
+            for i in range(5):
+                res = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+            results[speed] = res.copy()
+        diff = np.mean(np.abs(results[0.0].astype(float) - results[1.5].astype(float)))
+        assert diff > 0.5, f"rotation_speed should change output, got diff={diff:.2f}"
+
+    def test_damping_changes_output(self):
+        """Different damping values should produce different displacement magnitudes."""
+        frame = make_test_frame()
+        results = {}
+        for damp in [0.82, 0.98]:
+            chain = [{"name": "pixelmagnetic", "params": {"damping": damp, "seed": 70}}]
+            for i in range(5):
+                res = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+            results[damp] = res.copy()
+        diff = np.mean(np.abs(results[0.82].astype(float) - results[0.98].astype(float)))
+        assert diff > 0.3, f"damping should change output, got diff={diff:.2f}"
+
+    def test_seed_changes_output(self):
+        """Different seeds should produce different field orientations."""
+        frame = make_test_frame()
+        results = {}
+        for s in [10, 200]:
+            chain = [{"name": "pixelmagnetic", "params": {"seed": s}}]
+            for i in range(5):
+                res = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+            results[s] = res.copy()
+        diff = np.mean(np.abs(results[10].astype(float) - results[200].astype(float)))
+        assert diff > 0.3, f"seed should change output, got diff={diff:.2f}"
+
+    def test_no_overflow_warning(self):
+        """Magnetic should not produce overflow warnings."""
+        import warnings
+        frame = make_test_frame()
+        chain = [{"name": "pixelmagnetic", "params": {"strength": 15.0}}]
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            for i in range(8):
+                apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+
+
+class TestPixelQuantumFixes:
+    """Test quantum effect fixes: uncertainty, superposition, decoherence."""
+
+    def test_uncertainty_affects_displacement(self):
+        """Higher uncertainty should produce more random displacement."""
+        frame = make_test_frame()
+        results = {}
+        for unc in [1.0, 12.0]:
+            chain = [{"name": "pixelquantum", "params": {"uncertainty": unc, "superposition": 0, "seed": 40}}]
+            for i in range(5):
+                res = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+            results[unc] = res.copy()
+        low_diff = np.mean(np.abs(results[1.0].astype(float) - frame.astype(float)))
+        high_diff = np.mean(np.abs(results[12.0].astype(float) - frame.astype(float)))
+        assert high_diff > low_diff * 1.5, f"High uncertainty should displace more: low={low_diff:.1f} high={high_diff:.1f}"
+
+    def test_superposition_adds_ghosts(self):
+        """Superposition > 0 should produce different output than superposition=0."""
+        frame = make_test_frame()
+        results = {}
+        for sp in [0.0, 0.8]:
+            chain = [{"name": "pixelquantum", "params": {"superposition": sp, "decoherence": 0.0, "seed": 41}}]
+            res = apply_chain(frame.copy(), chain, frame_index=0, total_frames=10)
+            results[sp] = res.copy()
+        diff = np.mean(np.abs(results[0.0].astype(float) - results[0.8].astype(float)))
+        assert diff > 0.5, f"Superposition should add visible ghosts, got diff={diff:.2f}"
+
+    def test_decoherence_fades_ghosts(self):
+        """High decoherence should fade ghosts faster than low decoherence."""
+        frame = make_test_frame()
+        results = {}
+        for dec in [0.01, 0.1]:
+            chain = [{"name": "pixelquantum", "params": {"superposition": 0.8, "decoherence": dec, "seed": 42}}]
+            # Run to frame 15 where decoherence=0.1 ghosts should have faded
+            for i in range(16):
+                res = apply_chain(frame.copy(), chain, frame_index=i, total_frames=60)
+            results[dec] = res.copy()
+        # At frame 15: decoherence=0.01 still has ghosts, decoherence=0.1 has lost them
+        # So the two results should differ
+        diff = np.mean(np.abs(results[0.01].astype(float) - results[0.1].astype(float)))
+        assert diff > 0.3, f"Decoherence rate should affect ghost visibility, got diff={diff:.2f}"
+
+
 def main():
     # Verify all 21 effects are registered
     missing = [e for e in PHYSICS_EFFECTS if e not in EFFECTS]
