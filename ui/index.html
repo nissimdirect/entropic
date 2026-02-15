@@ -80,12 +80,7 @@
             <input type="file" id="file-input" accept="video/*,image/*,.gif,.pdf,.zip,.txt,.csv,.json,.xml,.html,.wav,.mp3,.aiff,.flac,.psd,.ai,.svg">
             <span id="file-name">No file loaded</span>
         </div>
-        <div class="mix-control" title="Dry/Wet: 0% = original, 100% = full effect">
-            <label>Dry/Wet</label>
-            <input type="range" id="mix-slider" min="0" max="100" value="100" oninput="onMixChange(this.value)">
-            <span id="mix-value">100%</span>
-            <span class="mix-hint">Original &#x2190; &#x2192; Effect</span>
-        </div>
+        <!-- Global mix slider removed — per-effect dry/wet and per-layer opacity handle this -->
         <div class="mode-toggle">
             <!-- Quick mode flagged off (FEATURE_QUICK_MODE=false). Button preserved, hidden. -->
             <button class="mode-btn" data-mode="quick" onclick="setMode('quick')" style="display:none">Quick</button>
@@ -139,6 +134,18 @@
             <span id="perf-hud-rec"></span>
             <span id="perf-hud-time"></span>
             <span id="perf-hud-events"></span>
+            <span id="perf-hud-buffer"></span>
+            <span id="perf-hud-keyboard" style="display:none;color:#b266ff;font-weight:700;">PERFORM</span>
+        </div>
+        <div id="keyboard-hint-overlay" style="display:none">
+            <div class="key-hint"><kbd>Q</kbd> L1</div>
+            <div class="key-hint"><kbd>W</kbd> L2</div>
+            <div class="key-hint"><kbd>E</kbd> L3</div>
+            <div class="key-hint"><kbd>R</kbd> L4</div>
+            <div class="key-hint"><kbd>A</kbd> L5</div>
+            <div class="key-hint"><kbd>S</kbd> L6</div>
+            <div class="key-hint"><kbd>D</kbd> L7</div>
+            <div class="key-hint"><kbd>F</kbd> L8</div>
         </div>
         <div id="frame-info"></div>
         <div id="diff-toolbar" style="display:none">
@@ -192,10 +199,12 @@
     <!-- PERFORM: Transport Bar (between preview and mixer) -->
     <div id="perform-transport">
         <div class="transport-left">
-            <button id="perf-play-btn" onclick="perfTogglePlay()" title="Space">&#9654; Play</button>
-            <button id="perf-rec-btn" onclick="perfToggleRecord()" title="R">&#9679; Rec</button>
-            <button onclick="perfPanic()" title="Shift+P">&#8634; Panic</button>
-            <button id="perf-loop-btn" onclick="perfToggleLoop()" title="Loop">⟲ Loop</button>
+            <button id="perf-play-btn" onclick="perfTogglePlay()" title="Space" data-tooltip="Play/pause perform mode playback" onmouseenter="showInfoViewText('PLAY: Start or pause perform mode playback (Space). Layers render at 15fps preview rate.')" onmouseleave="showInfoViewText('')">&#9654; Play</button>
+            <button id="perf-rec-btn" onclick="perfToggleRecord()" title="R" data-tooltip="Toggle explicit recording — captures trigger events to session" onmouseenter="showInfoViewText('REC: Toggle explicit recording (R). Events are captured to a session buffer. Stop to Review, Bake to Timeline, Save, or Discard.')" onmouseleave="showInfoViewText('')">&#9679; Rec</button>
+            <button id="perf-auto-btn" onclick="toggleAutoRecording()" title="Shift+R" data-tooltip="Arm automation recording — knob movements are captured as timeline automation lanes" onmouseenter="showInfoViewText('AUTO: Arm automation recording (Shift+R). Move any knob during playback to record parameter changes as timeline automation lanes.')" onmouseleave="showInfoViewText('')">AUTO</button>
+            <button id="perf-capture-btn" onclick="capturePerformBuffer()" title="Cmd+Shift+C" data-tooltip="Capture retroactive buffer — claim the last 60s of performance input" onmouseenter="showInfoViewText('CAPTURE: Claim the last 60 seconds of performance input without having pressed Record (Cmd+Shift+C). Like Ableton MIDI Capture.')" onmouseleave="showInfoViewText('')">Capture</button>
+            <button onclick="perfPanic()" title="Shift+P" data-tooltip="Panic — reset all layers to default state" onmouseenter="showInfoViewText('PANIC: Immediately reset all layer states, stop envelopes, clear triggers (Shift+P).')" onmouseleave="showInfoViewText('')">&#8634; Panic</button>
+            <button id="perf-loop-btn" onclick="perfToggleLoop()" title="Loop">&#10226; Loop</button>
         </div>
         <div class="transport-center">
             <span id="perf-time">0:00:00</span> / <span id="perf-duration">--:--</span>
@@ -445,10 +454,18 @@
                 <div class="sc-row"><kbd>M</kbd> Mute track</div>
                 <div class="sc-row"><kbd>S</kbd> Solo track</div>
                 <h3 data-shortcut-mode="perform">Perform</h3>
-                <div class="sc-row"><kbd>1-4</kbd> Trigger layers</div>
+                <div class="sc-row"><kbd>1-8</kbd> Trigger layers (one-shot)</div>
                 <div class="sc-row"><kbd>Space</kbd> Play/Pause</div>
                 <div class="sc-row"><kbd>R</kbd> Toggle recording</div>
+                <div class="sc-row"><kbd>Shift+R</kbd> Automation record (knobs)</div>
                 <div class="sc-row"><kbd>Shift+P</kbd> Panic (reset all)</div>
+                <div class="sc-row"><kbd>Cmd+Shift+C</kbd> Capture buffer</div>
+                <h3 data-shortcut-mode="perform">Keyboard Perform</h3>
+                <div class="sc-row"><kbd>M</kbd> Toggle keyboard mode</div>
+                <div class="sc-row"><kbd>Q/W/E/R</kbd> Trigger L1-L4</div>
+                <div class="sc-row"><kbd>A/S/D/F</kbd> Trigger L5-L8</div>
+                <div class="sc-row"><kbd>K</kbd> Toggle key hints</div>
+                <div class="sc-row"><kbd>Esc</kbd> Panic + exit mode</div>
             </div>
         </div>
     </div>

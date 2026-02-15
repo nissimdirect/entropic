@@ -67,6 +67,26 @@ Individual blend control for each effect in the chain.
 
 **Problem solved:** No way to partially apply an effect — it was all or nothing.
 
+### Performance Features (3 new)
+Three features that close the biggest usability gulfs in Perform mode.
+
+- **Keyboard Input Mode** — Press **M** to enter keyboard perform mode. Q/W/E/R trigger layers 1-4, A/S/D/F trigger layers 5-8. Keys respect gate/adsr trigger modes (hold=on, release=off). Press **K** to show key hint overlay. **Escape** panics all layers and exits mode. Purple "PERFORM" HUD indicator and canvas outline.
+- **Retroactive Buffer** — Always-on circular buffer captures the last 60 seconds of all trigger events, even without pressing Record. Press **Capture** button (or **Cmd+Shift+C**) to claim the buffer. Claimed events merge into a performance session for Review, Bake to Timeline, Save, or Discard. Buffer indicator shows duration in HUD. 50,000 event cap with automatic eviction.
+- **Automation Recording** — Press **AUTO** button (or **Shift+R**) to arm automation recording. During playback, any knob movement is captured as timeline automation lanes. Keyframe thinning at ~10fps prevents overdense data (skips if frame delta < 3 or value change < 1%). Lanes auto-commit when playback stops. Knobs being recorded glow red. HUD shows `[AUTO]` when armed.
+
+**Problem solved:** "I forgot to hit Record" (Retroactive Buffer), "How do I record knob movements?" (Automation Recording), "How do I trigger without mouse?" (Keyboard Input). Mental models: Ableton MIDI Capture, Ableton Automation Arm, Resolume keyboard overlay.
+
+### UX Refactor (17 improvements)
+Discovery, favorites, info panel, complexity meter, hover previews, parameter presets, whimsy effects.
+
+- **Effect search** with fuzzy matching, tag search, live filtering
+- **Favorites system** — Star effects, persisted to localStorage, "Favorites" pseudo-category at top
+- **Info View panel** — Ableton-style bottom-left info bar, hover any control for context
+- **Hover previews** — Effect thumbnails on hover in browser, cached per-effect
+- **Complexity meter** — Visual indicator of chain complexity (green/yellow/red)
+- **Parameter presets** — Save/load per-effect parameter snapshots, reset to defaults
+- **8 Whimsy effects** — Kaleidoscope, Soft Bloom, Shape Overlay, Lens Flare, Watercolor, Rainbow Shift, Sparkle, Film Grain Warm
+
 ---
 
 ## Breaking Changes
@@ -88,7 +108,7 @@ Individual blend control for each effect in the chain.
 | Chain Effects Creatively | GOOD | GOOD | No change (already strong) |
 | Correct Color Professionally | INSUFFICIENT | PROFESSIONAL | Levels, Curves, HSL, Color Balance, Histogram |
 | Automate & Modulate | BUILT (LFO Map) | BUILT | LFO Map operator (from other session) |
-| Perform Live | HIDDEN | ACCESSIBLE | Perform toggle in Timeline |
+| Perform Live | HIDDEN | PROFESSIONAL | Keyboard perform, retroactive buffer, automation recording, perform toggle |
 | Export | BROKEN | WORKING | Upload fix unblocks export |
 | Understand Failures | TERRIBLE | ACCEPTABLE | Toast system, tooltips, error messages |
 
@@ -101,7 +121,7 @@ Individual blend control for each effect in the chain.
 | Visibility of system status | 2/10 | 7/10 | Toasts, loading states, progress bars |
 | Consistency and standards | 5/10 | 7/10 | Collapsible taxonomy, unified mode |
 | Error prevention | 3/10 | 6/10 | Parameter validation, bounds checking |
-| Recognition over recall | 4/10 | 7/10 | Tooltips, folder descriptions, labels |
+| Recognition over recall | 4/10 | 8/10 | Tooltips, folder descriptions, labels, keyboard hint overlay, info-view hover |
 | Help recognize/recover errors | 1/10 | 6/10 | Error toasts with details, no silent failures |
 
 ---
@@ -115,9 +135,9 @@ Individual blend control for each effect in the chain.
 - `effects/color.py` — Added: levels, curves, hsl_adjust, color_balance, compute_histogram
 - `effects/__init__.py` — Registered new color effects, added CATEGORY_ORDER
 - `server.py` — Added POST /api/histogram endpoint
-- `ui/static/app.js` — Collapsible taxonomy, toast system, error wiring, per-effect mix, perform toggle, color suite UI
-- `ui/static/style.css` — Toast styles, folder styles, histogram canvas, color suite panels, perform sub-panel
-- `ui/index.html` — Toast container div, perform panel restructure
+- `ui/static/app.js` — Collapsible taxonomy, toast system, error wiring, per-effect mix, perform toggle, color suite UI, keyboard perform mode, retroactive buffer, automation recording, info-view tooltips
+- `ui/static/style.css` — Toast styles, folder styles, histogram canvas, color suite panels, perform sub-panel, keyboard perform styles, auto-recording knob glow, key hint overlay, buffer indicator
+- `ui/index.html` — Toast container div, perform panel restructure, AUTO/Capture transport buttons, HUD buffer/keyboard indicators, key hint overlay, shortcut reference additions, info-view tooltips on transport
 - `tests/test_color_suite.py` — New test file for color effects
 - `tests/test_taxonomy.py` — New test file for category validation
 - `tests/test_mix.py` — Updated with per-effect mix tests

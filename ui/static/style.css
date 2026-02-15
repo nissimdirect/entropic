@@ -2114,6 +2114,71 @@ h3 .count {
     50% { opacity: 0.6; }
 }
 
+/* Automation Recording button */
+#perf-auto-btn.auto-armed {
+    background: #ff4444;
+    color: #000;
+    border-color: #ff4444;
+    animation: rec-pulse 1s ease infinite;
+}
+
+/* Knob recording indicator (red arc glow) */
+.knob-container.auto-recording .knob {
+    box-shadow: 0 0 8px 2px rgba(255, 68, 68, 0.6);
+    border-radius: 50%;
+}
+.knob-container.auto-recording .arc-fill {
+    stroke: #ff4444 !important;
+}
+
+/* Capture button — pulses when buffer has content */
+#perf-capture-btn {
+    position: relative;
+}
+
+/* Keyboard Perform Mode */
+.keyboard-perform-active #canvas-area {
+    outline: 2px solid #b266ff;
+    outline-offset: -2px;
+}
+
+#keyboard-hint-overlay {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    z-index: 20;
+    pointer-events: none;
+    max-width: 200px;
+}
+
+.key-hint {
+    background: rgba(0, 0, 0, 0.75);
+    color: #b266ff;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: monospace;
+    white-space: nowrap;
+}
+
+.key-hint kbd {
+    background: #333;
+    color: #fff;
+    padding: 1px 4px;
+    border-radius: 2px;
+    margin-right: 3px;
+    font-size: 10px;
+}
+
+/* Buffer indicator in HUD */
+#perf-hud-buffer {
+    color: #4488ff;
+    font-size: 11px;
+}
+
 .transport-center {
     flex: 1;
     display: flex;
@@ -2515,6 +2580,188 @@ h3 .count {
 
 .channel-strip.master-strip .channel-strip-header {
     border-bottom-color: var(--text-dim);
+}
+
+/* Master Bus Effects Section */
+.master-fx-section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.master-fx-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.03);
+    font-size: 10px;
+    color: var(--text-secondary);
+    transition: background 0.15s;
+}
+
+.master-fx-header:hover {
+    background: rgba(255,255,255,0.06);
+}
+
+.master-fx-label {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.master-fx-toggle {
+    font-size: 10px;
+    color: var(--text-dim);
+}
+
+.master-fx-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 4px 0;
+}
+
+.master-fx-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 3px 6px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.04);
+    font-size: 10px;
+    color: var(--text);
+}
+
+.master-fx-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.master-fx-remove {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 2px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.master-fx-remove:hover {
+    color: #ff4444;
+}
+
+.master-fx-add {
+    width: 100%;
+    padding: 3px 4px;
+    border: 1px dashed var(--border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.master-fx-add:hover {
+    border-color: var(--accent);
+    color: var(--text);
+}
+
+.strip-fader-label {
+    font-size: 9px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    text-align: center;
+    display: block;
+    margin-bottom: 2px;
+}
+
+/* === Per-Layer LFO (Opacity Modulation) === */
+.strip-lfo-row {
+    display: flex;
+    gap: 2px;
+    padding: 0 4px;
+}
+.strip-lfo-btn {
+    flex: 1;
+    padding: 2px 0;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.strip-lfo-btn:hover { border-color: var(--accent); }
+.strip-lfo-btn.lfo-active {
+    background: var(--accent);
+    color: var(--bg-dark);
+    border-color: var(--accent);
+    animation: lfo-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes lfo-pulse {
+    0% { opacity: 0.85; }
+    100% { opacity: 1; }
+}
+.strip-lfo-cfg-btn {
+    width: 22px;
+    padding: 2px 0;
+    font-size: 10px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 2px;
+    cursor: pointer;
+}
+.strip-lfo-cfg-btn:hover { border-color: var(--accent); color: var(--text); }
+.strip-lfo-cfg {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 4px;
+    margin: 2px 4px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 9px;
+}
+.strip-lfo-cfg label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.strip-lfo-cfg select {
+    flex: 1;
+    font-size: 9px;
+    background: var(--bg-mid);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 2px;
+    padding: 1px 2px;
+}
+.strip-lfo-cfg input[type="range"] {
+    flex: 1;
+    height: 12px;
+    accent-color: var(--accent);
+}
+.strip-lfo-cfg .lfo-rate-val,
+.strip-lfo-cfg .lfo-depth-val {
+    min-width: 28px;
+    text-align: right;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
 }
 
 /* === LFO PANEL === */

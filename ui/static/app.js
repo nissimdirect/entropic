@@ -572,6 +572,15 @@ let perfReviewFrameMap = {};      // Frame->events map for review playback
 const PERF_FPS = 15;             // Preview framerate
 const PERF_MAX_EVENTS = 50000;   // Buffer cap (same as CLI)
 const PERF_LAYER_COLORS = ['#ff4444', '#4488ff', '#44cc44', '#ffcc00'];  // L1-L4
+let perfMasterEffects = [];       // Master bus effect chain [{name, params}]
+let perfMasterExpanded = false;   // Whether master effects panel is expanded
+let perfLayerLfos = {};           // Per-layer LFO state {layer_id: {enabled, waveform, rate, depth, phase}}
+let keyboardPerformMode = false;  // M key toggle — Q/W/E/R/A/S/D/F trigger layers
+let autoRecording = false;        // Automation arm — record knob movements as timeline automation
+let autoRecordLanes = {};         // {deviceId_paramName: [{frame, value}, ...]}
+const CAPTURE_BUFFER_SECONDS = 60;
+const CAPTURE_BUFFER_MAX_EVENTS = 50000;
+let captureBuffer = [];           // [{frame, layerId, param, value, timestamp}]
 
 // ============ HISTORY (Undo/Redo) ============
 
@@ -1270,6 +1279,12 @@ function setupKeyboard() {
             timelineEditor.fitToWindow();
             return;
         }
+        // Cmd+Shift+C = Capture retroactive buffer
+        if (isMod(e) && e.shiftKey && e.key === 'c') {
+            e.preventDefault();
+            capturePerformBuffer();
+            return;
+        }
         // Cmd+W = Close (same as quit in single-window)
         if (isMod(e) && e.key === 'w') {
             // Let PyWebView handle this natively
@@ -1297,11 +1312,11 @@ function setupKeyboard() {
             return;
         }
 
-        // --- Perform mode shortcuts (keys 1-4, R, Shift+P) ---
+        // --- Perform mode shortcuts (keys 1-8, R, Shift+P, M, Escape, Q/W/E/R/A/S/D/F) ---
         // Active in full Perform mode OR when Perform toggle is on in Timeline mode
         if ((appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) && videoLoaded && perfLayers.length > 0) {
-            // Keys 1-4: trigger layers (blocked during review)
-            if (e.key >= '1' && e.key <= '4') {
+            // Keys 1-8: trigger layers (one-shot fire, blocked during review)
+            if (e.key >= '1' && e.key <= '8') {
                 e.preventDefault();
                 if (!perfReviewing) {
                     const layerId = parseInt(e.key) - 1;
@@ -1309,8 +1324,43 @@ function setupKeyboard() {
                 }
                 return;
             }
-            // R: toggle recording (blocked during review)
-            if (e.key === 'r') {
+            // M: toggle keyboard perform mode
+            if (e.key === 'm') {
+                e.preventDefault();
+                toggleKeyboardPerformMode();
+                return;
+            }
+            // K: toggle key hint overlay (when in keyboard perform mode)
+            if (e.key === 'k' && keyboardPerformMode) {
+                e.preventDefault();
+                toggleKeyHintOverlay();
+                return;
+            }
+            // Escape: panic + exit keyboard mode
+            if (e.key === 'Escape' && keyboardPerformMode) {
+                e.preventDefault();
+                perfPanic();
+                toggleKeyboardPerformMode(false);
+                return;
+            }
+            // Shift+R: toggle automation recording
+            if (e.key === 'R' && e.shiftKey) {
+                e.preventDefault();
+                toggleAutoRecording();
+                return;
+            }
+            // Keyboard perform mode: Q/W/E/R = layers 0-3, A/S/D/F = layers 4-7
+            if (keyboardPerformMode && !perfReviewing) {
+                const kbMap = { q: 0, w: 1, e: 2, r: 3, a: 4, s: 5, d: 6, f: 7 };
+                const layerId = kbMap[e.key.toLowerCase()];
+                if (layerId !== undefined) {
+                    e.preventDefault();
+                    perfTriggerLayer(layerId, 'keydown');
+                    return;
+                }
+            }
+            // R: toggle recording (blocked during review, skip if Shift held)
+            if (e.key === 'r' && !e.shiftKey && !keyboardPerformMode) {
                 e.preventDefault();
                 if (!perfReviewing) {
                     perfToggleRecord();
@@ -1467,10 +1517,21 @@ function setupKeyboard() {
             const img = document.getElementById('preview-img');
             if (originalPreviewSrc) img.src = originalPreviewSrc;
         }
-        // Perform mode: key release for gate mode (blocked during review)
-        if ((appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) && !perfReviewing && e.key >= '1' && e.key <= '4') {
-            const layerId = parseInt(e.key) - 1;
-            perfTriggerLayer(layerId, 'keyup');
+        // Perform mode: key release for gate/adsr (blocked during review)
+        if ((appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) && !perfReviewing) {
+            // Number keys 1-8
+            if (e.key >= '1' && e.key <= '8') {
+                const layerId = parseInt(e.key) - 1;
+                perfTriggerLayer(layerId, 'keyup');
+            }
+            // Keyboard perform: Q/W/E/R/A/S/D/F keyup for gate/adsr release
+            if (keyboardPerformMode) {
+                const kbMap = { q: 0, w: 1, e: 2, r: 3, a: 4, s: 5, d: 6, f: 7 };
+                const layerId = kbMap[e.key.toLowerCase()];
+                if (layerId !== undefined) {
+                    perfTriggerLayer(layerId, 'keyup');
+                }
+            }
         }
     });
 }
@@ -2187,6 +2248,10 @@ function setupKnobInteraction(knobEl) {
                 device.params[paramName] = newValue > 0.5;
             } else {
                 device.params[paramName] = newValue;
+            }
+            // Automation recording: capture knob movements during playback
+            if (autoRecording && perfPlaying) {
+                autoRecordParam(deviceId, paramName, newValue, fullMin, fullMax);
             }
         }
 
@@ -3467,7 +3532,8 @@ async function randomizeChain() {
 
 function onMixChange(value) {
     mixLevel = parseInt(value) / 100;
-    document.getElementById('mix-value').textContent = `${parseInt(value)}%`;
+    const el = document.getElementById('mix-value');
+    if (el) el.textContent = `${parseInt(value)}%`;
     schedulePreview();
 }
 
@@ -3940,6 +4006,13 @@ function getProjectState() {
         state.perfLayerStates = perfLayerStates;
         state.perfSession = perfSession;
         state.perfFrameIndex = perfFrameIndex;
+        state.perfMasterEffects = perfMasterEffects;
+        // Save LFO state (strip transient _showCfg flag)
+        const lfoSave = {};
+        for (const [id, lfo] of Object.entries(perfLayerLfos)) {
+            lfoSave[id] = { enabled: lfo.enabled, waveform: lfo.waveform, rate: lfo.rate, depth: lfo.depth };
+        }
+        state.perfLayerLfos = lfoSave;
     }
     return state;
 }
@@ -4020,8 +4093,10 @@ async function loadProject() {
             // Restore mix
             if (p.mixLevel !== undefined) {
                 mixLevel = p.mixLevel;
-                document.getElementById('mix-slider').value = mixLevel * 100;
-                document.getElementById('mix-value').textContent = Math.round(mixLevel * 100) + '%';
+                const _ms = document.getElementById('mix-slider');
+                const _mv = document.getElementById('mix-value');
+                if (_ms) _ms.value = mixLevel * 100;
+                if (_mv) _mv.textContent = Math.round(mixLevel * 100) + '%';
             }
 
             // Restore perform mode state
@@ -4030,6 +4105,7 @@ async function loadProject() {
                 perfLayerStates = p.perfLayerStates || {};
                 perfSession = p.perfSession || {type:'performance', lanes:[]};
                 perfFrameIndex = p.perfFrameIndex || 0;
+                perfMasterEffects = p.perfMasterEffects || [];
                 if (appMode === 'perform') renderMixer();
             }
 
@@ -4369,6 +4445,14 @@ async function perfInitLayers() {
             perfRecording = false;
             perfSession = { type: 'performance', lanes: [] };
             perfEventCount = 0;
+            perfMasterEffects = data.master_effects || [];
+            // Restore per-layer LFO state
+            perfLayerLfos = {};
+            if (data.perfLayerLfos) {
+                for (const [id, lfo] of Object.entries(data.perfLayerLfos)) {
+                    perfLayerLfos[id] = { ...lfo, phase: 0, _showCfg: false };
+                }
+            }
 
             // Update transport
             perfUpdateTransport();
@@ -4489,6 +4573,33 @@ function renderMixer() {
                        oninput="perfSetOpacity(${l.layer_id}, this.value / 100)">
                 <span class="strip-fader-val">${Math.round(opacity * 100)}%</span>
             </div>
+            <div class="strip-lfo-row">
+                <button class="strip-lfo-btn ${(perfLayerLfos[l.layer_id] || {}).enabled ? 'lfo-active' : ''}"
+                        onclick="perfToggleLayerLfo(${l.layer_id})"
+                        title="Toggle opacity LFO">LFO</button>
+                <button class="strip-lfo-cfg-btn"
+                        onclick="perfShowLfoCfg(${l.layer_id})"
+                        title="Configure LFO">&#9881;</button>
+            </div>
+            ${(perfLayerLfos[l.layer_id] || {})._showCfg ? `
+            <div class="strip-lfo-cfg" data-lfo-layer="${l.layer_id}">
+                <label>Wave
+                <select onchange="perfSetLfoParam(${l.layer_id}, 'waveform', this.value)">
+                    ${['sine','square','saw','triangle','bin','ramp_up','ramp_down'].map(w =>
+                        `<option value="${w}" ${((perfLayerLfos[l.layer_id] || {}).waveform || 'sine') === w ? 'selected' : ''}>${w}</option>`
+                    ).join('')}
+                </select></label>
+                <label>Rate
+                <input type="range" min="0.1" max="10" step="0.1"
+                       value="${(perfLayerLfos[l.layer_id] || {}).rate || 1}"
+                       oninput="perfSetLfoParam(${l.layer_id}, 'rate', parseFloat(this.value)); this.nextElementSibling.textContent=this.value+'Hz'"
+                ><span class="lfo-rate-val">${(perfLayerLfos[l.layer_id] || {}).rate || 1}Hz</span></label>
+                <label>Depth
+                <input type="range" min="0" max="100" step="1"
+                       value="${((perfLayerLfos[l.layer_id] || {}).depth || 1) * 100}"
+                       oninput="perfSetLfoParam(${l.layer_id}, 'depth', this.value / 100); this.nextElementSibling.textContent=this.value+'%'"
+                ><span class="lfo-depth-val">${Math.round(((perfLayerLfos[l.layer_id] || {}).depth || 1) * 100)}%</span></label>
+            </div>` : ''}
             <div class="strip-bottom">
                 <button class="${isMuted ? 'muted' : ''}" onclick="perfToggleMute(${l.layer_id})">M</button>
                 <button class="${isSoloed ? 'soloed' : ''}" onclick="perfToggleSolo(${l.layer_id})">S</button>
@@ -4496,22 +4607,40 @@ function renderMixer() {
         </div>`;
     }
 
-    // Master strip
+    // Master strip with master bus effects
+    const masterFxNames = perfMasterEffects.map(e => e.name).join(' → ') || 'No effects';
+    const masterFxCount = perfMasterEffects.length;
     html += `
     <div class="channel-strip master-strip">
         <div class="channel-strip-header">
             <span class="strip-color" style="background:var(--text-dim)"></span>
             <span class="strip-name">MASTER</span>
         </div>
-        <div style="padding:8px 0;font-size:10px;color:var(--text-dim);">Preview: ${PERF_FPS}fps</div>
-        <div class="strip-fader-wrap">
-            <input type="range" class="strip-fader" min="0" max="100" value="100"
-                   oninput="mixLevel = this.value / 100; document.getElementById('mix-slider').value = this.value; document.getElementById('mix-value').textContent = this.value + '%';">
-            <span class="strip-fader-val">100%</span>
+        <div class="master-fx-section">
+            <div class="master-fx-header" onclick="perfToggleMasterExpand()">
+                <span class="master-fx-label">Bus FX${masterFxCount > 0 ? ` (${masterFxCount})` : ''}</span>
+                <span class="master-fx-toggle">${perfMasterExpanded ? '▾' : '▸'}</span>
+            </div>
+            ${perfMasterExpanded ? `
+            <div class="master-fx-list">
+                ${perfMasterEffects.map((fx, idx) => `
+                    <div class="master-fx-item">
+                        <span class="master-fx-name">${esc(fx.name)}</span>
+                        <button class="master-fx-remove" onclick="perfRemoveMasterEffect(${idx})" title="Remove">×</button>
+                    </div>
+                `).join('')}
+                <select class="master-fx-add" onchange="perfAddMasterEffect(this.value); this.selectedIndex=0;">
+                    <option value="">+ Add effect...</option>
+                    ${effectDefs.map(e => `<option value="${e.name}">${e.name}</option>`).join('')}
+                </select>
+            </div>
+            ` : ''}
         </div>
+        <!-- Master fader removed — no audio routing in a video tool -->
         <div class="strip-bottom">
-            <button onclick="perfPanic()">PANIC</button>
+            <button onclick="perfPanic()" title="Reset all layers to initial state (Shift+P)">PANIC</button>
         </div>
+        <div style="padding:4px 0;font-size:9px;color:var(--text-dim);text-align:center;">Preview: ${PERF_FPS}fps</div>
     </div>`;
 
     mixer.innerHTML = html;
@@ -4559,10 +4688,13 @@ function perfTriggerLayer(layerId, eventType) {
         perfTriggerQueue.push({ layer_id: layerId, event: 'on' });
         // Record event for automation
         perfRecordEvent(layerId, 'active', state.active ? 1.0 : 0.0);
+        // Retroactive buffer: always capture regardless of recording state
+        captureBufferPush(layerId, 'active', state.active ? 1.0 : 0.0);
     } else if (eventType === 'keyup') {
         if (mode === 'gate') {
             state.active = false;
             perfRecordEvent(layerId, 'active', 0.0);
+            captureBufferPush(layerId, 'active', 0.0);
         }
         if (mode === 'adsr' || mode === 'gate') {
             // Queue trigger_off for server ADSR release phase
@@ -4887,6 +5019,14 @@ function perfStop() {
 
     // Re-enable mode buttons
     document.querySelectorAll('.mode-btn').forEach(b => b.disabled = false);
+
+    // Auto-commit automation lanes if recording was armed
+    if (autoRecording && Object.keys(autoRecordLanes).length > 0) {
+        autoCommitLanes();
+        autoRecording = false;
+        const autoBtn = document.getElementById('perf-auto-btn');
+        if (autoBtn) autoBtn.classList.remove('auto-armed');
+    }
 }
 
 async function perfLoop() {
@@ -4943,6 +5083,20 @@ async function perfLoop() {
                 const s = perfLayerStates[l.layer_id];
                 if (s && s.muted && l._active) {
                     events.push({ layer_id: l.layer_id, event: 'opacity', value: 0.0 });
+                }
+            }
+        }
+
+        // Inject per-layer LFO opacity modulation
+        const lfoDt = 1 / PERF_FPS;
+        for (const l of perfLayers) {
+            const lfoOpacity = perfComputeLayerLfoOpacity(l.layer_id, lfoDt);
+            if (lfoOpacity !== null) {
+                const s = perfLayerStates[l.layer_id];
+                if (s && !s.muted) {
+                    // LFO modulates the base opacity (fader value * LFO)
+                    const baseOpacity = s.opacity ?? l.opacity;
+                    events.push({ layer_id: l.layer_id, event: 'opacity', value: baseOpacity * lfoOpacity });
                 }
             }
         }
@@ -5039,9 +5193,10 @@ function perfUpdateTransport() {
     const hudRec = document.getElementById('perf-hud-rec');
     const hudTime = document.getElementById('perf-hud-time');
     const hudEvents = document.getElementById('perf-hud-events');
-    if (hudRec) hudRec.textContent = perfReviewing ? '[REVIEW]' : (perfRecording ? '[REC]' : '[BUF]');
+    if (hudRec) hudRec.textContent = perfReviewing ? '[REVIEW]' : (perfRecording ? '[REC]' : (autoRecording ? '[AUTO]' : '[BUF]'));
     if (hudTime) hudTime.textContent = formatTime(perfFrameIndex / 30);
     if (hudEvents) hudEvents.textContent = `${perfEventCount} ev`;
+    updateCaptureBufferIndicator();
 }
 
 function perfScrub(value) {
@@ -5145,10 +5300,291 @@ function perfPanic() {
         }
         // Queue panic for each layer on server
         perfTriggerQueue.push({ layer_id: l.layer_id, event: 'panic' });
+        // Reset LFO phase (keep settings, just restart)
+        if (perfLayerLfos[l.layer_id]) {
+            perfLayerLfos[l.layer_id].phase = 0;
+        }
     }
     renderMixer();
     showToast('ALL LAYERS RESET', 'info', null, 1000);
     if (!perfPlaying) schedulePreview();
+}
+
+// --- Master Bus Effects ---
+function perfToggleMasterExpand() {
+    perfMasterExpanded = !perfMasterExpanded;
+    renderMixer();
+}
+
+function perfAddMasterEffect(effectName) {
+    if (!effectName) return;
+    if (perfMasterEffects.length >= 10) {
+        showToast('Max 10 master bus effects', 'error');
+        return;
+    }
+    perfMasterEffects.push({ name: effectName, params: {} });
+    perfSyncMasterEffects();
+    renderMixer();
+}
+
+function perfRemoveMasterEffect(idx) {
+    perfMasterEffects.splice(idx, 1);
+    perfSyncMasterEffects();
+    renderMixer();
+}
+
+function perfSyncMasterEffects() {
+    fetch(`${API}/api/perform/master`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ effects: perfMasterEffects }),
+    }).catch(() => showToast('Failed to sync master effects', 'error'));
+    if (!perfPlaying) schedulePreview();
+}
+
+// --- Per-Layer Opacity LFO ---
+
+function perfToggleLayerLfo(layerId) {
+    if (!perfLayerLfos[layerId]) {
+        perfLayerLfos[layerId] = { enabled: true, waveform: 'sine', rate: 1, depth: 1, phase: 0, _showCfg: false };
+    } else {
+        perfLayerLfos[layerId].enabled = !perfLayerLfos[layerId].enabled;
+    }
+    renderMixer();
+}
+
+function perfShowLfoCfg(layerId) {
+    if (!perfLayerLfos[layerId]) {
+        perfLayerLfos[layerId] = { enabled: false, waveform: 'sine', rate: 1, depth: 1, phase: 0, _showCfg: true };
+    } else {
+        perfLayerLfos[layerId]._showCfg = !perfLayerLfos[layerId]._showCfg;
+    }
+    renderMixer();
+}
+
+function perfSetLfoParam(layerId, param, value) {
+    if (!perfLayerLfos[layerId]) return;
+    perfLayerLfos[layerId][param] = value;
+}
+
+function perfComputeLayerLfoOpacity(layerId, dt) {
+    const lfo = perfLayerLfos[layerId];
+    if (!lfo || !lfo.enabled) return null;
+
+    // Advance phase
+    lfo.phase = (lfo.phase + dt * lfo.rate) % 1.0;
+
+    // Compute LFO value (0..1) using the existing lfoWaveform function
+    const raw = lfoWaveform(lfo.phase, lfo.waveform);
+
+    // Apply depth: interpolate between 1.0 (no mod) and raw
+    const modulated = 1.0 - lfo.depth * (1.0 - raw);
+    return Math.max(0, Math.min(1, modulated));
+}
+
+// --- Keyboard Perform Mode ---
+function toggleKeyboardPerformMode(forceState) {
+    keyboardPerformMode = forceState !== undefined ? forceState : !keyboardPerformMode;
+    const app = document.getElementById('app');
+    const hud = document.getElementById('perf-hud-keyboard');
+    const overlay = document.getElementById('keyboard-hint-overlay');
+
+    if (keyboardPerformMode) {
+        if (app) app.classList.add('keyboard-perform-active');
+        if (hud) hud.style.display = '';
+        showToast('Keyboard Perform: ON (Q/W/E/R = L1-L4, A/S/D/F = L5-L8, Esc = exit)', 'info', null, 3000);
+    } else {
+        if (app) app.classList.remove('keyboard-perform-active');
+        if (hud) hud.style.display = 'none';
+        if (overlay) overlay.style.display = 'none';
+    }
+}
+
+function toggleKeyHintOverlay() {
+    const overlay = document.getElementById('keyboard-hint-overlay');
+    if (!overlay) return;
+    overlay.style.display = overlay.style.display === 'none' ? '' : 'none';
+}
+
+// --- Automation Recording ---
+function toggleAutoRecording() {
+    autoRecording = !autoRecording;
+    const btn = document.getElementById('perf-auto-btn');
+
+    if (autoRecording) {
+        if (btn) btn.classList.add('auto-armed');
+        autoRecordLanes = {};
+        showToast('Automation armed — move knobs during playback to record', 'info', null, 3000);
+    } else {
+        if (btn) btn.classList.remove('auto-armed');
+        autoCommitLanes();
+    }
+}
+
+function autoRecordParam(deviceId, paramName, value, min, max) {
+    const key = `${deviceId}_${paramName}`;
+    if (!autoRecordLanes[key]) {
+        autoRecordLanes[key] = { deviceId, paramName, min, max, keyframes: [] };
+    }
+    const lane = autoRecordLanes[key];
+    // Thin: skip if frame delta < 3 (10fps at 30fps playback) or value change < 0.01
+    const last = lane.keyframes[lane.keyframes.length - 1];
+    if (last) {
+        const frameDelta = perfFrameIndex - last.frame;
+        const range = max - min || 1;
+        const valueDelta = Math.abs(value - last.value) / range;
+        if (frameDelta < 3 && valueDelta < 0.01) return;
+    }
+    // Normalize to 0-1
+    const normValue = min === max ? 0.5 : (value - min) / (max - min);
+    lane.keyframes.push({ frame: perfFrameIndex, value: Math.max(0, Math.min(1, normValue)) });
+
+    // Visual: mark knob as recording
+    const knobEl = document.querySelector(`.knob[data-device="${deviceId}"][data-param="${paramName}"]`);
+    if (knobEl) {
+        const container = knobEl.closest('.knob-container');
+        if (container && !container.classList.contains('auto-recording')) {
+            container.classList.add('auto-recording');
+        }
+    }
+}
+
+function autoCommitLanes() {
+    const keys = Object.keys(autoRecordLanes);
+    if (keys.length === 0) {
+        showToast('No automation recorded', 'info', null, 2000);
+        return;
+    }
+
+    if (!window.timelineEditor) {
+        showToast('Timeline not initialized — cannot commit automation', 'error');
+        return;
+    }
+
+    const te = window.timelineEditor;
+    const region = te.findRegion(te.selectedRegionId) || (te.tracks[0]?.regions?.[0]);
+    if (!region) {
+        showToast('No timeline region — create a region first', 'error');
+        return;
+    }
+
+    let lanesCreated = 0;
+    let totalKeyframes = 0;
+    for (const key of keys) {
+        const data = autoRecordLanes[key];
+        if (data.keyframes.length === 0) continue;
+
+        // Find effect index in region chain
+        const device = chain.find(d => d.id === data.deviceId);
+        if (!device) continue;
+        const effectIdx = chain.indexOf(device);
+        if (effectIdx < 0) continue;
+
+        const lane = te.addAutomationLane(region.id, effectIdx, data.paramName);
+        for (const kf of data.keyframes) {
+            lane.keyframes.push({
+                frame: region.startFrame + kf.frame,
+                value: kf.value,
+                curve: 'linear',
+            });
+        }
+        lane.keyframes.sort((a, b) => a.frame - b.frame);
+        lanesCreated++;
+        totalKeyframes += data.keyframes.length;
+    }
+
+    // Clear recording CSS
+    document.querySelectorAll('.knob-container.auto-recording').forEach(el => {
+        el.classList.remove('auto-recording');
+    });
+
+    autoRecordLanes = {};
+    te.draw();
+    showToast(`Automation recorded: ${lanesCreated} param${lanesCreated !== 1 ? 's' : ''}, ${totalKeyframes} keyframes`, 'success');
+}
+
+// --- Retroactive Capture Buffer ---
+function captureBufferPush(layerId, param, value) {
+    if (captureBuffer.length >= CAPTURE_BUFFER_MAX_EVENTS) {
+        captureBuffer.shift();
+    }
+    captureBuffer.push({
+        frame: perfFrameIndex,
+        layerId,
+        param,
+        value,
+        timestamp: performance.now(),
+    });
+    // Evict events older than buffer window
+    const cutoffFrame = perfFrameIndex - (CAPTURE_BUFFER_SECONDS * PERF_FPS);
+    while (captureBuffer.length > 0 && captureBuffer[0].frame < cutoffFrame) {
+        captureBuffer.shift();
+    }
+}
+
+function capturePerformBuffer() {
+    if (captureBuffer.length === 0) {
+        showToast('Nothing to capture — perform first', 'info', null, 2000);
+        return;
+    }
+
+    // Group events by layerId + param → create perfSession-compatible lanes
+    const laneMap = {};
+    for (const ev of captureBuffer) {
+        const key = `${ev.layerId}_${ev.param}`;
+        if (!laneMap[key]) {
+            laneMap[key] = {
+                type: 'midi_event',
+                effect_idx: ev.layerId,
+                layer_id: ev.layerId,
+                param: ev.param,
+                keyframes: [],
+                curve: 'step',
+            };
+        }
+        laneMap[key].keyframes.push([ev.frame, ev.value]);
+    }
+
+    const lanes = Object.values(laneMap);
+    const eventCount = captureBuffer.length;
+    const durationSec = captureBuffer.length > 0
+        ? ((captureBuffer[captureBuffer.length - 1].frame - captureBuffer[0].frame) / PERF_FPS).toFixed(1)
+        : 0;
+
+    // Merge into perfSession for review/bake/save
+    perfSession = { type: 'performance', lanes };
+    perfEventCount = eventCount;
+    captureBuffer = [];
+
+    // Update buffer indicator
+    updateCaptureBufferIndicator();
+
+    showToast(`Captured ${eventCount} events (${durationSec}s)`, 'success', null, 3000);
+    showToast('Review your captured performance', 'info', {
+        label: 'Review',
+        fn: 'perfReviewStart',
+    }, 10000);
+    showToast('Bake captures into timeline automation', 'info', {
+        label: 'Bake to Timeline',
+        fn: 'perfBakeToTimeline',
+    }, 10000);
+    showToast('Or discard this capture', 'info', {
+        label: 'Discard',
+        fn: 'perfDiscardSession',
+    }, 10000);
+
+    perfUpdateTransport();
+}
+
+function updateCaptureBufferIndicator() {
+    const el = document.getElementById('perf-hud-buffer');
+    if (!el) return;
+    if (captureBuffer.length === 0) {
+        el.textContent = '';
+        return;
+    }
+    const durationSec = Math.floor((captureBuffer[captureBuffer.length - 1].frame - captureBuffer[0].frame) / PERF_FPS);
+    el.textContent = `Buf: ${durationSec}s`;
 }
 
 // --- Save & Render ---
