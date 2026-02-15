@@ -4,6 +4,7 @@ Entropic — FastAPI Backend
 Serves the DAW-style UI and handles effect processing via API.
 """
 
+import asyncio
 import sys
 import os
 import shutil
@@ -53,6 +54,10 @@ _state = {
     "video_info": None,
     "current_frame": None,
 }
+_state_lock = asyncio.Lock()
+
+# Safety guard: max frames per render to prevent CPU/memory exhaustion
+MAX_FRAMES_PER_RENDER = 10000
 
 
 class EffectChain(BaseModel):
@@ -328,17 +333,19 @@ async def upload_video(file: UploadFile = File(...)):
             os.unlink(tmp.name)
             raise HTTPException(status_code=400, detail="Could not process file")
 
-        # Clean up previous temp file
-        old_path = _state.get("video_path")
-        if old_path and os.path.exists(old_path):
-            os.unlink(old_path)
+        # Lock state mutations (prevents race if two uploads overlap)
+        async with _state_lock:
+            # Clean up previous temp file
+            old_path = _state.get("video_path")
+            if old_path and os.path.exists(old_path):
+                os.unlink(old_path)
 
-        _state["video_path"] = video_path
-        _state["video_info"] = info
+            _state["video_path"] = video_path
+            _state["video_info"] = info
 
-        # Extract first frame for preview
-        frame = extract_single_frame(video_path, 0)
-        _state["current_frame"] = frame
+            # Extract first frame for preview
+            frame = extract_single_frame(video_path, 0)
+            _state["current_frame"] = frame
 
         return {
             "status": "ok",
@@ -532,6 +539,8 @@ async def export_timeline(req: TimelineExportRequest):
 
         extract_scale = min(1.0, target_w / source_w)
         frame_files = extract_frames(_state["video_path"], str(frames_dir), scale=extract_scale)
+        if len(frame_files) > MAX_FRAMES_PER_RENDER:
+            raise HTTPException(status_code=400, detail=f"Video too long ({len(frame_files)} frames, max {MAX_FRAMES_PER_RENDER})")
 
         for i, fp in enumerate(frame_files):
             frame = load_frame(fp)
@@ -860,6 +869,8 @@ async def render_video(req: RenderRequest):
         # Extract frames
         scale = {"lo": 0.5, "mid": 0.75, "hi": 1.0}[quality]
         frame_files = extract_frames(_state["video_path"], str(frames_dir), scale=scale)
+        if len(frame_files) > MAX_FRAMES_PER_RENDER:
+            raise HTTPException(status_code=400, detail=f"Video too long ({len(frame_files)} frames, max {MAX_FRAMES_PER_RENDER})")
 
         # Process each frame
         for i, fp in enumerate(frame_files):
@@ -957,6 +968,8 @@ async def export_video(export: ExportSettings):
         # Calculate extraction scale (extract at target res when downscaling)
         extract_scale = min(1.0, target_w / source_w)
         frame_files = extract_frames(_state["video_path"], str(frames_dir), scale=extract_scale)
+        if len(frame_files) > MAX_FRAMES_PER_RENDER:
+            raise HTTPException(status_code=400, detail=f"Video too long ({len(frame_files)} frames, max {MAX_FRAMES_PER_RENDER})")
 
         # Apply trim if specified
         start_idx = 0
@@ -1246,9 +1259,10 @@ async def perform_init(req: PerformInitRequest):
     # Create actual Layer objects with ADSR envelopes (persistent across frames)
     layers = [Layer.from_dict(ld) for ld in layer_dicts]
     stack = LayerStack(layers)
-    _state["perf_stack"] = stack
-    _state["perf_layers"] = layer_dicts
-    _state["perf_frame_count"] = 0
+    async with _state_lock:
+        _state["perf_stack"] = stack
+        _state["perf_layers"] = layer_dicts
+        _state["perf_frame_count"] = 0
 
     return {
         "status": "ok",
