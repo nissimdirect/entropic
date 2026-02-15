@@ -1,0 +1,32 @@
+#!/bin/bash
+# Entropic pre-commit hook: warns when effects change without test changes.
+# Install: cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+EFFECTS_CHANGED=$(git diff --cached --name-only | grep -c "^effects/")
+TESTS_CHANGED=$(git diff --cached --name-only | grep -c "^tests/")
+
+if [ "$EFFECTS_CHANGED" -gt 0 ] && [ "$TESTS_CHANGED" -eq 0 ]; then
+    echo ""
+    echo "WARNING: Effects code changed but no test files updated."
+    echo ""
+    echo "  Effects modified: $EFFECTS_CHANGED file(s)"
+    echo "  Tests modified:   0 files"
+    echo ""
+    echo "  Consider adding tests for your changes."
+    echo "  Run: python3 -m pytest tests/test_param_rendering.py -q"
+    echo ""
+    echo "  To skip this check: git commit --no-verify"
+    echo ""
+    # Soft gate: warn but don't block
+fi
+
+# Always run param rendering tests if effects changed
+if [ "$EFFECTS_CHANGED" -gt 0 ]; then
+    echo "Running param rendering tests..."
+    python3 -m pytest tests/test_param_rendering.py -q --tb=line 2>&1 | tail -3
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+        echo ""
+        echo "BLOCKED: Param rendering tests failed. Fix before committing."
+        exit 1
+    fi
+fi
