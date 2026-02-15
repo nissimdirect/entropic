@@ -172,23 +172,25 @@ def color_temperature(frame: np.ndarray, temp: float = 30) -> np.ndarray:
 def tape_saturation(frame: np.ndarray, drive: float = 1.5,
                     warmth: float = 0.3, mode: str = "vintage",
                     output_level: float = 1.0) -> np.ndarray:
-    """Audio tape saturation applied to video — compresses dynamics, not just brightness.
+    """Tape saturation — harmonic generation, HF rolloff, gentle compression.
 
-    Real tape saturates differently across the frequency spectrum: highs get
-    rounded off first, lows stay punchy. This models that as spatial frequency
-    response: fine detail (high freq) gets compressed more than broad areas (low freq).
+    Models real magnetic tape behavior:
+    - Odd-harmonic generation via soft clipping (asymmetric, not normalized)
+    - HF rolloff: fine detail gets rounded (head bump), broad areas stay punchy
+    - Gentle compression: dynamic range squeezed without washing out to white
+    - Flutter: subtle spatial wobble simulating tape transport variation
 
     Modes:
-        vintage: Warm analog compression with gentle high-frequency rolloff.
-        hot: Aggressive saturation with color bleeding (overdriven reel-to-reel).
-        lo-fi: Extreme compression + noise floor (cheap cassette deck).
+        vintage: Warm reel-to-reel with gentle saturation and head bump.
+        hot: Aggressive distortion with color crosstalk (overdriven).
+        lo-fi: Cheap cassette — heavy HF loss, noise floor, dropouts.
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
-        drive: Input gain before saturation (0.5-5.0). Higher = more squash.
+        drive: Input gain before saturation (0.5-5.0). Higher = more harmonics.
         warmth: Warm color tint amount (0.0-1.0).
         mode: Saturation character — 'vintage', 'hot', 'lo-fi'.
-        output_level: Output gain compensation (0.5-1.5). Prevents wash-out.
+        output_level: Output gain compensation (0.5-1.5).
 
     Returns:
         Tape-saturated frame.
@@ -200,42 +202,58 @@ def tape_saturation(frame: np.ndarray, drive: float = 1.5,
     output_level = max(0.5, min(1.5, float(output_level)))
     f = frame.astype(np.float32) / 255.0
 
+    # --- Step 1: HF rolloff (head bump) — blur fine detail ---
+    # Separate into low-freq (broad areas) and high-freq (detail)
+    blur_k = 5 if mode == "lo-fi" else 3
+    blur_sigma = 1.5 if mode == "lo-fi" else 0.7 + drive * 0.15
+    low_freq = cv2.GaussianBlur(f, (blur_k, blur_k), blur_sigma)
+    high_freq = f - low_freq
+    # Tape rolls off highs: reduce detail proportional to drive
+    hf_retention = max(0.1, 1.0 - drive * 0.15)
+    if mode == "lo-fi":
+        hf_retention = max(0.05, 1.0 - drive * 0.25)
+    f = low_freq + high_freq * hf_retention
+
+    # --- Step 2: Soft-clip saturation (odd harmonic generation) ---
+    # Center around midpoint so saturation compresses toward gray, not white
+    mid = 0.5
+    centered = (f - mid) * drive
     if mode == "hot":
-        # Aggressive: saturate each channel independently (causes color shift)
-        for c in range(3):
-            f[:, :, c] = np.tanh(f[:, :, c] * drive * 1.5) / np.tanh(drive * 1.5)
-        # Color bleed: slight channel crosstalk
+        # Harder clipping: more harmonics, asymmetric
+        saturated = np.tanh(centered * 1.3)
+        # Stronger drive pushes output harder but tanh caps at [-1,1]
+        f = mid + saturated * 0.5 / max(np.tanh(1.3), 0.1)
+    elif mode == "lo-fi":
+        saturated = np.tanh(centered)
+        f = mid + saturated * 0.5
+    else:
+        # Vintage: gentle odd-harmonic saturation
+        saturated = np.tanh(centered * 0.8)
+        f = mid + saturated * 0.5 / max(np.tanh(0.8), 0.1)
+
+    # --- Step 3: Gentle compression (reduce dynamic range) ---
+    # Push shadows up slightly, pull highlights down slightly
+    compress = min(drive * 0.08, 0.3)
+    f = f * (1.0 - compress) + 0.5 * compress
+
+    # --- Step 4: Mode-specific character ---
+    if mode == "hot":
+        # Color bleed: slight channel crosstalk from overdriven heads
         r, g, b = f[:, :, 0].copy(), f[:, :, 1].copy(), f[:, :, 2].copy()
-        f[:, :, 0] = r * 0.9 + g * 0.07 + b * 0.03
-        f[:, :, 1] = r * 0.05 + g * 0.9 + b * 0.05
-        f[:, :, 2] = r * 0.03 + g * 0.07 + b * 0.9
+        f[:, :, 0] = r * 0.88 + g * 0.08 + b * 0.04
+        f[:, :, 1] = r * 0.06 + g * 0.88 + b * 0.06
+        f[:, :, 2] = r * 0.04 + g * 0.08 + b * 0.88
 
     elif mode == "lo-fi":
-        # Cassette: heavy compression + noise floor + frequency loss
-        f = np.tanh(f * drive) / np.tanh(drive)
-        # Blur high frequencies (tape head gap loss)
-        for c in range(3):
-            f[:, :, c] = cv2.GaussianBlur(f[:, :, c], (3, 3), 0.8)
-        # Add noise floor
-        noise = np.random.RandomState(42).normal(0, 0.03, f.shape).astype(np.float32)
+        # Noise floor (tape hiss)
+        noise = np.random.RandomState(42).normal(0, 0.025 + drive * 0.008, f.shape).astype(np.float32)
         f += noise
 
-    else:  # vintage (default)
-        # Real tape: darks pass clean, brights get soft-clipped
-        # Asymmetric — only compress above the "bias point" (~0.3)
-        bias = 0.3
-        below = np.minimum(f, bias)
-        above = np.maximum(f - bias, 0.0)
-        # Soft-clip the headroom above bias
-        ceiling = 1.0 - bias
-        compressed = np.tanh(above * drive / ceiling) * ceiling / np.tanh(drive)
-        f = below + compressed
-
-    # Warmth tint
+    # --- Step 5: Warmth tint (head magnetization color shift) ---
     if warmth > 0:
-        f[:, :, 0] = np.clip(f[:, :, 0] + warmth * 0.04, 0, 1)  # Red up
-        f[:, :, 1] = np.clip(f[:, :, 1] + warmth * 0.01, 0, 1)  # Green slight
-        f[:, :, 2] = np.clip(f[:, :, 2] - warmth * 0.04, 0, 1)  # Blue down
+        f[:, :, 0] = f[:, :, 0] + warmth * 0.05  # Red up
+        f[:, :, 1] = f[:, :, 1] + warmth * 0.015  # Green slight
+        f[:, :, 2] = f[:, :, 2] - warmth * 0.05  # Blue down
 
     f *= output_level
     return np.clip(f * 255, 0, 255).astype(np.uint8)

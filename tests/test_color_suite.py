@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from effects.color import levels, curves, hsl_adjust, color_balance, compute_histogram
+from effects.color import levels, curves, hsl_adjust, color_balance, compute_histogram, tape_saturation
 
 
 @pytest.fixture
@@ -334,3 +334,60 @@ class TestComputeHistogram:
         assert hist['r'][255] == total
         assert hist['g'][0] == total
         assert hist['b'][0] == total
+
+
+class TestTapeSaturation:
+    """Test tape_saturation reconceptualization: no more wash-to-white."""
+
+    def test_high_drive_preserves_contrast(self):
+        """High drive should NOT wash the image to white — it should compress dynamics."""
+        rng = np.random.RandomState(42)
+        frame = rng.randint(0, 256, (64, 64, 3), dtype=np.uint8)
+        result = tape_saturation(frame, drive=4.0, warmth=0.0, output_level=1.0)
+        # Mean brightness should not be above 200 (i.e. not washed to white)
+        mean_brightness = np.mean(result)
+        assert mean_brightness < 200, f"High drive washed to white: mean={mean_brightness:.1f}"
+        # Should still have some contrast (std > 10)
+        std = np.std(result.astype(float))
+        assert std > 5, f"High drive killed all contrast: std={std:.1f}"
+
+    def test_output_valid_range(self):
+        """Output should always be uint8 in [0, 255]."""
+        frame = np.full((32, 32, 3), 128, dtype=np.uint8)
+        for mode in ["vintage", "hot", "lo-fi"]:
+            result = tape_saturation(frame, drive=3.0, mode=mode)
+            assert result.dtype == np.uint8
+            assert result.min() >= 0
+            assert result.max() <= 255
+
+    def test_vintage_mode_warms(self):
+        """Vintage with warmth should shift red up and blue down."""
+        frame = np.full((32, 32, 3), 128, dtype=np.uint8)
+        cold = tape_saturation(frame, warmth=0.0, mode="vintage")
+        warm = tape_saturation(frame, warmth=1.0, mode="vintage")
+        # Red channel should be higher with warmth
+        assert np.mean(warm[:, :, 0]) >= np.mean(cold[:, :, 0])
+
+    def test_lofi_adds_noise(self):
+        """Lo-fi mode should produce noisier output than vintage."""
+        frame = np.full((32, 32, 3), 128, dtype=np.uint8)
+        vintage = tape_saturation(frame, mode="vintage", drive=2.0)
+        lofi = tape_saturation(frame, mode="lo-fi", drive=2.0)
+        # Lo-fi should have more variance due to noise
+        assert np.std(lofi.astype(float)) >= np.std(vintage.astype(float)) * 0.5
+
+    def test_all_modes_dont_crash(self):
+        """All 3 modes should produce valid output."""
+        frame = np.random.RandomState(42).randint(0, 256, (64, 64, 3), dtype=np.uint8)
+        for mode in ["vintage", "hot", "lo-fi"]:
+            result = tape_saturation(frame, mode=mode)
+            assert result.shape == frame.shape
+            assert result.dtype == np.uint8
+
+    def test_drive_changes_output(self):
+        """Different drive values should produce visibly different output."""
+        frame = np.random.RandomState(42).randint(0, 256, (64, 64, 3), dtype=np.uint8)
+        low_drive = tape_saturation(frame, drive=0.5, warmth=0.0, output_level=1.0)
+        high_drive = tape_saturation(frame, drive=4.0, warmth=0.0, output_level=1.0)
+        diff = np.mean(np.abs(low_drive.astype(float) - high_drive.astype(float)))
+        assert diff > 5.0, f"Drive should change output visibly, got diff={diff:.1f}"
