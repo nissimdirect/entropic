@@ -37,9 +37,9 @@
 | P1-1 | **Knob sensitivity zone indicator** — arc gradient showing dead zone (gray), active zone (colored), blown-out zone (red). Visualization of useful range around the circle. | User request + UAT S2 | Medium | [ ] | app.js, style.css |
 | P1-2 | **Parameter range recalibration** — per-effect sweet spot mapping. Full slider width = useful range, not mathematical domain. | UAT systemic | Large | [ ] | effects/*.py, control-map.json |
 | P1-3 | **Tooltips on everything** — effect descriptions, parameter explanations, mode descriptions in UI. | Don Norman audit (6/10 recognition) | Medium | [ ] | app.js |
-| P1-4 | **Frame diff tool** — change a param, see pixel diff heatmap. If seed changes and nothing on screen changes = bug. | UAT S4 | Medium | [ ] | app.js, server.py |
+| P1-4 | **Frame diff tool** — change a param, see pixel diff heatmap. If seed changes and nothing on screen changes = bug. | UAT S4 | Medium | [x] | app.js (diffCapture/diffShow/diffClear + toolbar) |
 | P1-5 | **Mix slider labeling** — clear "Dry/Wet" label + tooltip explaining what mix does. | UAT U3 | Small | [ ] | app.js |
-| P1-6 | **Sidechain crossfeed mapping** — B14 design flaw. Effect not mapped to any output. | UAT B14 | Medium | [ ] | effects/sidechain.py |
+| P1-6 | **Sidechain crossfeed mapping** — B14 design flaw. Effect not mapped to any output. | UAT B14 | Medium | [x] | effects/__init__.py (registered crossfeed + interference) |
 | P1-7 | **Pixel elastic range fix** — works at low mass, nothing at high mass. Recalibrate. | UAT P4 | Small | [ ] | effects/physics.py |
 | P1-8 | **Pixel magnetic params** — poles, damping, rotation, seed all non-functional. Only center pull works. | UAT P2 | Medium | [ ] | effects/physics.py |
 | P1-9 | **Pixel quantum params** — uncertainty, superposition, decoherence sliders dead. | UAT P3 | Medium | [ ] | effects/physics.py |
@@ -162,6 +162,6 @@
 
 ---
 
-*Total remaining items: 0 P0 + 9 P1 + 7 P2 + 4 P3 + 2 P4 + 278 P5 + 10 UX = 310 items*
+*Total remaining items: 0 P0 + 7 P1 + 7 P2 + 4 P3 + 2 P4 + 278 P5 + 10 UX = 308 items*
 *P3 done this session: 23/28 (F1-F2,F4-F9,F11-F20,F22-F27). Remaining: F3 ASCII, F10 elastic, F21 xerox, F28 tapesaturation.*
 *P4 done this session: 3/5 (AM radio CUT, pixel annihilate CUT, cyanotype/infrared → presets). Remaining: xerox rework.*
