@@ -35,7 +35,7 @@
 | # | Item | Source | Effort | Status | Files |
 |---|------|--------|--------|--------|-------|
 | P1-1 | **Knob sensitivity zone indicator** — arc gradient showing dead zone (gray), active zone (colored), blown-out zone (red). Visualization of useful range around the circle. | User request + UAT S2 | Medium | [x] | app.js, style.css (arc-track/arc-zone/arc-danger) |
-| P1-2 | **Parameter range recalibration** — per-effect sweet spot mapping. Full slider width = useful range, not mathematical domain. | UAT systemic | Large | [ ] | effects/*.py, control-map.json |
+| P1-2 | **Parameter range recalibration** — hybrid approach: pattern-matched 197 params by name across 76 effects. Coverage: 26→103 complete (85%), 0 missing. | UAT systemic | Large | [x] | effects/__init__.py |
 | P1-3 | **Tooltips on everything** — effect descriptions, parameter explanations, mode descriptions in UI. | Don Norman audit (6/10 recognition) | Medium | [x] | app.js (data-tooltip + hover preview system) |
 | P1-4 | **Frame diff tool** — change a param, see pixel diff heatmap. If seed changes and nothing on screen changes = bug. | UAT S4 | Medium | [x] | app.js (diffCapture/diffShow/diffClear + toolbar) |
 | P1-5 | **Mix slider labeling** — clear "Dry/Wet" label + tooltip explaining what mix does. | UAT U3 | Small | [x] | app.js (renamed Mix→Dry/Wet in 3 locations) |
@@ -52,7 +52,7 @@
 |---|------|--------|--------|--------|-------|
 | P2-1 | **Pixel physics consolidation** — 21 effects → 3 mega-effects with mode selectors. Pixel Dynamics (6 modes), Pixel Cosmos (8 modes), Pixel Organic (3 modes). Shared PhysicsEngine class. | UAT A6 | Large | [ ] | effects/physics.py, app.js |
 | P2-2 | **Modular sidechain operator** — one sidechain operator that maps to any parameter. Current 6 sidechain effects → presets. | UAT A4 | Large | [ ] | effects/sidechain.py, app.js |
-| P2-3 | **Taxonomy reclassification** — move color effects (hueshift, contrast, saturation, exposure, temperature) → Tools. Move modulation (flanger, phaser, gate, ring mod) → Operators. Keep glitch/destruction/physics/ASCII as Effects. Add Image Editing category. | UAT A3 | Medium | [ ] | effects/__init__.py, app.js, style.css |
+| P2-3 | **Taxonomy reclassification** — added Operators category, moved LFO to operators, reordered CATEGORY_ORDER for logical flow (tools→color→texture→glitch→distortion→destruction→temporal→physics→modulation→operators→sidechain→enhance→whimsy). | UAT A3 | Medium | [~] | effects/__init__.py |
 | P2-4 | **Transparent layer rendering** — render effects to transparent layers. Emboss gray = transparent. Pixel distortion over transparent regions. | UAT S7 | Medium | [ ] | core/layer.py, server.py |
 | P2-5 | **Gravity concentrations** — place attraction points on frame that intensify parameters in that region. Spatial parameter modulation. | UAT S6 | Large | [ ] | new module |
 | P2-6 | **Ring mod reconceptualization** — currently "just black stripes." Needs external modulation source, spectrum value selection. | UAT rework | Medium | [ ] | effects/modulation.py |
@@ -73,7 +73,7 @@
 | F7 | **Noise** | Animated seed = motion noise. Before pixelsort = animated texture. | [x] animate toggle already built |
 | F8 | **TV static** | Spatial concentration, physics/gravity, animated displacement | [x] concentrate_x/y/radius + animate_displacement already built |
 | F9 | **Contrast** | (DONE — Photoshop-level via color suite) | [x] |
-| F10 | **Pixel elastic** | More force types, concentrations, vectors. Less atmospheric. | [ ] |
+| F10 | **Pixel elastic** | Added 4 force types: gravity, magnetic, wind, explosion (now 12 total) | [x] |
 | F11 | **Pixel wormhole** | Position moves around screen. Currently static. | [x] Added center_x/center_y position control |
 | F12 | **Block corrupt** | More non-random modes in dropdown | [x] Already has 6 modes + 4 placement modes |
 | F13 | **Channel destroy** | More modes | [x] Already has 6 modes (separate/swap/crush/eliminate/invert/xor) |
@@ -84,7 +84,7 @@
 | F18 | **Invert bands** | Direction, rotation, vectors, non-linear shapes, CRT motion | [x] Added direction (horizontal/vertical) |
 | F19 | **Pixel annihilate** | Differentiate with more params OR cut | [x] CUT |
 | F20 | **Pixel risograph** | Changeable colors | [x] Added palette presets (classic/zine/punk/ocean/sunset/custom) |
-| F21 | **Xerox** | Individuate, patchable effect order, better physical model OR cut | [ ] |
+| F21 | **Xerox** | Added registration_offset, toner_density, paper_feed — better physical model | [x] |
 | F22 | **Row shift** | Rotation, gravity concentrations | [x] Added direction (horizontal/vertical/both) |
 | F23 | **XOR glitch** | More modes, more params | [x] Already has 6 modes |
 | F24 | **Emboss** | Transparent gray for layering | [x] transparent_bg already built |
@@ -101,7 +101,7 @@
 |--------|--------------|----------|--------|
 | **AM radio** | "Kind of useless" | Cut | [x] REMOVED |
 | **Pixel annihilate** | "Redundant with noisy plugins" | Cut | [x] REMOVED |
-| **Xerox** | "Maybe chopping block" | Better physical model or cut | [ ] |
+| **Xerox** | "Maybe chopping block" | Kept — improved with registration, toner, paper params | [x] |
 | **Cyanotype** | "Just makes it blue" | Move to color filter preset | [x] → colorfilter preset |
 | **Infrared** | Cool but should be a filter preset | Move to color filter preset | [x] → colorfilter preset |
 
@@ -162,6 +162,5 @@
 
 ---
 
-*Total remaining items: 0 P0 + 1 P1 + 7 P2 + 2 P3 + 1 P4 + 278 P5 + 10 UX = 299 items*
-*P1 done: 8/9 (all except P1-2 param recalibration). P3 done: 26/28 (remaining: F10 elastic, F21 xerox).*
-*P4 remaining: xerox rework (1/5).*
+*Total remaining items: 0 P0 + 0 P1 + 6 P2 + 0 P3 + 0 P4 + 278 P5 + 10 UX = 294 items*
+*P1 done: 9/9. P3 done: 28/28. P4 done: 5/5. P2 partially done: P2-3 taxonomy started (operators category added, reorder done).*
