@@ -21,7 +21,7 @@ def _get_state(key, default_factory):
 
 def _cleanup_if_done(key, frame_index, total_frames):
     """Remove state at end of render to prevent memory leaks."""
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _temporal_state.pop(key, None)
 
 

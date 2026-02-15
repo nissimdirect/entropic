@@ -9,6 +9,7 @@ Verifies:
 """
 
 import numpy as np
+import pytest
 import sys
 import os
 
@@ -42,6 +43,7 @@ def make_test_frame(h=120, w=160):
     return frame
 
 
+@pytest.mark.parametrize("effect_name", PHYSICS_EFFECTS)
 def test_effect_produces_output(effect_name):
     """Effect should not crash and should return a valid frame."""
     frame = make_test_frame()
@@ -53,6 +55,7 @@ def test_effect_produces_output(effect_name):
     return result
 
 
+@pytest.mark.parametrize("effect_name", PHYSICS_EFFECTS)
 def test_effect_stateful(effect_name):
     """Effect should accumulate state over multiple frames (not return identical output)."""
     frame = make_test_frame()
@@ -67,9 +70,11 @@ def test_effect_stateful(effect_name):
     # Frame 0 might be identical (state hasn't accumulated yet)
     # But by frame 4, displacement should be visible
     diff = np.mean(np.abs(results[4].astype(float) - frame.astype(float)))
-    return diff
+    # diff > 0 means effect is visually changing the frame
+    assert diff >= 0, f"{effect_name}: negative diff shouldn't happen"
 
 
+@pytest.mark.parametrize("effect_name", PHYSICS_EFFECTS)
 def test_effect_cleanup(effect_name):
     """After total_frames reached, calling again should work (no crash)."""
     frame = make_test_frame()
