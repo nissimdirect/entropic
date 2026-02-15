@@ -325,21 +325,22 @@ def color_filter(frame: np.ndarray, preset: str = "cyanotype", intensity: float 
 
 
 def chroma_key(frame: np.ndarray, hue: float = 120.0, tolerance: float = 30.0,
-               softness: float = 10.0, replace_color: str = "black") -> np.ndarray:
-    """Green screen / chroma key — makes a specific color range transparent (black).
+               softness: float = 10.0, replace_color: str = "transparent") -> np.ndarray:
+    """Green screen / chroma key — makes a specific color range transparent.
 
-    Converts to HSV, creates a mask for the target hue range, then replaces
-    those pixels. Use with blend modes and layer opacity for real transparency.
+    Converts to HSV, creates a mask for the target hue range. With
+    replace_color="transparent" (default), outputs RGBA where keyed pixels
+    have alpha=0 for true compositing with layers below.
 
     Args:
         frame: (H, W, 3) uint8 RGB.
         hue: Target hue to key out in degrees (0-360). 120 = green, 0 = red, 240 = blue.
         tolerance: Hue range to key (degrees). Higher = wider key.
         softness: Edge feathering (0 = hard edge, 50 = very soft).
-        replace_color: What to put where keyed pixels were. "black" or "white".
+        replace_color: "transparent" = RGBA output, "black" or "white" = RGB output.
 
     Returns:
-        Frame with keyed areas replaced.
+        RGBA frame (transparent) or RGB frame (black/white fill).
     """
     import cv2
 
@@ -372,28 +373,35 @@ def chroma_key(frame: np.ndarray, hue: float = 120.0, tolerance: float = 30.0,
         ksize = int(softness * 2) | 1  # Ensure odd
         mask = cv2.GaussianBlur(mask, (ksize, ksize), 0)
 
-    # Apply mask: keyed areas become replace color
-    mask_3ch = mask[:, :, np.newaxis]
-    fill = 0.0 if replace_color == "black" else 255.0
-    result = frame.astype(np.float32) * (1.0 - mask_3ch) + fill * mask_3ch
-    return np.clip(result, 0, 255).astype(np.uint8)
+    # Apply mask
+    if replace_color == "transparent":
+        # Output RGBA: keyed pixels get alpha=0, unkeyed get alpha=255
+        alpha = ((1.0 - mask) * 255).astype(np.uint8)
+        return np.dstack([frame, alpha])
+    else:
+        mask_3ch = mask[:, :, np.newaxis]
+        fill = 0.0 if replace_color == "black" else 255.0
+        result = frame.astype(np.float32) * (1.0 - mask_3ch) + fill * mask_3ch
+        return np.clip(result, 0, 255).astype(np.uint8)
 
 
 def luma_key(frame: np.ndarray, threshold: float = 0.3, mode: str = "dark",
-             softness: float = 10.0) -> np.ndarray:
-    """Luminance key — makes dark or bright areas transparent (black).
+             softness: float = 10.0, replace_color: str = "transparent") -> np.ndarray:
+    """Luminance key — makes dark or bright areas transparent.
 
     Keys out pixels based on their brightness. Use "dark" to remove shadows/dark
-    areas (so bright content shows through), or "light" to remove bright areas.
+    areas (so bright content shows through), or "bright" to remove bright areas.
+    With replace_color="transparent" (default), outputs RGBA for layer compositing.
 
     Args:
         frame: (H, W, 3) uint8 RGB.
         threshold: Brightness cutoff (0-1). Pixels beyond this threshold are keyed.
-        mode: "dark" = key out dark areas, "light" = key out bright areas.
+        mode: "dark" = key out dark areas, "bright" = key out bright areas.
         softness: Edge feathering (0 = hard, 50 = very soft).
+        replace_color: "transparent" = RGBA output, "black" = RGB output.
 
     Returns:
-        Frame with keyed areas replaced with black.
+        RGBA frame (transparent) or RGB frame (black fill).
     """
     import cv2
 
@@ -416,10 +424,14 @@ def luma_key(frame: np.ndarray, threshold: float = 0.3, mode: str = "dark",
         ksize = int(softness * 2) | 1
         mask = cv2.GaussianBlur(mask, (ksize, ksize), 0)
 
-    # Apply mask: keyed areas become black
-    mask_3ch = mask[:, :, np.newaxis]
-    result = frame.astype(np.float32) * (1.0 - mask_3ch)
-    return np.clip(result, 0, 255).astype(np.uint8)
+    # Apply mask
+    if replace_color == "transparent":
+        alpha = ((1.0 - mask) * 255).astype(np.uint8)
+        return np.dstack([frame, alpha])
+    else:
+        mask_3ch = mask[:, :, np.newaxis]
+        result = frame.astype(np.float32) * (1.0 - mask_3ch)
+        return np.clip(result, 0, 255).astype(np.uint8)
 
 
 def levels(frame: np.ndarray, input_black: float = 0, input_white: float = 255,

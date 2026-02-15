@@ -942,6 +942,30 @@ h3 .count {
 
 .more-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
+/* --- Blend Mode Toggle --- */
+.blend-toggle {
+    width: 18px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: 1px solid var(--border-subtle);
+    color: var(--text-dim); cursor: pointer;
+    font-size: 9px; font-weight: 600; border-radius: 2px;
+    padding: 0 2px; margin-left: 2px; flex-shrink: 0;
+}
+.blend-toggle:hover { border-color: var(--text-dim); color: var(--text-primary); }
+.blend-toggle.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.blend-menu {
+    position: absolute; right: 0; top: 100%; z-index: 100;
+    background: var(--bg-panel); border: 1px solid var(--border-subtle);
+    border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    min-width: 120px; padding: 2px 0;
+}
+.blend-option {
+    padding: 4px 10px; cursor: pointer; font-size: 11px;
+    color: var(--text-secondary); text-transform: capitalize;
+}
+.blend-option:hover { background: var(--bg-hover); color: var(--text-primary); }
+
 /* --- History Panel (Photoshop-style) --- */
 #history-list {
     flex: 1;

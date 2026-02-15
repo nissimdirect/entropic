@@ -2114,3 +2114,218 @@ If you're short on time, test in this order:
 - Section 42: 85%+ pass (automation lanes are complex, edge cases expected)
 - Section 43: 100% pass (freeze/flatten is critical workflow)
 - Section 44: 90%+ pass (mapping expansion, polish OK)
+
+---
+
+## UAT CYCLE 4 — UX Refactor + Whimsy + Performance Features (2026-02-15)
+
+> **Added:** UX refactor (Don Norman heuristic analysis), 8 whimsy effects, performance automation features
+> **Version:** v0.7.0-dev (123 effects, 12 categories, 16 packages)
+
+---
+
+## SECTION 45: UX REFACTOR — SEARCH & DISCOVERY
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 45.1 | Effect search bar visible | Open browser panel | Search input visible at top of effect browser | | |
+| 45.2 | Search filters effects | Type "pixel" in search bar | Only effects with "pixel" in name/description shown; matching categories auto-expand | | |
+| 45.3 | Search clears | Clear search text | All effects visible again, categories return to normal state | | |
+| 45.4 | Search empty state | Type "zzzzz" (no matches) | "No effects matching" message shown | | |
+| 45.5 | Search is case-insensitive | Type "BLUR" | blur effect appears | | |
+| 45.6 | Search by description | Type "cinematic" | Effects with "cinematic" in description shown | | |
+
+---
+
+## SECTION 46: UX REFACTOR — FAVORITES
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 46.1 | Star icon on effects | Hover over any effect item | Star icon visible on left of effect name | | |
+| 46.2 | Toggle favorite | Click star icon on an effect | Star fills yellow; effect added to favorites | | |
+| 46.3 | Favorites persist | Refresh page | Previously favorited effects still have yellow star | | |
+| 46.4 | Favorites tab | Click star tab in browser header | Only favorited effects shown | | |
+| 46.5 | Unfavorite from list | Click star on favorited effect | Star unfills; effect removed from favorites view | | |
+| 46.6 | Right-click favorite | Right-click effect item | Context menu includes "Add to Favorites" / "Remove from Favorites" | | |
+| 46.7 | Empty favorites | Open favorites tab with none favorited | Empty state message shown | | |
+
+---
+
+## SECTION 47: UX REFACTOR — INFO VIEW & PREVIEWS
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 47.1 | Info view panel visible | Look at bottom-left area | Info view panel with "Info" label visible | | |
+| 47.2 | Hover shows info | Hover over any effect in browser | Info view shows effect name, category, description | | |
+| 47.3 | Hover preview thumbnail | Hover over effect for >400ms | Tooltip with thumbnail preview of effect appears near cursor | | |
+| 47.4 | Preview dismisses | Move mouse away from effect | Thumbnail tooltip disappears | | |
+| 47.5 | Preview caching | Hover same effect twice | Second hover shows preview faster (cached) | | |
+| 47.6 | Preview requires uploaded video | Hover with no video loaded | No preview shown (graceful, no error) | | |
+
+---
+
+## SECTION 48: UX REFACTOR — COMPLEXITY METER & PRESETS
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 48.1 | Complexity meter visible | Add 1+ effects to chain | Complexity indicator shows count + severity (Light/Medium/Heavy) | | |
+| 48.2 | Buffer count shown | Play video with effects | Buffer indicator shows "Buf: N/30" | | |
+| 48.3 | Click to clear cache | Click complexity meter | Frame cache cleared; toast notification shown | | |
+| 48.4 | Parameter preset save | In device panel, use preset dropdown > "Save" | Prompt for name; preset saved | | |
+| 48.5 | Parameter preset load | Select saved preset from dropdown | All params for that effect restored to saved values | | |
+| 48.6 | Parameter preset delete | Select preset, choose "Delete" | Preset removed from dropdown | | |
+| 48.7 | Presets persist | Refresh page, re-add same effect | Saved presets still available in dropdown | | |
+| 48.8 | Default preset | Select "Default" from dropdown | All params reset to effect defaults | | |
+
+---
+
+## SECTION 49: UX REFACTOR — AUTOMATION & TIMELINE
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 49.1 | Lane param switching | Right-click automation lane header | Context menu shows "Switch Parameter" with available params | | |
+| 49.2 | Switch param | Select different parameter from submenu | Lane header updates to new param name; keyframes cleared | | |
+| 49.3 | Lane dropdown triangle | Look at lane header text | Small triangle indicator after param name signals dropdown | | |
+| 49.4 | Perform bake to timeline | Record a perform session, stop | Toast offers "Bake to Timeline" option | | |
+| 49.5 | Bake creates lanes | Click "Bake to Timeline" | Automation lanes created from perform session events | | |
+
+---
+
+## SECTION 50: WHIMSY EFFECTS (8 new effects)
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 50.1 | Whimsy category | Open effect browser | "WHIMSY" category visible with 8 effects | | |
+| 50.2 | Kaleidoscope basic | Add kaleidoscope, render | Mirror-segment kaleidoscope visible; segments param works | | |
+| 50.3 | Kaleidoscope moods | Test classic/psychedelic/gentle moods | Each mood produces distinct look | | |
+| 50.4 | Soft bloom basic | Add softbloom, render | Soft glow/bloom visible on bright areas | | |
+| 50.5 | Shape overlay basic | Add shapeoverlay, render | Geometric shapes overlaid on frame | | |
+| 50.6 | Shape types | Test circle/triangle/square/hexagon/star/diamond | Each shape renders correctly | | |
+| 50.7 | Lens flare basic | Add lensflare, render | Lens flare at specified position | | |
+| 50.8 | Lens flare animation | Enable animate, render sequence | Flare drifts across frame | | |
+| 50.9 | Watercolor basic | Add watercolor, render | Painterly/watercolor effect visible | | |
+| 50.10 | Rainbow shift basic | Add rainbowshift, render | Color-shifting rainbow overlay | | |
+| 50.11 | Rainbow directions | Test horizontal/vertical/diagonal/radial | Each direction works | | |
+| 50.12 | Sparkle basic | Add sparkle, render | Sparkle/glitter particles visible | | |
+| 50.13 | Sparkle animation | Enable animate, render sequence | Sparkles twinkle/move between frames | | |
+| 50.14 | Film grain warm | Add filmgrainwarm, render | Warm-tinted film grain overlay | | |
+| 50.15 | Whimsy in chain | Chain 2+ whimsy effects | Effects compose correctly | | |
+| 50.16 | Whimsy recipes | Load fairy-tale recipe from packages | Multi-effect chain applies correctly | | |
+
+---
+
+## SECTION 51: PERFORMANCE AUTOMATION — KEYBOARD INPUT (Planned)
+
+> **Status:** PLANNED — Not yet implemented. Tests below define acceptance criteria.
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 51.1 | Keyboard mode toggle | Press M key | Status bar shows "KEYS: ON" indicator; keyboard now triggers effects | | |
+| 51.2 | Keys trigger effects | In keyboard mode, press Q/W/E/R | Corresponding channel triggers fire | | |
+| 51.3 | Key mapping visible | Open help panel (H or ?) | Current keyboard-to-trigger mapping shown | | |
+| 51.4 | Remap keys | Open key mapping dialog | User can reassign which keys trigger which effects | | |
+| 51.5 | Drum rack layout | Map QWERTY row to different effects | Each key triggers a different effect/layer (like Ableton Drum Rack) | | |
+| 51.6 | Typing vs performing | With keyboard mode on, click search bar | Keyboard mode temporarily disables; search input works normally | | |
+| 51.7 | Mode persists | Toggle keyboard mode on, switch panels | Mode stays active across panel changes | | |
+
+---
+
+## SECTION 52: PERFORMANCE AUTOMATION — RECORD / OVERDUB (Planned)
+
+> **Status:** PLANNED — Not yet implemented.
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 52.1 | Separate Rec/Overdub buttons | Look at perform transport | Two distinct buttons: Record (red) and Overdub (amber) | | |
+| 52.2 | Record replaces | Hit Record, trigger effects, stop | New recording replaces previous take on those channels | | |
+| 52.3 | Overdub layers | Hit Overdub, trigger effects, stop | New triggers added ON TOP of existing recording | | |
+| 52.4 | Visual distinction | Compare active states | Record = solid red. Overdub = blinking amber/yellow. Clear difference. | | |
+| 52.5 | Overdub preserves | Record take 1. Overdub take 2. Play back. | Both takes play back combined | | |
+
+---
+
+## SECTION 53: PERFORMANCE AUTOMATION — AUTOMATION RECORDING (Planned)
+
+> **Status:** PLANNED — Not yet implemented.
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 53.1 | Automation arm | Toggle automation record mode | Arm indicator visible; knob movements will be recorded | | |
+| 53.2 | Record knob movement | Arm automation, play, turn a knob | Knob movement recorded as automation breakpoints on timeline | | |
+| 53.3 | Multi-param recording | Turn multiple knobs during armed playback | Each knob's movement recorded to its own automation lane | | |
+| 53.4 | Automation playback | Stop recording, play timeline | Knobs move automatically following recorded automation | | |
+| 53.5 | Automation view toggle | Press A key | Automation lanes show/hide on timeline | | |
+| 53.6 | Visual feedback | Knob being recorded | Knob ring turns red/pulsing while recording automation | | |
+
+---
+
+## SECTION 54: PERFORMANCE AUTOMATION — MIDI CAPTURE BUFFER (Planned)
+
+> **Status:** PLANNED — Highest priority. Not yet implemented.
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 54.1 | Silent buffering active | No record button pressed; perform triggers | System silently buffers last N seconds of input | | |
+| 54.2 | Capture button visible | Look at transport | "Capture" button (or Cmd+Shift+C) visible near Record | | |
+| 54.3 | Capture claims buffer | Press Capture after performing without Record | Last N seconds of performance recovered and placed on timeline | | |
+| 54.4 | Buffer length setting | Check settings/preferences | Configurable buffer length (default: 60 seconds) | | |
+| 54.5 | Buffer wraps | Perform for longer than buffer length | Only last N seconds available; oldest data overwritten | | |
+| 54.6 | Capture + automation | Perform with knobs AND triggers without Record, then Capture | Both trigger events AND knob automation captured | | |
+| 54.7 | Visual indicator | Buffering active | Subtle indicator showing buffer is recording (small dot or ring) | | |
+| 54.8 | Empty buffer | Press Capture with no recent input | Toast: "Nothing to capture" (no crash, graceful) | | |
+
+---
+
+## SECTION 55: PERFORMANCE AUTOMATION — MIDI CONTROLLER (Planned)
+
+> **Status:** PLANNED — Not yet implemented.
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 55.1 | MIDI device detected | Connect MIDI controller, open app | Status shows "MIDI: [device name] connected" | | |
+| 55.2 | MIDI learn mode | Right-click any knob > "MIDI Learn" | Knob highlights; next MIDI CC input maps to it | | |
+| 55.3 | MIDI note triggers | Press MIDI key | Corresponding effect/channel triggered | | |
+| 55.4 | MIDI CC controls | Turn MIDI knob mapped to param | Parameter value follows MIDI input | | |
+| 55.5 | MIDI mapping visible | Open MIDI map view | All current MIDI mappings listed (CC# -> param name) | | |
+| 55.6 | MIDI mapping persists | Close/reopen app with same controller | Mappings restored | | |
+| 55.7 | Multiple controllers | Connect 2 MIDI devices | Both recognized; independent mappings | | |
+
+---
+
+## SECTION 56: PERFORMANCE AUTOMATION — MACROS (Planned)
+
+> **Status:** PLANNED — Not yet implemented.
+
+| # | Test | Steps | Expected Result | Pass/Fail | Notes |
+|---|------|-------|-----------------|-----------|-------|
+| 56.1 | Macro knobs visible | Open macro panel | 8 macro knobs displayed (like Ableton Rack macros) | | |
+| 56.2 | Map param to macro | Right-click param knob > "Map to Macro 1" | Param now controlled by Macro 1 | | |
+| 56.3 | Multi-param macro | Map 3 different params to Macro 1 | Turning Macro 1 moves all 3 params simultaneously | | |
+| 56.4 | Macro ranges | Set min/max per mapping | Each param mapped to different sub-range of macro rotation | | |
+| 56.5 | Macro + MIDI | Map MIDI CC to a macro knob | Physical knob controls multiple params at once | | |
+| 56.6 | Macro naming | Double-click macro label | Rename macro (e.g., "Chaos Amount") | | |
+
+---
+
+## UPDATED SCORING SUMMARY (Cycle 4)
+
+| Section | Tests | Pass | Fail | Skip |
+|---------|-------|------|------|------|
+| 45. Search & Discovery | 6 | | | |
+| 46. Favorites | 7 | | | |
+| 47. Info View & Previews | 6 | | | |
+| 48. Complexity Meter & Presets | 8 | | | |
+| 49. Automation & Timeline | 5 | | | |
+| 50. Whimsy Effects | 16 | | | |
+| 51. Keyboard Input (Planned) | 7 | | | |
+| 52. Record / Overdub (Planned) | 5 | | | |
+| 53. Automation Recording (Planned) | 6 | | | |
+| 54. MIDI Capture Buffer (Planned) | 8 | | | |
+| 55. MIDI Controller (Planned) | 7 | | | |
+| 56. Macros (Planned) | 6 | | | |
+| **Cycle 4 Total** | **87** | | | |
+| **Grand Total (Cycles 1-4)** | **668** | | | |
+
+**Cycle 4 ship criteria:**
+- Sections 45-50: 100% pass (shipped features, must work)
+- Sections 51-56: N/A (planned — acceptance criteria only, not yet testable)

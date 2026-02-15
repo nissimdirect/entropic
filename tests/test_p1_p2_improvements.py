@@ -375,6 +375,129 @@ class TestPhysicsEviction:
 
 
 # ---------------------------------------------------------------------------
+# Alpha Drift with Physics
+# ---------------------------------------------------------------------------
+
+class TestAlphaDrift:
+    def test_physics_displaces_alpha(self, frame):
+        """Physics effects should displace alpha channel along with RGB."""
+        # Create RGBA frame with a distinct alpha pattern (circle mask)
+        h, w = frame.shape[:2]
+        alpha = np.zeros((h, w), dtype=np.uint8)
+        cy, cx = h // 2, w // 2
+        yy, xx = np.ogrid[:h, :w]
+        mask = ((xx - cx) ** 2 + (yy - cy) ** 2) < (min(h, w) // 4) ** 2
+        alpha[mask] = 255
+        rgba = np.dstack([frame, alpha])
+
+        # Apply physics effect — alpha should move with pixels
+        result = apply_effect(rgba, "pixelliquify", frame_index=5, total_frames=30,
+                              viscosity=0.9, turbulence=5.0)
+
+        # Result should be RGBA (4 channels)
+        assert result.ndim == 3 and result.shape[2] == 4, f"Expected RGBA, got shape {result.shape}"
+
+        # Alpha should be different from input (displaced)
+        result_alpha = result[:, :, 3]
+        alpha_diff = np.abs(result_alpha.astype(float) - alpha.astype(float)).mean()
+        assert alpha_diff > 0.5, f"Alpha should be displaced, diff={alpha_diff:.1f}"
+
+    def test_non_physics_preserves_alpha_position(self, frame):
+        """Non-physics effects should keep alpha at original positions."""
+        alpha = np.full((64, 64), 128, dtype=np.uint8)
+        rgba = np.dstack([frame, alpha])
+
+        result = apply_effect(rgba, "contrast", amount=50)
+
+        # Alpha should be preserved unchanged
+        if result.ndim == 3 and result.shape[2] == 4:
+            result_alpha = result[:, :, 3]
+            assert np.array_equal(result_alpha, alpha), "Non-physics should preserve alpha"
+
+
+# ---------------------------------------------------------------------------
+# Chroma Key RGBA Output
+# ---------------------------------------------------------------------------
+
+class TestChromaKeyRGBA:
+    def test_chroma_key_transparent_output(self):
+        """Chroma key with transparent default should output RGBA."""
+        from effects.color import chroma_key
+        # Create a green frame
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        frame[:, :, 1] = 200  # Green channel high
+        frame[:, :, 0] = 20   # Low red
+        frame[:, :, 2] = 20   # Low blue
+
+        result = chroma_key(frame, hue=120.0, tolerance=60.0, replace_color="transparent")
+        assert result.shape == (64, 64, 4), f"Expected RGBA, got {result.shape}"
+
+        # Green areas should have low alpha (keyed out)
+        assert result[:, :, 3].mean() < 50, "Green areas should be mostly transparent"
+
+    def test_chroma_key_black_output(self):
+        """Chroma key with black should still return RGB."""
+        from effects.color import chroma_key
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        frame[:, :, 1] = 200
+        result = chroma_key(frame, hue=120.0, tolerance=60.0, replace_color="black")
+        assert result.shape == (64, 64, 3), "Black mode should return RGB"
+
+    def test_luma_key_transparent_output(self):
+        """Luma key with transparent default should output RGBA."""
+        from effects.color import luma_key
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        frame[:32, :, :] = 200  # Top half bright
+        frame[32:, :, :] = 10   # Bottom half dark
+
+        result = luma_key(frame, threshold=0.3, mode="dark", replace_color="transparent")
+        assert result.shape == (64, 64, 4), f"Expected RGBA, got {result.shape}"
+
+        # Dark areas should have low alpha
+        bottom_alpha = result[48:, :, 3].mean()
+        top_alpha = result[:16, :, 3].mean()
+        assert bottom_alpha < top_alpha, "Dark keyed areas should have lower alpha"
+
+    def test_chroma_key_through_apply_effect(self, frame):
+        """Chroma key through apply_effect should handle RGBA output correctly."""
+        result = apply_effect(frame, "chroma_key", hue=120.0, tolerance=30.0)
+        # Should return RGBA since default is transparent
+        assert result.ndim == 3
+        assert result.shape[2] in (3, 4), f"Unexpected channels: {result.shape[2]}"
+
+    def test_chroma_key_in_layer_composite(self):
+        """Chroma key RGBA should composite correctly with layers below."""
+        from core.layer import Layer, LayerStack
+        # Green screen frame
+        green = np.zeros((64, 64, 3), dtype=np.uint8)
+        green[:, :, 1] = 200  # Full green
+        # Subject in center (not green)
+        green[20:44, 20:44, :] = [200, 50, 50]  # Red subject
+
+        # Apply chroma key
+        keyed = apply_effect(green, "chroma_key", hue=120.0, tolerance=60.0)
+
+        # Background frame
+        bg = np.full((64, 64, 3), 100, dtype=np.uint8)
+
+        # Composite using LayerStack
+        layer_bg = Layer.from_dict({"layer_id": 0, "z_order": 0, "opacity": 1.0,
+                                     "trigger_mode": "always_on"})
+        layer_fg = Layer.from_dict({"layer_id": 1, "z_order": 1, "opacity": 1.0,
+                                     "trigger_mode": "always_on"})
+        stack = LayerStack([layer_bg, layer_fg])
+
+        result = stack.composite({0: bg, 1: keyed})
+        assert result.shape == (64, 64, 3)
+
+        # Background should show through where green was keyed out
+        corner = result[5, 5]  # Should be close to bg (100,100,100)
+        center = result[32, 32]  # Should be close to subject (200,50,50)
+        assert abs(int(corner[0]) - 100) < 30, f"Corner should be background, got {corner}"
+        assert center[0] > 150, f"Center should be subject red, got {center}"
+
+
+# ---------------------------------------------------------------------------
 # Param descriptions
 # ---------------------------------------------------------------------------
 

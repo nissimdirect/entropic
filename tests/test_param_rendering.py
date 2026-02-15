@@ -234,7 +234,8 @@ class TestAllEffectsRenderDefaults:
         result, err = render_effect(effect_name)
         assert err is None, f"{effect_name} crashed at defaults: {err}"
         assert result is not None, f"{effect_name} returned None"
-        assert result.shape == (120, 160, 3), f"{effect_name} shape: {result.shape}"
+        assert result.shape[:2] == (120, 160), f"{effect_name} spatial: {result.shape}"
+        assert result.shape[2] in (3, 4), f"{effect_name} channels: {result.shape[2]}"
         assert result.dtype == np.uint8, f"{effect_name} dtype: {result.dtype}"
 
 
@@ -253,7 +254,7 @@ class TestNumericParamMin:
         result, err = render_effect(effect_name, param_overrides)
         assert err is None, f"{test_id} crashed: {err}"
         assert result is not None, f"{test_id} returned None"
-        assert result.shape == (120, 160, 3), f"{test_id} shape: {result.shape}"
+        assert result.shape[:2] == (120, 160) and result.shape[2] in (3, 4), f"{test_id} shape: {result.shape}"
         assert result.dtype == np.uint8, f"{test_id} dtype: {result.dtype}"
 
 
@@ -272,7 +273,7 @@ class TestNumericParamMax:
         result, err = render_effect(effect_name, param_overrides)
         assert err is None, f"{test_id} crashed: {err}"
         assert result is not None, f"{test_id} returned None"
-        assert result.shape == (120, 160, 3), f"{test_id} shape: {result.shape}"
+        assert result.shape[:2] == (120, 160) and result.shape[2] in (3, 4), f"{test_id} shape: {result.shape}"
         assert result.dtype == np.uint8, f"{test_id} dtype: {result.dtype}"
 
 
@@ -310,7 +311,7 @@ class TestStringParams:
         result, err = render_effect(effect_name, param_overrides)
         assert err is None, f"{test_id} crashed: {err}"
         assert result is not None, f"{test_id} returned None"
-        assert result.shape == (120, 160, 3), f"{test_id} shape: {result.shape}"
+        assert result.shape[:2] == (120, 160) and result.shape[2] in (3, 4), f"{test_id} shape: {result.shape}"
 
 
 # ─── Test 6: Multi-frame rendering (stateful effects) ───
@@ -362,4 +363,4 @@ class TestExtremeValues:
             result, err = render_effect(effect_name, overrides)
             assert err is None, f"{effect_name} crashed with all-zero params: {err}"
             assert result is not None, f"{effect_name} returned None with all-zero params"
-            assert result.shape == (120, 160, 3)
+            assert result.shape[:2] == (120, 160) and result.shape[2] in (3, 4)

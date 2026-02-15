@@ -1553,6 +1553,57 @@ function updateDeviceMix(deviceId, value) {
     }
 }
 
+// Blend mode labels (short display names)
+const _BLEND_MODES = ['normal', 'multiply', 'screen', 'overlay', 'add', 'difference', 'soft_light'];
+function _blendLabel(mode) {
+    if (!mode || mode === 'normal') return 'N';
+    return {'multiply':'M', 'screen':'S', 'overlay':'O', 'add':'A', 'difference':'D', 'soft_light':'SL'}[mode] || 'N';
+}
+
+function toggleBlendMenu(deviceId, btn) {
+    // Close existing blend menu if open
+    const existing = document.querySelector('.blend-menu');
+    if (existing) { existing.remove(); return; }
+
+    const menu = document.createElement('div');
+    menu.className = 'blend-menu';
+    menu.innerHTML = _BLEND_MODES.map(m =>
+        `<div class="blend-option" data-mode="${m}" onclick="setBlendMode(${deviceId}, '${m}', this)">${m.replace('_', ' ')}</div>`
+    ).join('');
+    btn.parentElement.appendChild(menu);
+
+    // Close on outside click
+    setTimeout(() => {
+        document.addEventListener('click', function closeBM(e) {
+            if (!menu.contains(e.target) && e.target !== btn) {
+                menu.remove();
+                document.removeEventListener('click', closeBM);
+            }
+        });
+    }, 10);
+}
+
+function setBlendMode(deviceId, mode, optionEl) {
+    const device = _findItemInChain(chain, deviceId);
+    if (!device) return;
+    if (device.type === 'group') {
+        device.blend_mode = mode;
+    } else {
+        if (!device.params) device.params = {};
+        device.params.blend_mode = mode;
+    }
+    // Update button label
+    const btn = optionEl.closest('.device, .device-group')?.querySelector('.blend-toggle');
+    if (btn) {
+        btn.textContent = _blendLabel(mode);
+        btn.classList.toggle('active', mode !== 'normal');
+    }
+    // Close menu
+    const menu = optionEl.closest('.blend-menu');
+    if (menu) menu.remove();
+    schedulePreview();
+}
+
 function duplicateSelected() {
     if (selectedLayerId === null) return;
     const device = chain.find(d => d.id === selectedLayerId);
@@ -1697,6 +1748,9 @@ function _renderDeviceHTML(device) {
                                onclick="event.stopPropagation()">
                         <span class="mix-value">${mixPct}%</span>
                     </span>
+                    <button class="blend-toggle ${device.blend_mode && device.blend_mode !== 'normal' ? 'active' : ''}"
+                            onclick="event.stopPropagation(); toggleBlendMenu(${device.id}, this)"
+                            data-tooltip="Blend mode">${_blendLabel(device.blend_mode)}</button>
                 </div>
                 <div class="group-children ${childrenClass}">
                     ${childrenHtml}
@@ -1752,6 +1806,9 @@ function _renderDeviceHTML(device) {
                            onclick="event.stopPropagation()">
                     <span class="mix-value">${mixPct}%</span>
                 </span>
+                <button class="blend-toggle ${device.params?.blend_mode && device.params.blend_mode !== 'normal' ? 'active' : ''}"
+                        onclick="event.stopPropagation(); toggleBlendMenu(${device.id}, this)"
+                        data-tooltip="Blend mode">${_blendLabel(device.params?.blend_mode)}</button>
                 <button class="more-btn" onclick="event.stopPropagation(); deviceContextMenu(event, ${device.id})" title="More options">&#8943;</button>
             </div>
             <div class="device-params">

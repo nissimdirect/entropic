@@ -1481,6 +1481,7 @@ from core.automation import PerformanceSession
 class PerformInitRequest(BaseModel):
     layers: list[dict] | None = None  # Custom layer configs
     auto: bool = True                 # Auto-generate defaults
+    master_effects: list[dict] = []   # Master bus effects (applied after composite)
 
 
 from typing import Literal
@@ -1599,10 +1600,12 @@ async def perform_init(req: PerformInitRequest):
         _state["perf_stack"] = stack
         _state["perf_layers"] = layer_dicts
         _state["perf_frame_count"] = 0
+        _state["perf_master_effects"] = req.master_effects
 
     return {
         "status": "ok",
         "layers": layer_dicts,
+        "master_effects": req.master_effects,
         "adsr_presets": list(ADSR_PRESETS.keys()),
     }
 
@@ -1677,6 +1680,14 @@ async def perform_frame(req: PerformFrameRequest):
 
         # --- 5. Composite using LayerStack (respects z-order + computed opacity) ---
         result = stack.composite(frame_dict)
+
+        # --- 5b. Apply master bus effects (post-composite processing) ---
+        master_fx = _state.get("perf_master_effects", [])
+        if master_fx:
+            result = apply_chain(result, master_fx,
+                                 frame_index=_state.get("perf_frame_count", 0),
+                                 total_frames=_state["video_info"].get("total_frames", 1),
+                                 watermark=False)
 
         # --- 6. Build envelope state for client UI sync ---
         layer_info = []
@@ -1757,6 +1768,21 @@ async def perform_update_layer(req: PerformUpdateLayerRequest):
             break
 
     return {"status": "ok", "layer": layer.to_dict()}
+
+
+class PerformMasterRequest(BaseModel):
+    effects: list[dict] = []
+
+
+@app.post("/api/perform/master")
+async def perform_update_master(req: PerformMasterRequest):
+    """Update the master bus effects chain (applied after layer composite)."""
+    if _state.get("perf_stack") is None:
+        raise HTTPException(status_code=400, detail="Perform mode not initialized.")
+    if len(req.effects) > 10:
+        raise HTTPException(status_code=400, detail="Max 10 master bus effects")
+    _state["perf_master_effects"] = req.effects
+    return {"status": "ok", "master_effects": req.effects}
 
 
 @app.post("/api/perform/save")

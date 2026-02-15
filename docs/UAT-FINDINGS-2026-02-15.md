@@ -814,3 +814,63 @@ These items were in the user's feedback but MISSED in the first capture:
 
 *Captured: 2026-02-15, live UAT session*
 *Quote mapping: 2026-02-15, exhaustive pass — 150+ quotes mapped*
+
+---
+
+## ADDENDUM: UX REFACTOR SHIPPED (2026-02-15)
+
+> **Context:** Don Norman heuristic analysis scored Entropic 7/10. 17 UX improvements implemented to target 9.5/10. 8 whimsy effects added. 2655 tests passing.
+
+### Shipped Features (Sections 45-50 in UAT Plan)
+
+| # | Feature | What It Does | Files Changed |
+|---|---------|-------------|---------------|
+| UXR-1 | Effect search bar | Type to filter effects across all categories | index.html, app.js, style.css |
+| UXR-2 | Favorites system | Star effects, localStorage persistence, dedicated tab | app.js, style.css, index.html |
+| UXR-3 | Info view panel | Ableton-style hover descriptions at bottom-left | app.js, style.css, index.html |
+| UXR-4 | Chain complexity meter | Light/Medium/Heavy indicator + buffer count + click-to-clear-cache | app.js, style.css, index.html |
+| UXR-5 | Effect hover preview | 400ms debounced thumbnail via /api/preview/thumbnail | app.js, server.py, style.css |
+| UXR-6 | Parameter presets | Save/load/delete per-effect param snapshots via localStorage | app.js, style.css |
+| UXR-7 | Automation lane switching | Right-click lane header to switch which param is automated | timeline.js, app.js |
+| UXR-8 | Perform bake to timeline | Convert perform session events into timeline automation lanes | app.js |
+| UXR-9 | Top 3 categories auto-expand | Most-used categories expand on load | app.js |
+| UXR-10 | Arc visibility improvements | Better knob arc visibility in dark theme | style.css |
+| UXR-11 | Export toast | Success notification after export completes | app.js |
+| UXR-12 | 8 Whimsy effects | kaleidoscope, softbloom, shapeoverlay, lensflare, watercolor, rainbowshift, sparkle, filmgrainwarm | effects/whimsy.py, __init__.py, packages.py |
+
+### Test Evidence
+- 2655 tests passing (2547 pre-existing + 108 whimsy)
+- 123 effects total (was 115)
+- 12 categories (was 11)
+- 16 packages (was 15)
+- node -c syntax checks pass for all JS
+- py_compile passes for all Python
+
+---
+
+## ADDENDUM: PERFORMANCE AUTOMATION FEATURES (2026-02-15, Planned)
+
+> **Context:** User session identified gaps in performance recording workflow. 8 new feature areas documented with acceptance criteria (UAT Sections 51-56).
+
+### Quote-to-Feature Mapping
+
+| Quote | Maps To |
+|-------|---------|
+| "we might need to mimic Ableton's Overdub and Record buttons separately" | SEC-52: Separate Rec/Overdub buttons |
+| "maybe we want an automation record" | SEC-53: Automation recording mode |
+| "in a performance if there was a buffer of automation and we could claim it from not having recorded it by accident" | SEC-54: MIDI Capture / Retroactive Buffer (HIGHEST PRIORITY) |
+| "In Ableton, there's that MIDI capture button. I think that would be great." | SEC-54: Confirms Ableton MIDI Capture as reference |
+| "any automation performance can come from the computer keyboard via toggle" | SEC-51: Keyboard as performance input |
+| "any MIDI input via keyboard and knob mappings" | SEC-55: MIDI controller mapping |
+| "figure out how to map knobs to parameters and make macros" | SEC-56: Macro system |
+| "hot key to toggle automation view on and off, so that would be the A button" | SEC-53.5: A key toggles automation lanes visibility |
+| "keyboard toggle on for having it as a MIDI input, which would be M for triggering stuff" | SEC-51.1: M key toggles keyboard-as-controller mode |
+| "different effect layers doing it...Ableton's Drum Rack and Sampler" | SEC-51.5: Drum rack-style multi-layer key mapping |
+
+### Priority (User-Stated)
+1. **MIDI Capture / Retroactive Buffer** (SEC-54) — "I think that would be great"
+2. **Keyboard input mode** (SEC-51) — foundational for all performance
+3. **Automation recording** (SEC-53) — knob movements to timeline
+4. **Record vs Overdub** (SEC-52) — essential for iterative performance
+5. **MIDI controller** (SEC-55) — hardware integration
+6. **Macros** (SEC-56) — power user feature

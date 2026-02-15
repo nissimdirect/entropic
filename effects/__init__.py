@@ -233,14 +233,14 @@ EFFECTS = {
     "chroma_key": {
         "fn": chroma_key,
         "category": "color",
-        "params": {"hue": 120.0, "tolerance": 30.0, "softness": 10.0, "replace_color": "black"},
+        "params": {"hue": 120.0, "tolerance": 30.0, "softness": 10.0, "replace_color": "transparent"},
         "param_ranges": {"hue": {"min": 0.0, "max": 360.0}, "tolerance": {"min": 5.0, "max": 90.0}, "softness": {"min": 0.0, "max": 50.0}},
         "description": "Green screen — key out a color range for transparency",
     },
     "luma_key": {
         "fn": luma_key,
         "category": "color",
-        "params": {"threshold": 0.3, "mode": "dark", "softness": 10.0},
+        "params": {"threshold": 0.3, "mode": "dark", "softness": 10.0, "replace_color": "transparent"},
         "param_ranges": {"threshold": {"min": 0.0, "max": 1.0}, "softness": {"min": 0.0, "max": 50.0}},
         "description": "Luminance key — key out dark or bright areas for transparency",
     },
@@ -1063,12 +1063,26 @@ def apply_effect(frame, effect_name: str, frame_index: int = 0, total_frames: in
     fn, defaults = get_effect(effect_name)
     merged = {**defaults, **params}
 
-    # RGBA normalization gate: strip alpha before effect, preserve for reattach
-    # This prevents 4-channel frames from corrupting effects that expect 3-channel
+    # RGBA normalization gate: strip alpha before most effects, preserve for reattach.
+    # EXCEPTION: Physics effects use _remap_frame (cv2.remap) which handles any channel
+    # count, so we pass RGBA through so alpha drifts with the displaced pixels.
+    _PHYSICS_EFFECTS = {
+        "pixelliquify", "pixelgravity", "pixelvortex", "pixelexplode", "pixelelastic",
+        "pixelmelt", "pixelblackhole", "pixelantigravity", "pixelmagnetic",
+        "pixeltimewarp", "pixeldimensionfold", "pixelwormhole", "pixelquantum",
+        "pixeldarkenergy", "pixelsuperfluid", "pixelbubbles", "pixelinkdrop",
+        "pixelhaunt", "pixelannihilate", "pixeldynamics", "pixelcosmos",
+        "pixelorganic", "pixeldecay",
+    }
     _input_alpha = None
+    _pass_rgba_through = effect_name in _PHYSICS_EFFECTS
     if frame.ndim == 3 and frame.shape[2] == 4:
-        _input_alpha = frame[:, :, 3].copy()
-        frame = frame[:, :, :3].copy()
+        if _pass_rgba_through:
+            # Physics: keep RGBA intact — displacement will move alpha with pixels
+            _input_alpha = None  # Don't reattach separately; physics handles it
+        else:
+            _input_alpha = frame[:, :, 3].copy()
+            frame = frame[:, :, :3].copy()
 
     # Inject temporal context for effects that need it
     import inspect
@@ -1099,12 +1113,17 @@ def apply_effect(frame, effect_name: str, frame_index: int = 0, total_frames: in
 
     # RGBA output handling: if effect produced RGBA, extract its alpha
     # If effect produced RGB but input had alpha, reattach the input alpha
+    # Physics effects that passed RGBA through already have displaced alpha in wet
     _output_alpha = None
     if wet.ndim == 3 and wet.shape[2] == 4:
         _output_alpha = wet[:, :, 3]
         wet = wet[:, :, :3]
     elif _input_alpha is not None:
         _output_alpha = _input_alpha
+
+    # For concentration and mix blending, ensure frame is also RGB
+    if frame.ndim == 3 and frame.shape[2] == 4:
+        frame = frame[:, :, :3]
 
     # Spatial concentration: Gaussian falloff mask around a point
     if conc_x is not None and conc_y is not None and conc_radius > 0:
@@ -1132,6 +1151,9 @@ def apply_effect(frame, effect_name: str, frame_index: int = 0, total_frames: in
         # Dry/wet blend with optional blend mode
         if mix <= 0.0:
             wet = frame.copy()
+            # If input was RGB, don't inject effect's output alpha onto dry signal
+            if _input_alpha is None and not _pass_rgba_through:
+                _output_alpha = None
         else:
             wet = _blend_mix(frame, wet, mix, blend_mode)
 

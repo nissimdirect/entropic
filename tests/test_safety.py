@@ -507,15 +507,26 @@ class TestEffectOutputContract:
     def effect_name(self, request):
         return request.param
 
+    # Effects that legitimately produce RGBA output (transparency-generating)
+    _RGBA_PRODUCING = {"chroma_key", "luma_key", "emboss"}
+
     def test_effect_returns_same_shape(self, effect_name, medium_frame):
-        """Every effect must return the same shape as input."""
+        """Every effect must return same spatial dims; RGBA-producing effects may add alpha."""
         entry = EFFECTS[effect_name]
         fn = entry["fn"]
         params = entry["params"].copy()
         result = fn(medium_frame, **params)
-        assert result.shape == medium_frame.shape, (
-            f"Effect {effect_name} changed shape: {medium_frame.shape} -> {result.shape}"
+        assert result.shape[:2] == medium_frame.shape[:2], (
+            f"Effect {effect_name} changed spatial dims: {medium_frame.shape[:2]} -> {result.shape[:2]}"
         )
+        if effect_name in self._RGBA_PRODUCING:
+            assert result.shape[2] in (3, 4), (
+                f"Effect {effect_name} channels: {result.shape[2]}"
+            )
+        else:
+            assert result.shape == medium_frame.shape, (
+                f"Effect {effect_name} changed shape: {medium_frame.shape} -> {result.shape}"
+            )
 
     def test_effect_returns_uint8(self, effect_name, medium_frame):
         """Every effect must return uint8 dtype."""
