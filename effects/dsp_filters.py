@@ -41,7 +41,7 @@ def video_flanger(
         feedback: Output→buffer feedback (0.0-0.95). Higher = self-reinforcing.
         wet: Dry/wet mix (0.0-1.0).
     """
-    key = seed
+    key = f"video_flanger_{seed}"
     if key not in _flanger_buffers:
         _flanger_buffers[key] = []
     buf = _flanger_buffers[key]
@@ -97,7 +97,7 @@ def video_phaser(
         depth: Sweep range (0.1-5.0). Higher = wider frequency sweep.
         feedback: Output→input feedback (0.0-0.8).
     """
-    key = seed
+    key = f"video_phaser_{seed}"
     prev = _phaser_state.get(key)
 
     f = frame.astype(np.float32)
@@ -150,7 +150,7 @@ def spatial_flanger(
         depth: Max pixel shift per row (1-100).
         feedback: Frame-to-frame feedback (0.0-0.8).
     """
-    key = seed
+    key = f"spatial_flanger_{seed}"
     prev = _phaser_state.get(f"sf_{key}")
 
     f = frame.astype(np.float32)
@@ -401,7 +401,7 @@ def feedback_phaser(
         feedback: Self-feed amount (0.0-0.95). Above 0.7 = self-oscillation.
         escalation: Depth increase per frame (0.0-0.05).
     """
-    key = seed
+    key = f"feedback_phaser_{seed}"
     prev = _feedback_phaser_state.get(key)
 
     f = frame.astype(np.float32)
@@ -456,7 +456,7 @@ def spectral_freeze(
         blend_peak: Max blend of frozen spectrum (0.1-1.0).
         envelope_frames: Duration of freeze influence in frames (5-60).
     """
-    key = seed
+    key = f"spectral_freeze_{seed}"
     state = _spectral_freeze_state.get(key, {"frozen": None, "freeze_frame": -999})
 
     # Capture spectrum at intervals
@@ -507,7 +507,7 @@ def visual_reverb(
         depth: Max convolution blend (0.1-0.8).
         ir_interval: Frames between IR updates (10-90).
     """
-    key = seed
+    key = f"visual_reverb_{seed}"
     state = _reverb_state.get(key, {"ir": None})
 
     # Update impulse response at intervals
@@ -557,7 +557,7 @@ def freq_flanger(
         mag_blend: Magnitude blend amount (0.0-0.8).
         phase_blend: Phase blend amount (0.0-0.6). Higher = more ghostly.
     """
-    key = seed
+    key = f"freq_flanger_{seed}"
     if key not in _freq_flanger_state:
         _freq_flanger_state[key] = []
     buf = _freq_flanger_state[key]

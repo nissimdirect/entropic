@@ -53,20 +53,24 @@ def vhs(frame: np.ndarray, tracking: float = 0.5, noise_amount: float = 0.2,
 
 
 def noise(frame: np.ndarray, amount: float = 0.3,
-          noise_type: str = "gaussian", seed: int = 42) -> np.ndarray:
+          noise_type: str = "gaussian", seed: int = 42,
+          animate: bool = False, frame_index: int = 0) -> np.ndarray:
     """Add noise to the frame.
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
         amount: Noise intensity (0.0-1.0).
         noise_type: 'gaussian', 'salt_pepper', or 'uniform'.
-        seed: Random seed.
+        seed: Random seed (base seed when animate=False).
+        animate: If True, seed auto-increments each frame for motion noise.
+        frame_index: Current frame number for animation.
 
     Returns:
         Noisy frame.
     """
     h, w, c = frame.shape
-    rng = np.random.RandomState(seed)
+    effective_seed = seed + frame_index if animate else seed
+    rng = np.random.RandomState(effective_seed)
     amount = max(0.0, min(1.0, amount))
     result = frame.astype(np.float32)
 
@@ -152,42 +156,58 @@ def blur(frame: np.ndarray, radius: int = 3, blur_type: str = "box") -> np.ndarr
     Args:
         frame: (H, W, 3) uint8 RGB array.
         radius: Blur radius in pixels (1-20).
-        blur_type: 'box' or 'motion'.
+        blur_type: 'box', 'gaussian', 'motion', 'radial', or 'median'.
 
     Returns:
         Blurred frame.
     """
+    import cv2
     from PIL import Image, ImageFilter
 
     radius = max(1, min(20, int(radius)))
-    img = Image.fromarray(frame)
+    h, w = frame.shape[:2]
 
-    if blur_type == "motion":
+    if blur_type == "gaussian":
+        # OpenCV GaussianBlur — radius maps to kernel size
+        ksize = radius * 2 + 1
+        return cv2.GaussianBlur(frame, (ksize, ksize), 0)
+
+    elif blur_type == "motion":
         # Horizontal motion blur using a 1D kernel
-        # Pillow Kernel supports max 5x5, so use numpy for larger radii
         kernel_size = radius * 2 + 1
-        if kernel_size > 5:
-            kernel = np.zeros((kernel_size, kernel_size), dtype=np.float32)
-            kernel[kernel_size // 2, :] = 1.0 / kernel_size
-            from scipy.ndimage import convolve
-            result = np.stack([
-                convolve(frame[:, :, c].astype(np.float32), kernel)
-                for c in range(3)
-            ], axis=-1)
-            return np.clip(result, 0, 255).astype(np.uint8)
-        kernel = [1.0 / kernel_size] * kernel_size
-        # Pad to square kernel
-        full_kernel = [0.0] * (kernel_size * kernel_size)
-        mid = kernel_size // 2
-        for i in range(kernel_size):
-            full_kernel[mid * kernel_size + i] = kernel[i]
-        img = img.filter(ImageFilter.Kernel(
-            (kernel_size, kernel_size), full_kernel, scale=1, offset=0
-        ))
-    else:
-        img = img.filter(ImageFilter.BoxBlur(radius))
+        kernel = np.zeros((kernel_size, kernel_size), dtype=np.float32)
+        kernel[kernel_size // 2, :] = 1.0 / kernel_size
+        result = cv2.filter2D(frame, -1, kernel)
+        return result
 
-    return np.array(img)
+    elif blur_type == "radial":
+        # Radial blur from center — warp pixels inward/outward with scaling
+        cx, cy = w // 2, h // 2
+        strength = radius * 0.02  # Scaling factor
+        y_coords, x_coords = np.mgrid[0:h, 0:w].astype(np.float32)
+        dx = x_coords - cx
+        dy = y_coords - cy
+        distance = np.sqrt(dx**2 + dy**2) + 1e-6
+        # Scale coordinates toward/away from center
+        scale = 1.0 + strength
+        map_x = cx + dx * scale
+        map_y = cy + dy * scale
+        result = cv2.remap(frame, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        # Blend with original for blur effect
+        blended = (frame.astype(np.float32) * 0.6 + result.astype(np.float32) * 0.4)
+        return np.clip(blended, 0, 255).astype(np.uint8)
+
+    elif blur_type == "median":
+        # Median filter — noise reduction, preserves edges
+        ksize = min(radius * 2 + 1, 31)  # OpenCV medianBlur max is 31
+        if ksize % 2 == 0:
+            ksize += 1
+        return cv2.medianBlur(frame, ksize)
+
+    else:  # box
+        img = Image.fromarray(frame)
+        img = img.filter(ImageFilter.BoxBlur(radius))
+        return np.array(img)
 
 
 def sharpen(frame: np.ndarray, amount: float = 1.0) -> np.ndarray:
@@ -214,7 +234,10 @@ def sharpen(frame: np.ndarray, amount: float = 1.0) -> np.ndarray:
 
 
 def tv_static(frame: np.ndarray, intensity: float = 0.8,
-              sync_drift: float = 0.3, seed: int = 42) -> np.ndarray:
+              sync_drift: float = 0.3, seed: int = 42,
+              concentrate_x: float = 0.5, concentrate_y: float = 0.5,
+              concentrate_radius: float = 0.0, animate_displacement: bool = False,
+              frame_index: int = 0) -> np.ndarray:
     """Full-screen TV static with horizontal sync drift.
 
     Channel-between-stations aesthetic. Random noise overlay +
@@ -225,15 +248,33 @@ def tv_static(frame: np.ndarray, intensity: float = 0.8,
         intensity: Static overlay amount (0.0-1.0).
         sync_drift: Horizontal sync error amount (0.0-1.0).
         seed: Random seed.
+        concentrate_x: X position for spatial concentration (0.0-1.0, 0.5=center).
+        concentrate_y: Y position for spatial concentration (0.0-1.0, 0.5=center).
+        concentrate_radius: Radius for concentration falloff (0.0=fullscreen, 0.5=half).
+        animate_displacement: If True, displacement shifts over time.
+        frame_index: Current frame number for animation.
 
     Returns:
         Static-overlaid frame.
     """
     h, w, c = frame.shape
-    rng = np.random.RandomState(seed)
+    effective_seed = seed + frame_index if animate_displacement else seed
+    rng = np.random.RandomState(effective_seed)
     intensity = max(0.0, min(1.0, float(intensity)))
     sync_drift = max(0.0, min(1.0, float(sync_drift)))
+    concentrate_radius = max(0.0, min(1.0, float(concentrate_radius)))
+
     static = rng.randint(0, 256, (h, w), dtype=np.uint8)
+
+    # Spatial concentration — fade static based on distance from center
+    if concentrate_radius > 0.0:
+        cx = int(w * max(0.0, min(1.0, concentrate_x)))
+        cy = int(h * max(0.0, min(1.0, concentrate_y)))
+        yy, xx = np.ogrid[:h, :w]
+        distance = np.sqrt(((xx - cx) / w) ** 2 + ((yy - cy) / h) ** 2)
+        mask = 1.0 - np.clip(distance / concentrate_radius, 0.0, 1.0)
+        static = (static.astype(np.float32) * mask).astype(np.uint8)
+
     static_rgb = np.stack([static] * 3, axis=2)
     result = frame.copy()
     if sync_drift > 0:

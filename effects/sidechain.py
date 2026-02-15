@@ -93,7 +93,7 @@ def sidechain_duck(
               "blur", "invert", "displace").
         invert: Invert sidechain signal (duck where signal is LOW).
     """
-    key = seed
+    key = f"sidechain_duck_{seed}"
     state = _sidechain_state.get(key, {"envelope": None})
 
     # Extract sidechain signal from the SAME frame (self-sidechain)

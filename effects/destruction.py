@@ -445,11 +445,12 @@ def block_corrupt(
     num_blocks: int = 15,
     block_size: int = 32,
     mode: str = "shift",
+    placement: str = "random",
     seed: int = 42,
 ) -> np.ndarray:
     """Corrupt random rectangular blocks — simulates codec macroblock errors.
 
-    Modes:
+    Corruption modes:
         shift: Copy block from random offset position
         noise: Fill block with random noise
         repeat: Fill block by repeating its first row
@@ -457,31 +458,82 @@ def block_corrupt(
         zero: Black out the block
         smear: Stretch a single pixel column across the block
 
+    Placement modes:
+        random: Place blocks randomly (default)
+        sequential: Place blocks left-to-right, top-to-bottom
+        radial: Place blocks radiating from center
+        edge_detected: Place blocks near detected edges
+
     Args:
         frame: (H, W, 3) uint8 RGB array.
         num_blocks: Number of blocks to corrupt (1-200).
         block_size: Size of each block in pixels (4-256).
         mode: Corruption mode ('shift', 'noise', 'repeat', 'invert', 'zero', 'smear', 'random').
+        placement: Placement strategy ('random', 'sequential', 'radial', 'edge_detected').
         seed: Random seed.
 
     Returns:
         Block-corrupted frame.
     """
+    import cv2
+
     num_blocks = max(1, min(200, int(num_blocks)))
     block_size = max(4, min(256, int(block_size)))
-    modes = ["shift", "noise", "repeat", "invert", "zero", "smear"]
+    corruption_modes = ["shift", "noise", "repeat", "invert", "zero", "smear"]
     rng = np.random.RandomState(seed)
 
     h, w = frame.shape[:2]
     result = frame.copy()
 
-    for _ in range(num_blocks):
-        bh = rng.randint(max(1, block_size // 2), block_size + 1)
-        bw = rng.randint(max(1, block_size // 2), block_size + 1)
-        y = rng.randint(0, max(1, h - bh))
-        x = rng.randint(0, max(1, w - bw))
+    # Generate block positions based on placement strategy
+    if placement == "sequential":
+        # Left-to-right, top-to-bottom grid
+        positions = []
+        for y in range(0, h, block_size):
+            for x in range(0, w, block_size):
+                positions.append((y, x))
+        # Take first num_blocks positions
+        positions = positions[:num_blocks]
+    elif placement == "radial":
+        # Radiate from center outward
+        cx, cy = w // 2, h // 2
+        positions = []
+        for _ in range(num_blocks):
+            angle = rng.uniform(0, 2 * np.pi)
+            distance = rng.uniform(0, min(cx, cy))
+            x = int(cx + distance * np.cos(angle))
+            y = int(cy + distance * np.sin(angle))
+            x = max(0, min(w - block_size, x))
+            y = max(0, min(h - block_size, y))
+            positions.append((y, x))
+    elif placement == "edge_detected":
+        # Detect edges, place blocks near them
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        edge_coords = np.argwhere(edges > 0)
+        if len(edge_coords) == 0:
+            # Fallback to random if no edges
+            positions = [(rng.randint(0, max(1, h - block_size)),
+                          rng.randint(0, max(1, w - block_size)))
+                         for _ in range(num_blocks)]
+        else:
+            positions = []
+            for _ in range(num_blocks):
+                edge_pt = edge_coords[rng.randint(0, len(edge_coords))]
+                y, x = edge_pt[0], edge_pt[1]
+                y = max(0, min(h - block_size, y))
+                x = max(0, min(w - block_size, x))
+                positions.append((y, x))
+    else:  # random
+        positions = [(rng.randint(0, max(1, h - block_size)),
+                      rng.randint(0, max(1, w - block_size)))
+                     for _ in range(num_blocks)]
 
-        m = mode if mode != "random" else modes[rng.randint(0, len(modes))]
+    for y, x in positions:
+        bh = min(block_size, h - y)
+        bw = min(block_size, w - x)
+
+        m = mode if mode != "random" else corruption_modes[rng.randint(0, len(corruption_modes))]
 
         if m == "shift":
             sy = rng.randint(0, max(1, h - bh))
@@ -780,6 +832,7 @@ def film_grain(
     intensity: float = 0.4,
     grain_size: int = 2,
     seed: int = 42,
+    animate: bool = True,
     frame_index: int = 0,
     total_frames: int = 1,
 ) -> np.ndarray:
@@ -792,14 +845,16 @@ def film_grain(
         frame: (H, W, 3) uint8 RGB array.
         intensity: Grain strength (0.0-2.0). Above 1.0 = extreme grain.
         grain_size: Grain particle size in pixels (1-8).
-        seed: Random seed.
+        seed: Random seed (base seed when animate=False).
+        animate: If True, grain moves frame-to-frame (default True for realism).
 
     Returns:
         Grainy frame.
     """
     intensity = max(0.0, min(2.0, float(intensity)))
     grain_size = max(1, min(8, int(grain_size)))
-    rng = np.random.RandomState(seed + frame_index)
+    effective_seed = seed + frame_index if animate else seed
+    rng = np.random.RandomState(effective_seed)
 
     h, w = frame.shape[:2]
     f = frame.astype(np.float32)
@@ -831,6 +886,7 @@ def glitch_repeat(
     num_slices: int = 8,
     max_height: int = 20,
     shift: bool = True,
+    flicker: bool = False,
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
@@ -845,11 +901,16 @@ def glitch_repeat(
         num_slices: Number of slices to repeat (1-60).
         max_height: Maximum height of each slice (3-200).
         shift: Also horizontally shift repeated slices.
+        flicker: If True, alternates between glitched and clean frames.
         seed: Random seed.
 
     Returns:
         Glitch-repeated frame.
     """
+    # Flicker mode: every other frame is clean
+    if flicker and frame_index % 2 == 0:
+        return frame.copy()
+
     num_slices = max(1, min(60, int(num_slices)))
     max_height = max(3, min(200, int(max_height)))
     rng = np.random.RandomState(seed + frame_index)
@@ -882,19 +943,26 @@ def xor_glitch(
     pattern: int = 128,
     mode: str = "fixed",
     seed: int = 42,
+    frame_index: int = 0,
+    total_frames: int = 1,
 ) -> np.ndarray:
     """Bitwise XOR pixels with a pattern — digital-only aesthetic.
 
     Modes:
         fixed: XOR all pixels with a single byte value.
-        random: XOR with random bytes per pixel.
+        random: XOR with random bytes per pixel (noise).
         gradient: XOR with a horizontal gradient (column index as byte).
+        shift_self: XOR frame with horizontally shifted copy of itself.
+        invert_self: XOR frame with its own inversion.
+        prev_frame: XOR with previous frame (temporal glitch).
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
-        pattern: XOR byte value for fixed mode (0-255).
-        mode: 'fixed', 'random', or 'gradient'.
+        pattern: XOR byte value for fixed mode (0-255). For shift_self, shift amount (pixels).
+        mode: 'fixed', 'random', 'gradient', 'shift_self', 'invert_self', or 'prev_frame'.
         seed: Random seed for random mode.
+        frame_index: Current frame number for prev_frame mode.
+        total_frames: Total frames for prev_frame mode.
 
     Returns:
         XOR-glitched frame.
@@ -910,7 +978,28 @@ def xor_glitch(
         gradient = np.tile(np.arange(w, dtype=np.uint8), (h, 1))
         gradient = np.stack([gradient] * 3, axis=2)
         return np.bitwise_xor(frame, gradient)
-    else:
+    elif mode == "shift_self":
+        # XOR with shifted copy — creates interference patterns
+        shift = max(1, min(frame.shape[1] // 2, pattern))
+        shifted = np.roll(frame, shift, axis=1)
+        return np.bitwise_xor(frame, shifted)
+    elif mode == "invert_self":
+        # XOR with inverted self — produces specific color artifacts
+        inverted = 255 - frame
+        return np.bitwise_xor(frame, inverted)
+    elif mode == "prev_frame":
+        # XOR with previous frame — temporal glitch (requires state)
+        state_key = f"xor_prev_{seed}"
+        st = _get_destruction_state(state_key, lambda: {"prev": None})
+        if frame_index == 0 or st["prev"] is None or st["prev"].shape != frame.shape:
+            st["prev"] = frame.copy()
+            _cleanup_destruction_if_done(state_key, frame_index, total_frames)
+            return frame.copy()
+        result = np.bitwise_xor(frame, st["prev"])
+        st["prev"] = frame.copy()
+        _cleanup_destruction_if_done(state_key, frame_index, total_frames)
+        return result
+    else:  # fixed
         return np.bitwise_xor(frame, np.uint8(pattern))
 
 
@@ -1119,6 +1208,7 @@ def channel_destroy(
         swap: Randomly reassign channels to wrong channels.
         crush: Reduce one or more channels to 1-bit.
         eliminate: Kill one or more channels entirely.
+        invert: Invert one or more channels.
         xor_channels: XOR channels against each other.
 
     Args:
@@ -1164,12 +1254,20 @@ def channel_destroy(
             result[:, :, ch] = np.where(result[:, :, ch] > threshold, 255, 0).astype(np.uint8)
 
     elif mode == "eliminate":
-        # Kill channels
+        # Kill channels (set to zero)
         num_kill = max(1, min(2, int(intensity * 2.5)))
         channels = list(range(3))
         rng.shuffle(channels)
         for i in range(num_kill):
             result[:, :, channels[i]] = 0
+
+    elif mode == "invert":
+        # Invert one or more channels
+        num_invert = max(1, min(3, int(intensity * 3)))
+        channels = list(range(3))
+        rng.shuffle(channels)
+        for i in range(num_invert):
+            result[:, :, channels[i]] = 255 - result[:, :, channels[i]]
 
     elif mode == "xor_channels":
         # XOR channels against each other

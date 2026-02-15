@@ -114,8 +114,8 @@ EFFECTS = {
     "smear": {
         "fn": cumulative_smear,
         "category": "distortion",
-        "params": {"direction": "horizontal", "decay": 0.95},
-        "description": "Cumulative paint-smear / light-trail streaks",
+        "params": {"direction": "horizontal", "decay": 0.95, "animate": False},
+        "description": "Cumulative paint-smear / light-trail streaks (horizontal/vertical/diagonal_left/diagonal_right, animated rotation)",
     },
     "wave": {
         "fn": wave_distort,
@@ -140,8 +140,8 @@ EFFECTS = {
     "tvstatic": {
         "fn": tv_static,
         "category": "texture",
-        "params": {"intensity": 0.8, "sync_drift": 0.3, "seed": 42},
-        "description": "TV static with horizontal sync drift (between-channels)",
+        "params": {"intensity": 0.8, "sync_drift": 0.3, "seed": 42, "concentrate_x": 0.5, "concentrate_y": 0.5, "concentrate_radius": 0.0, "animate_displacement": False},
+        "description": "TV static with horizontal sync drift (spatial concentration + animated displacement)",
     },
     "contours": {
         "fn": contour_lines,
@@ -164,14 +164,14 @@ EFFECTS = {
     "noise": {
         "fn": noise,
         "category": "texture",
-        "params": {"amount": 0.3, "noise_type": "gaussian", "seed": 42},
-        "description": "Add grain/noise overlay",
+        "params": {"amount": 0.3, "noise_type": "gaussian", "seed": 42, "animate": False},
+        "description": "Add grain/noise overlay (animate=True for motion noise)",
     },
     "blur": {
         "fn": blur,
         "category": "texture",
         "params": {"radius": 3, "blur_type": "box"},
-        "description": "Box or motion blur",
+        "description": "Blur (box/gaussian/motion/radial/median)",
     },
     "sharpen": {
         "fn": sharpen,
@@ -451,7 +451,7 @@ EFFECTS = {
         "fn": xor_glitch,
         "category": "destruction",
         "params": {"pattern": 128, "mode": "fixed", "seed": 42},
-        "description": "Bitwise XOR corruption (fixed, random, or gradient pattern)",
+        "description": "Bitwise XOR corruption (fixed/random/gradient/shift_self/invert_self/prev_frame)",
     },
     "datamosh": {
         "fn": datamosh,
@@ -472,8 +472,8 @@ EFFECTS = {
     "blockcorrupt": {
         "fn": block_corrupt,
         "category": "destruction",
-        "params": {"num_blocks": 15, "block_size": 32, "mode": "random", "seed": 42},
-        "description": "Corrupt random macroblocks (shift, noise, repeat, invert, zero)",
+        "params": {"num_blocks": 15, "block_size": 32, "mode": "random", "placement": "random", "seed": 42},
+        "description": "Corrupt macroblocks (shift/noise/repeat/invert/zero, placement: random/sequential/radial/edge_detected)",
     },
     "rowshift": {
         "fn": row_shift,
@@ -508,14 +508,14 @@ EFFECTS = {
     "filmgrain": {
         "fn": film_grain,
         "category": "destruction",
-        "params": {"intensity": 0.4, "grain_size": 2, "seed": 42},
-        "description": "Realistic film grain (brightness-responsive, chunky texture)",
+        "params": {"intensity": 0.4, "grain_size": 2, "seed": 42, "animate": True},
+        "description": "Realistic film grain (brightness-responsive, chunky texture, animate=True for moving grain)",
     },
     "glitchrepeat": {
         "fn": glitch_repeat,
         "category": "destruction",
-        "params": {"num_slices": 8, "max_height": 20, "shift": True, "seed": 42},
-        "description": "Repeat and shift random horizontal slices (buffer overflow)",
+        "params": {"num_slices": 8, "max_height": 20, "shift": True, "flicker": False, "seed": 42},
+        "description": "Repeat and shift random horizontal slices (buffer overflow, flicker=True alternates glitched/clean)",
     },
     "pixelannihilate": {
         "fn": pixel_annihilate,
@@ -533,7 +533,7 @@ EFFECTS = {
         "fn": channel_destroy,
         "category": "destruction",
         "params": {"mode": "separate", "intensity": 0.5, "seed": 42},
-        "description": "Rip color channels apart — separate, swap, crush, eliminate, XOR",
+        "description": "Rip color channels apart — separate, swap, crush, eliminate, invert, XOR",
     },
 
     # === SIDECHAIN ===

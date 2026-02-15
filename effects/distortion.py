@@ -176,7 +176,8 @@ def pencil_sketch(frame: np.ndarray, sigma_s: float = 60.0,
 
 
 def cumulative_smear(frame: np.ndarray, direction: str = "horizontal",
-                     decay: float = 0.95) -> np.ndarray:
+                     decay: float = 0.95, animate: bool = False,
+                     frame_index: int = 0) -> np.ndarray:
     """Cumulative smear — paint-smear / light-trail effect.
 
     Each pixel takes the max of itself or the decayed previous pixel,
@@ -184,18 +185,37 @@ def cumulative_smear(frame: np.ndarray, direction: str = "horizontal",
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
-        direction: 'horizontal' or 'vertical'.
+        direction: 'horizontal', 'vertical', 'diagonal_left', or 'diagonal_right'.
         decay: Smear decay rate (0.5-0.999). Higher = longer trails.
+        animate: If True, direction rotates over time using frame_index.
+        frame_index: Current frame number for animation.
 
     Returns:
         Smeared frame.
     """
     decay = max(0.5, min(0.999, float(decay)))
     f = frame.astype(np.float32) / 255.0
+
+    # Animated direction — cycle through 4 directions every 60 frames
+    if animate:
+        cycle_pos = (frame_index // 15) % 4
+        directions = ["horizontal", "vertical", "diagonal_left", "diagonal_right"]
+        direction = directions[cycle_pos]
+
     if direction == "vertical":
         for y in range(1, f.shape[0]):
             f[y] = np.maximum(f[y], f[y - 1] * decay)
-    else:
+    elif direction == "diagonal_left":
+        # Top-left to bottom-right
+        for y in range(1, f.shape[0]):
+            for x in range(1, f.shape[1]):
+                f[y, x] = np.maximum(f[y, x], f[y - 1, x - 1] * decay)
+    elif direction == "diagonal_right":
+        # Top-right to bottom-left
+        for y in range(1, f.shape[0]):
+            for x in range(f.shape[1] - 2, -1, -1):
+                f[y, x] = np.maximum(f[y, x], f[y - 1, x + 1] * decay)
+    else:  # horizontal
         for x in range(1, f.shape[1]):
             f[:, x] = np.maximum(f[:, x], f[:, x - 1] * decay)
     return np.clip(f * 255, 0, 255).astype(np.uint8)
