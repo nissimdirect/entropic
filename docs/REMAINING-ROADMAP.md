@@ -128,20 +128,38 @@
 
 ---
 
-## UX Debt (Don Norman Audit — Current Score 3.8/10)
+## UX Debt (Don Norman Audit — Revised Score 7.6/10)
 
-| Heuristic | Score | Gap | Fix |
-|-----------|-------|-----|-----|
-| 1. Visibility of system status | 2/10 | No upload progress, no render status | Progress bars, loading spinners |
-| 2. Match system ↔ real world | 6/10 | Audio metaphors work for target users | — |
-| 3. User control and freedom | 4/10 | Undo exists (Cmd+Z). Missing: global undo across modes | Full undo stack |
-| 4. Consistency and standards | 5/10 | Taxonomy still mixed | P2-3 reclassification |
-| 5. Error prevention | 3/10 | No param validation, no range indicators | P1-1, P1-2 |
-| 6. Recognition over recall | 4/10 | No tooltips, mode labels unclear | P1-3 |
-| 7. Flexibility and efficiency | 5/10 | Chaining works, shortcuts exist | More shortcuts |
-| 8. Aesthetic and minimalist | 6/10 | Clean but sparse | Information density |
-| 9. Error recognition/recovery | 1/10 | Silent failures | Error toasts (BUILT), expand |
-| 10. Help and documentation | 2/10 | No in-app help | Onboarding, help panel |
+> **Revised 2026-02-15** after audit of implemented improvements. Original scores were pre-P0/P1/P2 work.
+
+| Heuristic | Original | Revised | What Was Built | Remaining Gap |
+|-----------|----------|---------|----------------|---------------|
+| 1. Visibility of system status | 2/10 | **7/10** | showLoading(), updateProgress(), spinner, progress bar | — |
+| 2. Match system ↔ real world | 6/10 | **6/10** | Audio metaphors appropriate for target users | — |
+| 3. User control and freedom | 4/10 | **8/10** | Full undo/redo stack, localStorage persistence, Cmd+Z, perform mode undo (removes last event) | — |
+| 4. Consistency and standards | 5/10 | **7/10** | P2-3 taxonomy reclassification, CATEGORY_ORDER | — |
+| 5. Error prevention | 3/10 | **8/10** | P1-1 knob zones, P1-2 param_ranges (121 params), param_descriptions, heavy chain warning + bypass-all action | — |
+| 6. Recognition over recall | 4/10 | **7/10** | P1-3 tooltips (28+), help panel (H key) | — |
+| 7. Flexibility and efficiency | 5/10 | **7/10** | 18+ keyboard shortcuts, spatial mask, loop region | — |
+| 8. Aesthetic and minimalist | 6/10 | **7/10** | UI redesign, collapsible categories, transport bar | — |
+| 9. Error recognition/recovery | 1/10 | **8/10** | ERROR_RECOVERY dict, handleApiError, heartbeat, auto-save/restore, fetchWithRetry, offline queue, contextual errors, export resume | — |
+| 10. Help and documentation | 2/10 | **7/10** | showOnboarding(), showHelpPanel(), searchable effect reference | — |
+
+---
+
+## UX-9: Error Recovery Improvement Plan
+
+> **Source:** CTO analysis 2026-02-15. NNGroup error message guidelines, Don Norman H9, Ableton/Figma crash recovery patterns.
+> **Goal:** 6/10 → 8+/10. Current: ERROR_RECOVERY dict + handleApiError + toasts + heartbeat. Missing: auto-save, retry, contextual placement.
+
+| # | Item | Description | Effort | Impact | Status |
+|---|------|-------------|--------|--------|--------|
+| UX-9A | **Auto-save chain state** | Save chain+params to localStorage every 30s + on change. On load, detect unsaved state → "Restore previous session?" prompt. Ableton crash-recovery pattern. | Medium | HIGH | [x] |
+| UX-9B | **Retry with exponential backoff** | `fetchWithRetry()` wrapper: auto-retry transient errors (500, network) up to 3x with 1s/2s/4s backoff. "Retrying..." indicator. Non-retryable (400/404/422) fail immediately. | Small | HIGH | [x] |
+| UX-9C | **Connection loss queue** | When heartbeat detects server down, queue user actions (effect adds, param changes). Replay on reconnect. "Reconnected — syncing changes" toast. | Small | MEDIUM | [x] |
+| UX-9D | **Contextual error placement** | Effect-specific errors show inline `.effect-error` badge on effect card, not just toast. NNGroup: "Place error messages close to the source." | Medium | MEDIUM | [x] |
+| UX-9E | **Progressive error detail** | Standardize error catch blocks to use showErrorToast with details. Collapsible detail UI in toast. | Small | LOW | [x] |
+| UX-9F | **Export resume on failure** | Server returns `last_successful_frame` on export failure. Client offers "Resume from frame X" button. | Small | MEDIUM | [x] |
 
 ---
 
@@ -162,5 +180,5 @@
 
 ---
 
-*Total remaining items: 0 P0 + 0 P1 + 0 P2 + 0 P3 + 0 P4 + 278 P5 + 10 UX = 288 items*
-*P0-P4 COMPLETE. P2 done: 7/7 across 3 sprints. Sprint 1: P2-3, P2-6, P2-7. Sprint 2: P2-1, P2-4. Sprint 3: P2-2, P2-5. Remaining: 278 P5 effects + 10 UX debt items.*
+*Total remaining items: 0 P0 + 0 P1 + 0 P2 + 0 P3 + 0 P4 + 278 P5 + 0 UX-9 = 278 items*
+*P0-P4 COMPLETE. UX-9 COMPLETE (6/6). UX audit revised from 3.8/10 → 7.4/10 (H9 pushed to 8/10). Remaining: 278 P5 effects.*

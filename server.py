@@ -57,6 +57,9 @@ _state = {
 }
 _state_lock = asyncio.Lock()
 
+# Freeze cache: track_idx -> {frame_num: numpy_array}
+_freeze_cache = {}
+
 # Render progress tracking (polled by frontend during export)
 _render_progress = {
     "active": False,
@@ -82,15 +85,18 @@ ERROR_RECOVERY = {
 }
 
 
-def _error_detail(key: str, message: str) -> dict:
+def _error_detail(key: str, message: str, effect_name: str = "") -> dict:
     """Build structured error detail dict for frontend handleApiError()."""
     recovery = ERROR_RECOVERY.get(key, {})
-    return {
+    result = {
         "detail": message,
         "code": recovery.get("code", "UNKNOWN"),
         "hint": recovery.get("hint", ""),
         "action": recovery.get("action"),
     }
+    if effect_name:
+        result["effect_name"] = effect_name
+    return result
 
 
 class EffectChain(BaseModel):
@@ -512,7 +518,13 @@ async def preview_effect(chain: EffectChain):
     except Exception as e:
         import logging
         logging.exception("Preview failed")
-        raise HTTPException(status_code=500, detail=_error_detail("processing_failed", "Effect processing failed"))
+        # Try to identify which effect caused the error
+        effect_name = ""
+        if filtered_effects:
+            # The last effect in the chain is most likely the culprit
+            effect_name = filtered_effects[-1].get("name", "") if isinstance(filtered_effects[-1], dict) else ""
+        raise HTTPException(status_code=500, detail=_error_detail(
+            "processing_failed", f"Effect processing failed: {str(e)[:100]}", effect_name=effect_name))
 
 
 class MultiTrackPreviewRequest(BaseModel):
@@ -575,7 +587,16 @@ async def preview_multitrack(req: MultiTrackPreviewRequest):
         total_frames = _state["video_info"].get("total_frames", 1)
 
         frame_dict = {}
-        for layer in layers:
+        for i, layer in enumerate(layers):
+            # Check if this track is frozen — use cached frame if available
+            track_data = req.tracks[i]
+            if track_data.get("frozen", False) and i in _freeze_cache:
+                cached_frame = _freeze_cache[i].get(req.frame_number)
+                if cached_frame is not None:
+                    frame_dict[layer.layer_id] = cached_frame
+                    continue
+
+            # Not frozen or no cache — apply effects normally
             effects = layer.effects
             if effects:
                 filtered, _ = _filter_video_level_effects(effects)
@@ -599,6 +620,69 @@ async def preview_multitrack(req: MultiTrackPreviewRequest):
         import logging
         logging.exception("Multitrack preview failed")
         raise HTTPException(status_code=500, detail=_error_detail("processing_failed", "Multi-track preview failed"))
+
+
+class FreezeTrackRequest(BaseModel):
+    track_index: int
+    effects: list[dict]
+
+
+@app.post("/api/track/freeze")
+async def freeze_track(req: FreezeTrackRequest):
+    """Render all frames with track effects and cache them server-side."""
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
+
+    total_frames = _state["video_info"].get("total_frames", 1)
+
+    # Cap at 300 frames
+    if total_frames > 300:
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "video_too_long",
+                f"Cannot freeze: video has {total_frames} frames (max 300)"
+            )
+        )
+
+    try:
+        # Clear any existing cache for this track
+        _freeze_cache[req.track_index] = {}
+
+        # Render each frame
+        for frame_num in range(total_frames):
+            frame = extract_single_frame(_state["video_path"], frame_num)
+
+            # Apply effects chain
+            if req.effects:
+                frame = apply_chain(
+                    frame,
+                    req.effects,
+                    frame_index=frame_num,
+                    total_frames=total_frames,
+                    watermark=False
+                )
+
+            # Store as numpy array (much more efficient than data URL)
+            _freeze_cache[req.track_index][frame_num] = frame
+
+        return {
+            "status": "ok",
+            "frames_cached": total_frames
+        }
+
+    except Exception as e:
+        import logging
+        logging.exception("Track freeze failed")
+        raise HTTPException(status_code=500, detail=_error_detail("freeze_failed", "Track freeze failed"))
+
+
+@app.post("/api/track/unfreeze")
+async def unfreeze_track(track_index: int):
+    """Clear freeze cache for a track."""
+    if track_index in _freeze_cache:
+        del _freeze_cache[track_index]
+    return {"status": "ok"}
 
 
 class TimelinePreviewRequest(BaseModel):
@@ -1392,50 +1476,105 @@ async def export_video(export: ExportSettings):
         _render_progress["total_frames"] = len(frame_files)
         _render_progress["phase"] = "processing"
 
-        # Process each frame
-        for i, fp in enumerate(frame_files):
-            _render_progress["current_frame"] = i
-            frame = load_frame(fp)
+        # Build multi-track layer stack if tracks provided
+        use_multitrack = export.tracks and len(export.tracks) > 0
+        mt_layers = None
+        mt_stack = None
+        if use_multitrack:
+            from core.layer import Layer, LayerStack
+            any_solo = any(t.get("solo", False) for t in export.tracks)
+            mt_layers = []
+            for ti, track in enumerate(export.tracks):
+                is_muted = track.get("muted", False)
+                is_solo = track.get("solo", False)
+                if any_solo and not is_solo:
+                    continue
+                if is_muted:
+                    continue
+                mt_layers.append(Layer(
+                    layer_id=ti,
+                    name=track.get("name", f"Track {ti + 1}"),
+                    video_path=_state["video_path"],
+                    effects=track.get("effects", []),
+                    opacity=max(0.0, min(1.0, track.get("opacity", 1.0))),
+                    z_order=ti,
+                    blend_mode=track.get("blend_mode", "normal"),
+                    trigger_mode="always_on",
+                ))
+            mt_stack = LayerStack(mt_layers) if mt_layers else None
 
-            # Apply effects with mix
-            if export.effects:
-                effects = export.effects
-                # Apply LFO modulation per frame
-                if lfo_mod:
-                    effects = lfo_mod.apply_to_chain(effects, i, info["fps"])
-                original = frame.copy() if export.mix < 1.0 else None
-                frame = apply_chain(frame, effects,
+        # Process each frame
+        last_successful_frame = -1
+        try:
+            for i, fp in enumerate(frame_files):
+                _render_progress["current_frame"] = i
+                frame = load_frame(fp)
+
+                if use_multitrack and mt_stack:
+                    frame_dict = {}
+                    for layer in mt_layers:
+                        if layer.effects:
+                            filtered, _ = _filter_video_level_effects(layer.effects)
+                            if filtered:
+                                eff = lfo_mod.apply_to_chain(filtered, i, info["fps"]) if lfo_mod else filtered
+                                processed = apply_chain(
+                                    frame.copy(), eff,
                                     frame_index=i,
                                     total_frames=len(frame_files),
-                                    watermark=True)
-                if original is not None:
-                    mix = max(0.0, min(1.0, export.mix))
-                    # Normalize channels for blend (RGBA → strip alpha)
-                    blend_frame = frame[:, :, :3] if frame.ndim == 3 and frame.shape[2] == 4 else frame
-                    frame = np.clip(
-                        original.astype(float) * (1 - mix) + blend_frame.astype(float) * mix,
-                        0, 255
-                    ).astype(np.uint8)
+                                    watermark=True,
+                                )
+                            else:
+                                processed = frame.copy()
+                        else:
+                            processed = frame.copy()
+                        frame_dict[layer.layer_id] = processed
+                    frame = mt_stack.composite(frame_dict)
+                elif use_multitrack and not mt_stack:
+                    frame = np.zeros_like(frame)
+                elif export.effects:
+                    effects = export.effects
+                    if lfo_mod:
+                        effects = lfo_mod.apply_to_chain(effects, i, info["fps"])
+                    original = frame.copy() if export.mix < 1.0 else None
+                    frame = apply_chain(frame, effects,
+                                        frame_index=i,
+                                        total_frames=len(frame_files),
+                                        watermark=True)
+                    if original is not None:
+                        mix = max(0.0, min(1.0, export.mix))
+                        blend_frame = frame[:, :, :3] if frame.ndim == 3 and frame.shape[2] == 4 else frame
+                        frame = np.clip(
+                            original.astype(float) * (1 - mix) + blend_frame.astype(float) * mix,
+                            0, 255
+                        ).astype(np.uint8)
 
-            # Ensure RGB for output (strip any RGBA alpha channel)
-            if frame.ndim == 3 and frame.shape[2] == 4:
-                frame = frame[:, :, :3]
+                if frame.ndim == 3 and frame.shape[2] == 4:
+                    frame = frame[:, :, :3]
 
-            # Resize to target dimensions if different from extracted
-            h_now, w_now = frame.shape[:2]
-            if (w_now, h_now) != (target_w, target_h):
-                img = Image.fromarray(frame)
-                algo_map = {
-                    "lanczos": Image.LANCZOS,
-                    "bilinear": Image.BILINEAR,
-                    "bicubic": Image.BICUBIC,
-                    "nearest": Image.NEAREST,
-                }
-                algo = algo_map.get(export.scale_algorithm.value, Image.LANCZOS)
-                img = img.resize((target_w, target_h), algo)
-                frame = np.array(img)
+                h_now, w_now = frame.shape[:2]
+                if (w_now, h_now) != (target_w, target_h):
+                    img = Image.fromarray(frame)
+                    algo_map = {
+                        "lanczos": Image.LANCZOS,
+                        "bilinear": Image.BILINEAR,
+                        "bicubic": Image.BICUBIC,
+                        "nearest": Image.NEAREST,
+                    }
+                    algo = algo_map.get(export.scale_algorithm.value, Image.LANCZOS)
+                    img = img.resize((target_w, target_h), algo)
+                    frame = np.array(img)
 
-            save_frame(frame, str(processed_dir / f"frame_{i+1:06d}.png"))
+                save_frame(frame, str(processed_dir / f"frame_{i+1:06d}.png"))
+                last_successful_frame = i
+        except Exception as e:
+            import logging
+            logging.exception(f"Export failed at frame {i}")
+            _render_progress["active"] = False
+            _render_progress["phase"] = "idle"
+            detail = _error_detail("render_failed", f"Export failed at frame {i + 1}/{len(frame_files)}: {str(e)[:100]}")
+            detail["last_successful_frame"] = last_successful_frame
+            detail["total_frames"] = len(frame_files)
+            raise HTTPException(status_code=500, detail=detail)
 
         # Build output filename
         ext = export.get_output_extension()

@@ -1239,11 +1239,12 @@ class TimelineEditor {
 
     toggleLoop() {
         if (this.loopStart === null || this.loopEnd === null) {
-            // No loop set — create one from I/O or a default range
+            // No loop set — create one from I/O points, or default to full video
             if (this.inPoint !== null && this.outPoint !== null) {
                 this.setLoopFromIO();
-            } else if (typeof showToast === 'function') {
-                showToast('No loop set. Use Shift+L with I/O points, or drag in ruler.', 'info');
+            } else {
+                // Default: loop entire video
+                this.setLoop(0, this.totalFrames - 1);
             }
             return;
         }

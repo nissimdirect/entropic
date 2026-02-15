@@ -1489,6 +1489,11 @@ def apply_chain(frame, effects_list: list[dict], frame_index: int = 0, total_fra
             continue
 
         name = effect["name"]
+
+        # Skip perform device — it's a UI-only trigger container, not a pixel processor
+        if name == "perform":
+            continue
+
         params = effect.get("params", {})
         envelope = effect.get("envelope")
 

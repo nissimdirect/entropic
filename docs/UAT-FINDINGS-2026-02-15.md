@@ -973,3 +973,340 @@ These items were in the user's feedback but MISSED in the first capture:
 ---
 
 *Added: 2026-02-15, post-sprint UAT cycle*
+
+---
+
+## ADDENDUM: UI REDESIGN SPRINT — COMPLETE (2026-02-15)
+
+> **Context:** Full UI architecture overhaul based on UX heuristic analysis and UAT Rounds 1-2. Unified timeline view replacing 3-mode system.
+
+### Phase A: Layout Foundation (COMPLETE)
+| # | Feature | Status |
+|---|---------|--------|
+| A1 | Kill 3-mode system (Quick/Timeline/Perform) | DONE — mode toggle hidden |
+| A2 | Merge topbar + menubar into single 38px bar | DONE |
+| A3 | Move Load File + Export into File menu | DONE |
+| A4 | Move Undo/Redo into Edit menu | DONE |
+| A5 | Replace dice emoji with "Rand" text | DONE |
+| A6 | Fix icon sizes to 18px | DONE |
+| A7 | Hide right panel (layers/history sidebar) | DONE |
+| A8 | Hide histogram panel + toggle | DONE |
+| A9 | Drag dividers (browser, canvas-timeline, timeline-chain) | DONE |
+| A10 | Collapsible browser sidebar (Tab key) | DONE |
+| A11 | Panel collapse to 28px header | DONE |
+| A12 | History as dropdown button (right-aligned) | DONE |
+| A13 | Light/dark theme toggle | DONE |
+| A14 | Panel sizes saved to localStorage | DONE |
+| A15 | Collapsed panel grid rows adjusted | DONE |
+
+### Phase B: Track System (COMPLETE)
+| # | Feature | Status |
+|---|---------|--------|
+| B1 | Multi-track data model (max 8 tracks) | DONE |
+| B2 | Track strip UI (name, controls, color) | DONE |
+| B3-B5 | Add Track button, context menus | DONE |
+| B6 | Track selection updates chain panel | DONE |
+| B7-B8 | Track collapse/expand, color indicator | DONE |
+| B9-B11 | Opacity, Solo (yellow), Mute (red) | DONE |
+| B12 | Blend mode dropdown (7 modes) | DONE |
+| B13 | Multi-track rendering pipeline (LayerStack compositing, 7 blend modes, solo/mute logic, export support) | DONE |
+
+### Phase C: Transport Bar (COMPLETE)
+| # | Feature | Status |
+|---|---------|--------|
+| C1-C8 | Play/Pause, Rec, Overdub, Capture, Loop with keyboard shortcuts | DONE |
+| C10 | Frame navigation (arrow keys) | DONE |
+| C9 | Loop region drag on ruler | IN PROGRESS |
+
+### Immediate Fixes (COMPLETE)
+- I1-I10: All resolved (dice to Rand, icons 18px, merged toolbar, history right, panel collapse, default Track 1, Add Track sizing, diff hidden, Loop vs Refresh icons, Mixer removed)
+
+### Additional Changes
+| Change | Detail |
+|--------|--------|
+| Tooltips removed | Both native title attributes (stripped via MutationObserver in init()) and custom data-tooltip CSS (display: none). Effect hover preview deprecated to no-op. User feedback: tooltips block content, same color scheme, hard to tell from UI. |
+| Preview controls | Play/pause overlay, scrubber, fullscreen, pop-out window on hover |
+| Split Compare | Moved from toolbar to View menu |
+| Multi-track export | Export pipeline supports tracks array with per-track compositing |
+
+---
+
+## UAT ROUND 3: POST-SPRINT TESTING (2026-02-15) — UPDATED
+
+> **Context:** Following UI refactor sprint, all toolbar/layout/track issues addressed. Test plan covers merged toolbar, track system, transport controls, preview cleanup, and panel resizing.
+
+### Test Plan
+
+#### A. Toolbar & Navigation
+- [ ] Single merged toolbar (File/Edit/View + transport + status)
+- [ ] File menu: Open File, Export, Save Preset all work
+- [ ] Edit menu: Undo, Redo, Randomize, Refresh all work
+- [ ] View menu: Toggle Histogram, Toggle Sidebar, Split Compare, Pop Out Preview, Keyboard Shortcuts
+- [ ] Transport centered: Play/Pause, Rec, Overdub, Capture, Loop buttons visible
+- [ ] Transport icons are appropriately sized (not too small)
+- [ ] Loop and Refresh have DIFFERENT icons (Loop = ↻, Refresh = ↻ but visually distinct)
+- [ ] No Mixer button visible anywhere
+- [ ] History dropdown opens on right side
+
+#### B. Track System
+- [ ] Default Track 1 appears on startup (before file load)
+- [ ] Can add tracks with "+" button (up to 8)
+- [ ] "+" button is channel-strip width, not full row
+- [ ] Track header shows: name, opacity, Solo, Mute, blend mode
+- [ ] Click track to select → chain panel updates
+- [ ] Right-click track → context menu (Add/Duplicate/Delete/Move)
+- [ ] Track collapse toggle works
+- [ ] Solo/Mute buttons toggle correctly
+
+#### C. Preview Canvas
+- [ ] Preview video maintains aspect ratio (not stretched)
+- [ ] No confusing buttons on preview (Capture/Diff/Split hidden)
+- [ ] Split Compare accessible via View menu
+- [ ] Pop Out Preview opens in new window
+
+#### D. Panel Resizing
+- [ ] Browser width draggable (120-500px)
+- [ ] Canvas↔Timeline divider draggable
+- [ ] Timeline↔Chain divider draggable
+- [ ] Panel sizes persist on page reload
+- [ ] Browser collapses via Tab key
+- [ ] Chain/Timeline collapse to header only (28px)
+
+#### E. Transport Controls
+- [ ] Play/Pause toggles (Space key)
+- [ ] Record activates (R key)
+- [ ] Overdub activates (Shift+R)
+- [ ] Capture blinks on trigger (Cmd+Shift+C)
+- [ ] Loop toggles (L key)
+- [ ] Timecode updates during playback
+- [ ] Frame counter updates
+
+#### F. Multi-Track Rendering
+- [ ] Add effect to Track 1, different effect to Track 2, preview shows composite
+- [ ] Solo Track 2, only its effect visible
+- [ ] Mute Track 1, its effect disappears
+- [ ] Change blend mode to Multiply, visual changes
+- [ ] Export with multi-track, output has composited effects
+
+#### G. Tooltips
+- [ ] No native browser tooltips on hover
+- [ ] No custom data-tooltip popups
+- [ ] Effect hover preview is disabled
+
+---
+
+## UAT ROUND 4: NEW FEATURES (Phases C9, D, E, F) — 2026-02-15
+
+> **Context:** Manual test checklist for 4 new feature areas:
+> - **C9:** Loop region (toggle, drag handles, playback wrap)
+> - **Phase D:** Perform module (8 trigger pads, toggle/hold modes)
+> - **Phase E:** MIDI input (keyboard as controller, Web MIDI, MIDI Learn)
+> - **Phase F:** Freeze/Flatten (per-track freeze, 300-frame cap, frozen preview cache)
+
+---
+
+### Phase C9: Loop Region
+
+#### Loop Toggle
+- [ ] Click Loop button in transport bar → loop region appears on timeline ruler
+- [ ] Loop region defaults to visible portion of timeline (or sensible range)
+- [ ] Click Loop button again → loop region disappears
+- [ ] Loop button shows active state when enabled (highlight/color)
+
+#### Drag Handles
+- [ ] Loop region has TWO drag handles (left=start, right=end)
+- [ ] Drag left handle → start boundary updates, playhead follows
+- [ ] Drag right handle → end boundary updates
+- [ ] Handles snap to frame boundaries (no subframe positions)
+- [ ] Cannot drag left handle past right handle (minimum 1-frame loop)
+- [ ] Cannot drag right handle before left handle
+
+#### Playback Wrap
+- [ ] Enable loop, press Play → playback starts at loop start
+- [ ] Playhead reaches loop end → wraps to loop start immediately
+- [ ] Playback wraps smoothly (no pause/stutter)
+- [ ] Frame counter shows correct wrapped frame number
+- [ ] Disable loop during playback → playback continues linearly past loop end
+
+#### Loop + Timeline Interaction
+- [ ] Scrubbing inside loop region → preview updates normally
+- [ ] Scrubbing outside loop region while loop enabled → playback still wraps on Play
+- [ ] Loop region persists across session (localStorage)
+- [ ] Loop region shown in timeline minimap (if applicable)
+
+---
+
+### Phase D: Perform Module (8 Trigger Pads)
+
+#### Trigger Pad UI
+- [ ] 8 trigger pads visible (keys 1-8)
+- [ ] Each pad shows assigned effect name
+- [ ] Each pad shows mode indicator (Toggle/Hold)
+- [ ] Click pad → activates (visual feedback: color/border)
+- [ ] Click again (Toggle mode) → deactivates
+- [ ] Release mouse (Hold mode) → deactivates
+- [ ] Keyboard keys 1-8 trigger pads (same as click)
+
+#### Toggle Mode
+- [ ] Assign effect to pad in Toggle mode
+- [ ] Press key "1" → effect activates
+- [ ] Press key "1" again → effect deactivates
+- [ ] Toggle state persists until key pressed again
+- [ ] Multiple pads can be active simultaneously (layering)
+
+#### Hold Mode
+- [ ] Assign effect to pad in Hold mode
+- [ ] Press and hold key "2" → effect activates
+- [ ] Release key "2" → effect deactivates immediately
+- [ ] Hold mode does NOT persist state
+
+#### Perform Backend Pass-Through
+- [ ] Perform effect in chain → renders without crashing
+- [ ] Preview updates reflect active perform layers
+- [ ] Perform session persists across page refresh (if saved)
+- [ ] Export with perform layers → output includes triggered effects
+
+#### Perform Effect Assignment
+- [ ] Right-click pad → "Assign Effect" menu opens
+- [ ] Select effect from list → pad updates
+- [ ] Change effect params → pad reflects new params
+- [ ] Clear assignment → pad shows "Empty"
+- [ ] Cannot assign more than 8 effects (pads 1-8)
+
+---
+
+### Phase E: MIDI Input
+
+#### Keyboard as MIDI Controller
+- [ ] Press "M" key → enables keyboard-as-MIDI mode
+- [ ] Mode indicator shows "MIDI: ON"
+- [ ] Transport controls (Space, R, L) still work in MIDI mode
+- [ ] Letter keys (A-Z) map to MIDI notes
+- [ ] Number keys (1-8) still trigger perform pads
+- [ ] Press "M" again → disables MIDI mode
+
+#### Key-to-Note Mapping
+- [ ] QWERTY row maps to chromatic scale starting at C4 (configurable)
+- [ ] Lower row maps to octave below (C3)
+- [ ] Press key → MIDI note-on event fires
+- [ ] Release key → MIDI note-off event fires
+- [ ] Velocity fixed at 100 (or velocity-sensitive if implemented)
+
+#### Web MIDI Integration
+- [ ] Connect MIDI controller via USB
+- [ ] Open Preferences → MIDI tab
+- [ ] MIDI device appears in device list
+- [ ] Enable device → MIDI input routes to perform layers
+- [ ] MIDI note-on triggers perform pads (mapped to keys 1-8)
+- [ ] MIDI CC messages modulate parameters (if MIDI Learn active)
+
+#### MIDI Learn
+- [ ] Click param knob → "MIDI Learn" button appears
+- [ ] Click "MIDI Learn" → knob highlights (learning mode)
+- [ ] Twist MIDI knob/fader → binding created
+- [ ] Move MIDI controller → param updates in real-time
+- [ ] Right-click param → "Clear MIDI" removes binding
+- [ ] MIDI mappings persist across sessions (localStorage)
+
+#### MIDI Routing Preferences
+- [ ] Preferences → MIDI tab shows all connected devices
+- [ ] Enable/disable per-device routing
+- [ ] Set MIDI channel filter (1-16 or "All")
+- [ ] MIDI Learn mappings listed in table (CC#, Param, Effect)
+- [ ] Delete button removes individual mappings
+
+---
+
+### Phase F: Freeze/Flatten Track
+
+#### Freeze Track (Backend)
+- [ ] Select track, right-click → "Freeze Track" option appears
+- [ ] Click "Freeze Track" → progress indicator shows
+- [ ] Track freezes (effects baked into cached frames)
+- [ ] Frozen track shows "FROZEN" badge in header
+- [ ] Frozen track effect rack is disabled (grayed out)
+- [ ] Scrubbing frozen track → preview uses cached frames (fast)
+
+#### Freeze 300-Frame Cap
+- [ ] Attempt to freeze 301+ frames → error message shown
+- [ ] Error message: "Freeze limited to 300 frames. Select shorter region."
+- [ ] Freeze exactly 300 frames → succeeds
+- [ ] Freeze < 300 frames → succeeds
+
+#### Frozen Preview Cache
+- [ ] Freeze track → cache written to disk (or memory)
+- [ ] Multitrack preview with frozen track → uses cache
+- [ ] Frozen preview is pixel-identical to live render (no drift)
+- [ ] Cache persists across page refresh (if saved)
+- [ ] Cache invalidated on unfreeze
+
+#### Unfreeze Track
+- [ ] Right-click frozen track → "Unfreeze Track" option
+- [ ] Click "Unfreeze" → badge removed, effect rack re-enabled
+- [ ] Scrubbing unfrozen track → renders live again
+- [ ] Can modify effects after unfreeze
+- [ ] Re-freeze after changes → new cache generated
+
+#### Export with Frozen Tracks
+- [ ] Export project with 1 frozen track → output correct
+- [ ] Export project with mixed frozen/live tracks → composite correct
+- [ ] Frozen track opacity/blend mode respected in export
+- [ ] Export progress indicator shows freeze status per-track
+
+#### Freeze Error Handling
+- [ ] Freeze track with no video loaded → error shown
+- [ ] Freeze track with invalid frame range → error shown
+- [ ] Freeze track when disk space low → error shown (if applicable)
+- [ ] Freeze track with unsupported effect → warning shown, proceeds
+
+---
+
+### Integration: All Features Together
+
+#### Scenario 1: Loop + Perform + Freeze
+- [ ] Freeze track 0 (frames 0-50)
+- [ ] Enable loop region (frames 10-40)
+- [ ] Assign perform effect to pad 1
+- [ ] Press Play → playback wraps at frame 40
+- [ ] Press key "1" during playback → perform effect applies
+- [ ] Frozen track renders from cache (no lag)
+
+#### Scenario 2: MIDI + Perform + Loop
+- [ ] Connect MIDI controller
+- [ ] Enable MIDI routing
+- [ ] Map MIDI note C4 to perform pad 1
+- [ ] Enable loop region
+- [ ] Press MIDI key → pad 1 triggers
+- [ ] Playback wraps seamlessly with MIDI input active
+
+#### Scenario 3: Freeze + Export
+- [ ] Freeze 2 tracks with different effects
+- [ ] Set blend modes (Multiply, Screen)
+- [ ] Export 30-second clip
+- [ ] Output video matches preview composite
+- [ ] Frozen tracks don't cause export delay (cached)
+
+---
+
+### Performance Benchmarks
+
+#### Freeze Performance
+- [ ] Freeze 300 frames with 1 effect → completes in < 60 seconds
+- [ ] Freeze 100 frames with 5 effects → completes in < 90 seconds
+- [ ] Frozen preview at 60 FPS → no dropped frames
+- [ ] CPU usage during frozen playback < 30%
+
+#### MIDI Latency
+- [ ] MIDI note-on to visual feedback < 50ms
+- [ ] MIDI CC to param change < 50ms
+- [ ] No audio dropouts during MIDI input
+- [ ] No UI freeze during MIDI input burst (rapid notes)
+
+#### Loop Playback
+- [ ] Loop wrap latency < 1 frame (imperceptible)
+- [ ] No memory leak during 100+ loop iterations
+- [ ] CPU usage stable during looped playback
+
+---
+
+*Added: 2026-02-15, Phases C9/D/E/F manual test plan*

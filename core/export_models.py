@@ -694,6 +694,13 @@ class ExportSettings(BaseModel):
         description="LFO modulation config for parameter animation during export.",
     )
 
+    # -- Multi-track compositing --
+    tracks: list[dict] | None = Field(
+        default=None,
+        description="Multi-track data: [{name, effects, opacity, blend_mode, muted, solo}]. "
+                    "When present, overrides the flat `effects` chain with per-track compositing.",
+    )
+
     # -- Output filename --
     filename: str | None = Field(
         default=None,

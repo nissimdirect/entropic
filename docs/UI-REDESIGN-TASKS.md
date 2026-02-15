@@ -24,7 +24,7 @@
 - [x] A14. Save panel sizes to localStorage on drag end
 - [x] A15. Fix collapsed panel grid rows (togglePanel adjusts grid-template-rows)
 
-## Phase B: Track System (DONE)
+## Phase B: Track System (COMPLETE)
 
 - [x] B1. Multi-track data model (max 8 tracks, each has: name, effects chain, opacity, solo, mute, blend mode, color)
 - [x] B2. Track strip UI in timeline (left header: ▼ name [100%] [S] [M] [Normal▾])
@@ -38,7 +38,7 @@
 - [x] B10. Solo button (yellow active state)
 - [x] B11. Mute button (red active state)
 - [x] B12. Blend mode dropdown (Normal, Multiply, Screen, Add, Overlay, Darken, Lighten)
-- [ ] B13. Backend: multi-track rendering pipeline (composite tracks by blend mode + opacity)
+- [x] B13. Backend: multi-track rendering pipeline (composite tracks by blend mode + opacity)
 
 ## Phase C: Transport Bar (DONE — UI + wiring)
 
@@ -90,6 +90,11 @@
 - [x] I9. Loop and Refresh icons differentiated
 - [x] I10. Mixer button removed from toolbar
 
+## Tooltip Removal (COMPLETE)
+- [x] T1. Kill all native browser tooltips (title attributes stripped via MutationObserver)
+- [x] T2. Kill custom data-tooltip CSS system (display: none)
+- [x] T3. Deprecate effect hover preview (no-op functions)
+
 ---
 
 ## Phase Round 3 Tasks (NEW — from sprint completion)
@@ -105,14 +110,43 @@
 
 ---
 
+## Regression Fixes (CRITICAL — from 2026-02-15 UAT)
+
+- [ ] REG-1. **Timeline destroyed** — renderTrackList() overwrites timeline-canvas-wrapper innerHTML, destroying canvas. Create separate #track-list-container.
+- [ ] REG-2. **Mixer toast on upload** — delete lines 1412-1418 (leftover from killed 3-mode system)
+- [ ] REG-3. **Dual upload notification** — success + "upload failed" toasts both fire. Wrap fetchHistogram + timelineEditor sync in try/catch.
+- [ ] REG-4. **Video resolution halved** — MAX_PREVIEW_PIXELS cap too aggressive. Investigate preview-only vs export.
+- [ ] REG-5. **Track shows "(0)"** — hide effect count when 0 (show "No effects" or nothing)
+- [ ] REG-6. **Track controls horizontal** — restructure to vertical stack: name on top, opacity/blend/solo/mute below
+- [ ] REG-7. **Effect description subtext** — remove effect-desc spans from browser items (information overload)
+- [ ] REG-8. **Track rename UX** — click on track name = SELECT track (not rename). Rename via right-click context menu only.
+- [ ] REG-9. **Regression test suite** — automated tests for core workflow: upload → timeline → scrub → add effect → preview → export
+
+## Security Fixes (from Red Team 2026-02-15)
+
+- [ ] SEC-1. Freeze cache global 2GB cap + LRU eviction
+- [ ] SEC-2. Track index bounds check (0 <= idx < 8) on freeze/unfreeze
+- [ ] SEC-3. Freeze asyncio.Lock() per track
+- [ ] SEC-4. MIDI bounds validation (note/CC/velocity 0-127)
+- [ ] SEC-5. Blend mode whitelist validation
+- [ ] SEC-6. Escape effect names in track summary (XSS)
+
+## Code Bug Fixes (from CTO Review 2026-02-15)
+
+- [ ] BUG-1. Register 'perform' in EFFECTS dict (effects/__init__.py)
+- [ ] BUG-2. Implement executePerformAction dispatch (app.js)
+
 ## Implementation Priority
 
 1. **Phase A** — Layout foundation ✅ COMPLETE
-2. **Phase B** — Track system ✅ COMPLETE (UI layer)
+2. **Phase B** — Track system ✅ COMPLETE (UI + backend rendering)
 3. **Phase C** — Transport bar ✅ COMPLETE (UI wiring)
 4. **Immediate Fixes** — ✅ COMPLETE
-5. **Phase Round 3** — UAT testing (CURRENT)
-6. **Phase F** — Freeze/Flatten (backend needed)
-7. **Phase D** — Perform module (backend needed)
-8. **Phase E** — Keyboard/MIDI (backend needed)
-9. **Backend: Multi-track rendering** — B13 (render pipeline)
+5. **Regression Fixes** — REG-1 through REG-9 (NEXT)
+6. **Security Fixes** — SEC-1 through SEC-6
+7. **Code Bug Fixes** — BUG-1, BUG-2
+8. **Phase Round 3** — UAT testing
+9. **Phase F** — Freeze/Flatten ✅ CODE DONE (needs SEC fixes)
+10. **Phase D** — Perform module ✅ CODE DONE (needs BUG fixes)
+11. **Phase E** — Keyboard/MIDI ✅ CODE DONE (needs SEC fixes)
+12. **Backend: Multi-track rendering** — B13 ✅ COMPLETE

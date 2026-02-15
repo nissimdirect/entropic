@@ -59,6 +59,62 @@ function showErrorToast(message, details) {
     showToast(message, 'error', null, 8000, details || null);
 }
 
+// ============ FETCH WITH RETRY (exponential backoff) ============
+
+let _retryToast = null;
+
+async function fetchWithRetry(url, options = {}, { maxRetries = 3, baseDelay = 1000, context = '' } = {}) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const res = await fetch(url, options);
+            // Non-retryable client errors — fail immediately
+            if (res.status >= 400 && res.status < 500) return res;
+            // Server errors — retry
+            if (res.status >= 500 && attempt < maxRetries) {
+                const delay = baseDelay * Math.pow(2, attempt);
+                _showRetryIndicator(attempt + 1, maxRetries, context);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+            }
+            _clearRetryIndicator();
+            return res;
+        } catch (err) {
+            // Network error — retry if attempts remain
+            if (attempt < maxRetries) {
+                const delay = baseDelay * Math.pow(2, attempt);
+                _showRetryIndicator(attempt + 1, maxRetries, context);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+            }
+            _clearRetryIndicator();
+            throw err;
+        }
+    }
+}
+
+function _showRetryIndicator(attempt, maxRetries, context) {
+    const msg = context ? `${context}: retrying (${attempt}/${maxRetries})...` : `Retrying (${attempt}/${maxRetries})...`;
+    if (_retryToast && _retryToast.parentNode) {
+        _retryToast.querySelector('.toast-msg').textContent = msg;
+    } else {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+        _retryToast = document.createElement('div');
+        _retryToast.className = 'toast warning';
+        _retryToast.setAttribute('role', 'status');
+        _retryToast.innerHTML = `<span class="toast-icon">&#8635;</span><span class="toast-msg">${esc(msg)}</span>`;
+        container.appendChild(_retryToast);
+    }
+}
+
+function _clearRetryIndicator() {
+    if (_retryToast && _retryToast.parentNode) {
+        _retryToast.style.opacity = '0';
+        _retryToast.style.transition = 'opacity 0.3s';
+        setTimeout(() => { if (_retryToast) _retryToast.remove(); _retryToast = null; }, 300);
+    }
+}
+
 // Structured error handler — parses server error detail dicts with hint + action
 function handleApiError(data, context) {
     let detail = data;
@@ -85,7 +141,71 @@ function handleApiError(data, context) {
 
     const action = actionKey ? actionMap[actionKey] : null;
     const fullMsg = hint ? `${message} — ${hint}` : message;
+
+    // Contextual error: if error references a specific effect, show inline badge
+    const effectName = detail.effect_name || '';
+    if (effectName) {
+        showEffectError(effectName, hint || message);
+    }
+
     showToast(fullMsg, 'error', action || null, 10000);
+}
+
+// Show inline error badge on a specific effect's layer item (NNGroup: errors near the source)
+function showEffectError(effectName, message) {
+    // Clear previous effect errors
+    document.querySelectorAll('.layer-error').forEach(el => el.remove());
+
+    // Find matching layer item
+    const layers = document.querySelectorAll('.layer-item');
+    layers.forEach(layer => {
+        const nameEl = layer.querySelector('.layer-name');
+        if (nameEl && nameEl.textContent.trim().toLowerCase() === effectName.toLowerCase()) {
+            const badge = document.createElement('span');
+            badge.className = 'layer-error';
+            badge.title = message;
+            badge.textContent = '!';
+            layer.appendChild(badge);
+            // Auto-clear after 10s
+            setTimeout(() => { if (badge.parentNode) badge.remove(); }, 10000);
+        }
+    });
+}
+
+function clearEffectErrors() {
+    document.querySelectorAll('.layer-error').forEach(el => el.remove());
+}
+
+// Heavy chain warning (H5: error prevention)
+const HEAVY_EFFECTS = new Set(['pixeldynamics', 'pixelcosmos', 'pixelorganic', 'pixeldecay',
+    'pixelelastic', 'pixelmagnetic', 'pixelquantum', 'pixelwormhole', 'pixelsort',
+    'flowdistort', 'contours', 'edges', 'blur']);
+let _lastHeavyWarningCount = 0;
+
+function _warnIfHeavyChain() {
+    const active = chain.filter(d => !d.bypassed);
+    const count = active.length;
+    const heavyCount = active.filter(d => HEAVY_EFFECTS.has(d.name)).length;
+
+    // Warn at 5+ effects, or 3+ heavy effects
+    if (count >= 5 && count > _lastHeavyWarningCount) {
+        const msg = heavyCount >= 2
+            ? `${count} effects active (${heavyCount} compute-heavy) — preview may be slow`
+            : `${count} effects active — preview may be slow at full resolution`;
+        showToast(msg, 'warning', { label: 'Bypass All', fn: 'function(){bypassAllEffects()}' }, 5000);
+        _lastHeavyWarningCount = count;
+    } else if (count < 5) {
+        _lastHeavyWarningCount = 0; // Reset when chain shrinks
+    }
+}
+
+function bypassAllEffects() {
+    chain.forEach(d => d.bypassed = true);
+    pushHistory('Bypass all');
+    renderChain();
+    renderLayers();
+    schedulePreview();
+    showToast('All effects bypassed — re-enable individually', 'info');
 }
 
 function showConfirmDialog(title, message) {
@@ -179,11 +299,12 @@ document.addEventListener('keydown', e => {
     }
 });
 
-// ============ SERVER HEARTBEAT ============
+// ============ SERVER HEARTBEAT + OFFLINE QUEUE ============
 
 let _heartbeatFailures = 0;
 let _heartbeatInterval = null;
 let _serverDown = false;
+const _offlineQueue = []; // Queued actions during server downtime
 
 function startHeartbeat() {
     _heartbeatInterval = setInterval(async () => {
@@ -194,6 +315,7 @@ function startHeartbeat() {
                     _serverDown = false;
                     _heartbeatFailures = 0;
                     document.getElementById('server-banner').style.display = 'none';
+                    _flushOfflineQueue();
                 }
             } else {
                 _heartbeatFailures++;
@@ -204,15 +326,39 @@ function startHeartbeat() {
         if (_heartbeatFailures >= 3 && !_serverDown) {
             _serverDown = true;
             document.getElementById('server-banner').style.display = 'flex';
+            showToast('Server disconnected — changes will be synced when reconnected', 'warning', null, 8000);
         }
     }, 5000);
 }
 
 function restartServer() {
-    // In desktop mode, the server thread is managed by desktop.py
-    // This just resets heartbeat and waits for recovery
     _heartbeatFailures = 0;
     showToast('Attempting to reconnect...', 'info');
+}
+
+function queueOfflineAction(action) {
+    if (!_serverDown) return false; // Not offline — don't queue
+    _offlineQueue.push(action);
+    return true; // Queued
+}
+
+async function _flushOfflineQueue() {
+    if (_offlineQueue.length === 0) return;
+    const count = _offlineQueue.length;
+    showToast(`Reconnected — syncing ${count} queued action${count !== 1 ? 's' : ''}...`, 'info');
+    while (_offlineQueue.length > 0) {
+        const action = _offlineQueue.shift();
+        try {
+            if (typeof action === 'function') {
+                await action();
+            }
+        } catch (e) {
+            showErrorToast(`Failed to sync queued action`, e.message);
+        }
+    }
+    // Refresh preview after syncing
+    schedulePreview();
+    showToast('All changes synced', 'success');
 }
 
 // Shortcut reference
@@ -455,7 +601,8 @@ function createTrack(name) {
         mute: false,
         blendMode: 'normal',
         color: TRACK_COLORS[tracks.length % TRACK_COLORS.length],
-        collapsed: false
+        collapsed: false,
+        frozen: false
     };
     return track;
 }
@@ -530,57 +677,10 @@ function showInfoView(name, desc) {
     el.textContent = `${name} [${cat}] — ${desc}`;
 }
 
-// ============ EFFECT HOVER PREVIEW (thumbnail tooltip) ============
-
-let _hoverPreviewTimer = null;
-const _hoverPreviewCache = {};  // effectName -> dataUrl
-
-function showEffectHoverPreview(effectName, event) {
-    clearTimeout(_hoverPreviewTimer);
-    if (!videoLoaded) return;
-
-    // Position the tooltip near the mouse
-    let tooltip = document.getElementById('effect-hover-preview');
-    if (!tooltip) {
-        tooltip = document.createElement('div');
-        tooltip.id = 'effect-hover-preview';
-        document.body.appendChild(tooltip);
-    }
-    tooltip.style.left = (event.clientX + 16) + 'px';
-    tooltip.style.top = (event.clientY - 50) + 'px';
-
-    // Show cached immediately if available
-    if (_hoverPreviewCache[effectName]) {
-        tooltip.innerHTML = `<img src="${_hoverPreviewCache[effectName]}" alt="preview">`;
-        tooltip.style.display = 'block';
-        return;
-    }
-
-    // Debounced fetch
-    _hoverPreviewTimer = setTimeout(async () => {
-        try {
-            tooltip.innerHTML = '<div class="hover-loading">...</div>';
-            tooltip.style.display = 'block';
-            const res = await fetch(`${API}/api/preview/thumbnail`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ effect_name: effectName, frame_number: currentFrame }),
-            });
-            if (!res.ok) throw new Error();
-            const data = await res.json();
-            _hoverPreviewCache[effectName] = data.preview;
-            tooltip.innerHTML = `<img src="${data.preview}" alt="preview">`;
-        } catch {
-            tooltip.style.display = 'none';
-        }
-    }, 400);
-}
-
-function hideEffectHoverPreview() {
-    clearTimeout(_hoverPreviewTimer);
-    const tooltip = document.getElementById('effect-hover-preview');
-    if (tooltip) tooltip.style.display = 'none';
-}
+// ============ EFFECT HOVER PREVIEW (DEPRECATED — tooltips killed per user feedback) ============
+// Tooltips blocked content and blended into UI. Kept as no-ops for any remaining callers.
+function showEffectHoverPreview() {}
+function hideEffectHoverPreview() {}
 
 function showInfoViewText(text) {
     const el = document.getElementById('info-view-content');
@@ -661,18 +761,51 @@ function pushHistory(action) {
     historyIndex = history.length - 1;
     renderHistory();
     _persistHistory();
+    _autoSave(); // Auto-save on every chain change
 }
 
 function undo() {
+    // In perform mode, undo removes the last recorded event
+    if (appMode === 'perform' || performToggleActive) {
+        _perfUndoLastEvent();
+        return;
+    }
     if (historyIndex <= 0) return;
     historyIndex--;
     restoreFromHistory(historyIndex);
 }
 
 function redo() {
+    if (appMode === 'perform' || performToggleActive) {
+        // No redo in perform mode (events are append-only)
+        showToast('Redo not available in Perform mode', 'info', null, 2000);
+        return;
+    }
     if (historyIndex >= history.length - 1) return;
     historyIndex++;
     restoreFromHistory(historyIndex);
+}
+
+function _perfUndoLastEvent() {
+    if (perfEventCount === 0) {
+        showToast('No perform events to undo', 'info', null, 2000);
+        return;
+    }
+    // Remove last keyframe from the most recent lane
+    for (let i = perfSession.lanes.length - 1; i >= 0; i--) {
+        const lane = perfSession.lanes[i];
+        if (lane.keyframes.length > 0) {
+            lane.keyframes.pop();
+            perfEventCount--;
+            // Remove empty lanes
+            if (lane.keyframes.length === 0) {
+                perfSession.lanes.splice(i, 1);
+            }
+            perfUpdateTransport();
+            showToast(`Undid last perform event (${perfEventCount} remaining)`, 'info', null, 2000);
+            return;
+        }
+    }
 }
 
 function restoreFromHistory(index) {
@@ -737,6 +870,109 @@ function _clearPersistedHistory() {
     localStorage.removeItem('entropic_history_index');
 }
 
+// ============ AUTO-SAVE (Ableton crash-recovery pattern) ============
+
+let _autoSaveInterval = null;
+const AUTOSAVE_KEY = 'entropic_autosave';
+const AUTOSAVE_INTERVAL_MS = 30000; // 30 seconds
+
+function _autoSave() {
+    try {
+        const state = {
+            chain: chain.map(d => ({ name: d.name, params: { ...d.params }, bypassed: d.bypassed, mix: d.mix })),
+            tracks: tracks.map(t => ({
+                name: t.name,
+                effects: t.effects.map(e => ({ name: e.name, params: { ...e.params }, bypassed: e.bypassed, mix: e.mix })),
+                opacity: t.opacity,
+                blendMode: t.blendMode,
+                mute: t.mute,
+                solo: t.solo,
+            })),
+            appMode,
+            mixLevel,
+            timestamp: new Date().toISOString(),
+            videoLoaded,
+        };
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(state));
+    } catch (e) { /* localStorage full — silently ignore */ }
+}
+
+function _startAutoSave() {
+    if (_autoSaveInterval) clearInterval(_autoSaveInterval);
+    _autoSaveInterval = setInterval(_autoSave, AUTOSAVE_INTERVAL_MS);
+}
+
+function _checkAutoSaveRestore() {
+    try {
+        const raw = localStorage.getItem(AUTOSAVE_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (!saved.chain || saved.chain.length === 0) {
+            localStorage.removeItem(AUTOSAVE_KEY);
+            return;
+        }
+        const age = Date.now() - new Date(saved.timestamp).getTime();
+        if (age > 24 * 60 * 60 * 1000) {
+            localStorage.removeItem(AUTOSAVE_KEY);
+            return;
+        }
+        const timeAgo = age < 60000 ? 'less than a minute ago'
+            : age < 3600000 ? `${Math.floor(age / 60000)} min ago`
+            : `${Math.floor(age / 3600000)}h ago`;
+        const effectCount = saved.chain.length;
+        showToast(
+            `Restore previous session? (${effectCount} effect${effectCount !== 1 ? 's' : ''}, saved ${timeAgo})`,
+            'info',
+            { label: 'Restore', fn: `function(){_restoreAutoSave()}` },
+            15000
+        );
+    } catch (e) { /* corrupt data — ignore */ }
+}
+
+function _restoreAutoSave() {
+    try {
+        const raw = localStorage.getItem(AUTOSAVE_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (saved.chain && saved.chain.length > 0) {
+            chain = saved.chain.map((d, i) => ({
+                id: i,
+                name: d.name,
+                params: d.params || {},
+                bypassed: d.bypassed || false,
+                mix: d.mix ?? 1.0,
+            }));
+            deviceIdCounter = chain.length;
+        }
+        if (saved.tracks && saved.tracks.length > 0) {
+            tracks = saved.tracks.map((t, i) => ({
+                ...createTrack(t.name),
+                effects: (t.effects || []).map((e, j) => ({
+                    id: j,
+                    name: e.name,
+                    params: e.params || {},
+                    bypassed: e.bypassed || false,
+                    mix: e.mix ?? 1.0,
+                })),
+                opacity: t.opacity ?? 1.0,
+                blendMode: t.blendMode || 'normal',
+                mute: t.mute || false,
+                solo: t.solo || false,
+            }));
+            selectedTrackIdx = 0;
+        }
+        if (saved.mixLevel !== undefined) mixLevel = saved.mixLevel;
+        renderChain();
+        renderLayers();
+        renderHistory();
+        renderTrackList();
+        pushHistory('Restore session');
+        showToast('Session restored', 'success');
+    } catch (e) {
+        showErrorToast('Failed to restore session', e.message);
+    }
+}
+
 // ============ GRIP HANDLE HTML ============
 
 function gripHTML() {
@@ -750,6 +986,20 @@ function gripHTML() {
 // ============ INIT ============
 
 async function init() {
+    // Kill all native browser tooltips — they block content and blend into UI
+    document.querySelectorAll('[title]').forEach(el => el.removeAttribute('title'));
+    // Also suppress any dynamically-added titles
+    new MutationObserver(muts => {
+        for (const m of muts) {
+            if (m.type === 'attributes' && m.attributeName === 'title') {
+                m.target.removeAttribute('title');
+            }
+            for (const n of m.addedNodes) {
+                if (n.querySelectorAll) n.querySelectorAll('[title]').forEach(el => el.removeAttribute('title'));
+            }
+        }
+    }).observe(document.body, { attributes: true, attributeFilter: ['title'], childList: true, subtree: true });
+
     const [effectsRes, controlsRes] = await Promise.all([
         fetch(`${API}/api/effects`),
         fetch('/static/control-map.json').catch(() => null),
@@ -766,11 +1016,23 @@ async function init() {
     if (controlsRes && controlsRes.ok) {
         controlMap = await controlsRes.json();
     }
+
+    // Register client-side Perform effect (device container, not a pixel processor)
+    effectDefs.push({
+        name: 'perform',
+        label: 'Perform',
+        category: 'perform',
+        description: 'Trigger pad device with up to 8 slots',
+        params: {},
+        is_device: true,
+    });
+
     renderBrowser();
     setupDragDrop();
     setupFileInput();
     setupPanelTabs();
     setupKeyboard();
+    initWebMidi();
     setupMaskDrawing();
     _loadHistory();
     if (history.length === 0) {
@@ -787,6 +1049,8 @@ async function init() {
     renderTrackList();  // Initialize track strip UI
     startHeartbeat();
     showOnboarding();
+    _checkAutoSaveRestore();
+    _startAutoSave();
 
     // Initialize timeline editor
     window.timelineEditor = new TimelineEditor('timeline-canvas');
@@ -1410,7 +1674,7 @@ function setupKeyboard() {
         }
 
         // --- Perform mode shortcuts (keys 1-8, R, Shift+P, M, Escape, Q/W/E/R/A/S/D/F) ---
-        // Active in full Perform mode OR when Perform toggle is on in Timeline mode
+        // Priority: Perform mode > Perform device (mode wins when active)
         if ((appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) && videoLoaded && perfLayers.length > 0) {
             // Keys 1-8: trigger layers (one-shot fire, blocked during review)
             if (e.key >= '1' && e.key <= '8') {
@@ -1468,6 +1732,17 @@ function setupKeyboard() {
             if (e.key === 'P' && e.shiftKey) {
                 e.preventDefault();
                 perfPanic();
+                return;
+            }
+        }
+
+        // --- Perform device: keys 1-8 trigger slots (lower priority than perform mode) ---
+        if (!keyboardMidiEnabled && e.key >= '1' && e.key <= '8') {
+            const slotIdx = parseInt(e.key) - 1;
+            const performDevice = chain.find(d => d.name === 'perform');
+            if (performDevice && performDevice.slots && performDevice.slots[slotIdx]) {
+                e.preventDefault();
+                triggerPerformSlot(performDevice.id, slotIdx);
                 return;
             }
         }
@@ -1619,14 +1894,13 @@ function setupKeyboard() {
             const img = document.getElementById('preview-img');
             if (originalPreviewSrc) img.src = originalPreviewSrc;
         }
-        // Perform mode: key release for gate/adsr (blocked during review)
+        // Perform mode: key release (priority over perform device)
         if ((appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) && !perfReviewing) {
-            // Number keys 1-8
             if (e.key >= '1' && e.key <= '8') {
                 const layerId = parseInt(e.key) - 1;
                 perfTriggerLayer(layerId, 'keyup');
+                return;
             }
-            // Keyboard perform: Q/W/E/R/A/S/D/F keyup for gate/adsr release
             if (keyboardPerformMode) {
                 const kbMap = { q: 0, w: 1, e: 2, r: 3, a: 4, s: 5, d: 6, f: 7 };
                 const layerId = kbMap[e.key.toLowerCase()];
@@ -1635,8 +1909,224 @@ function setupKeyboard() {
                 }
             }
         }
+        // Perform device: release hold-mode slots (lower priority)
+        if (!keyboardMidiEnabled && e.key >= '1' && e.key <= '8') {
+            const slotIdx = parseInt(e.key) - 1;
+            const performDevice = chain.find(d => d.name === 'perform');
+            if (performDevice && performDevice.slots && performDevice.slots[slotIdx]) {
+                releasePerformSlot(performDevice.id, slotIdx);
+            }
+        }
     });
 }
+
+// ============ KEYBOARD MIDI & WEB MIDI ============
+
+let keyboardMidiEnabled = false;
+let midiAccess = null;
+let midiInputs = [];
+let midiLearnActive = false;
+let midiLearnTarget = null; // { trackIdx, deviceIdx, paramName }
+const midiMappings = new Map(); // cc -> { trackIdx, deviceIdx, paramName }
+const activeNotes = new Set(); // Track active note numbers for keyup
+
+// Key-to-MIDI mapping
+const keyToMidi = {
+    // Letters a-z map to MIDI notes 48-73 (C3-C#5)
+    'a': 48, 's': 49, 'd': 50, 'f': 51, 'g': 52, 'h': 53, 'j': 54, 'k': 55, 'l': 56,
+    ';': 57, "'": 58,
+    'z': 59, 'x': 60, 'c': 61, 'v': 62, 'b': 63, 'n': 64, 'm': 65, ',': 66, '.': 67, '/': 68,
+    'q': 69, 'w': 70, 'e': 71, 'r': 72, 't': 73,
+    // Number keys 0-9 map to notes 36-45
+    '0': 36, '1': 37, '2': 38, '3': 39, '4': 40, '5': 41, '6': 42, '7': 43, '8': 44, '9': 45
+};
+
+function toggleKeyboardMidi() {
+    keyboardMidiEnabled = !keyboardMidiEnabled;
+    const btn = document.getElementById('kbd-midi-btn');
+    if (btn) {
+        if (keyboardMidiEnabled) {
+            btn.classList.add('active');
+            btn.style.background = 'var(--accent)';
+            btn.style.color = '#000';
+            showToast('Keyboard MIDI: ON (M to toggle)', 'info', null, 2000);
+        } else {
+            btn.classList.remove('active');
+            btn.style.background = '';
+            btn.style.color = '';
+            // Release all active notes
+            activeNotes.forEach(note => dispatchMidiNote(note, 0, 0));
+            activeNotes.clear();
+            showToast('Keyboard MIDI: OFF', 'info', null, 1500);
+        }
+    }
+}
+
+function dispatchMidiNote(note, velocity, channel = 0) {
+    const type = velocity > 0 ? 'noteon' : 'noteoff';
+    const evt = new CustomEvent('entropic-midi', {
+        detail: { note, velocity, channel, type }
+    });
+    document.dispatchEvent(evt);
+    console.log(`MIDI ${type}: note=${note}, vel=${velocity}, ch=${channel}`);
+}
+
+// Initialize Web MIDI API
+async function initWebMidi() {
+    if (!navigator.requestMIDIAccess) {
+        console.warn('Web MIDI API not supported in this browser');
+        return;
+    }
+    try {
+        midiAccess = await navigator.requestMIDIAccess();
+        midiAccess.inputs.forEach(input => {
+            input.onmidimessage = handleMidiMessage;
+            midiInputs.push(input);
+            console.log(`MIDI input connected: ${input.name}`);
+        });
+        if (midiInputs.length > 0) {
+            showToast(`MIDI: ${midiInputs.length} input(s) connected`, 'info', null, 3000);
+        }
+    } catch (e) {
+        console.warn('Web MIDI not available:', e);
+    }
+}
+
+function handleMidiMessage(msg) {
+    const [status, data1, data2] = msg.data;
+    const messageType = status & 0xf0;
+    const channel = status & 0x0f;
+
+    // Note On (0x90) or Note Off (0x80)
+    if (messageType === 0x90 || messageType === 0x80) {
+        const note = data1;
+        const velocity = (messageType === 0x90 && data2 > 0) ? data2 : 0;
+        dispatchMidiNote(note, velocity, channel);
+    }
+
+    // Control Change (0xB0)
+    else if (messageType === 0xB0) {
+        const cc = data1;
+        const value = data2;
+        handleMidiCC(cc, value, channel);
+    }
+}
+
+function handleMidiCC(cc, value, channel) {
+    // If MIDI Learn is active, map this CC to the target parameter
+    if (midiLearnActive && midiLearnTarget) {
+        midiMappings.set(cc, { ...midiLearnTarget });
+        console.log(`MIDI Learn: CC${cc} -> track ${midiLearnTarget.trackIdx}, device ${midiLearnTarget.deviceIdx}, param ${midiLearnTarget.paramName}`);
+        showToast(`MIDI Learn: CC${cc} → ${midiLearnTarget.paramName}`, 'success', null, 2000);
+        exitMidiLearn();
+        return;
+    }
+
+    // Check if this CC is mapped
+    const mapping = midiMappings.get(cc);
+    if (mapping) {
+        // Normalize CC value (0-127) to parameter range (0.0-1.0)
+        const normalizedValue = value / 127.0;
+        applyMidiMapping(mapping, normalizedValue);
+    }
+}
+
+function applyMidiMapping(mapping, value) {
+    // This is a placeholder for applying MIDI CC to parameters
+    // In a full implementation, this would update the parameter in the timeline/chain
+    console.log(`Apply MIDI: track ${mapping.trackIdx}, device ${mapping.deviceIdx}, param ${mapping.paramName} = ${value}`);
+
+    // TODO: Wire this into the actual parameter system once tracks/devices are accessible
+    // For now, just log it
+}
+
+function enterMidiLearn(trackIdx, deviceIdx, paramName) {
+    midiLearnActive = true;
+    midiLearnTarget = { trackIdx, deviceIdx, paramName };
+    showToast(`MIDI Learn: Move a knob or fader on your controller`, 'info', null, 5000);
+    console.log(`MIDI Learn active for: track ${trackIdx}, device ${deviceIdx}, param ${paramName}`);
+}
+
+function exitMidiLearn() {
+    midiLearnActive = false;
+    midiLearnTarget = null;
+}
+
+// Enhance keyboard handler to support MIDI mode
+// This needs to be integrated into the existing setupKeyboard function
+// We'll add event listeners for keydown/keyup when MIDI mode is active
+
+document.addEventListener('keydown', e => {
+    const isTextInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+    const isMod = e.metaKey || e.ctrlKey;
+    const isModalOpen = () => {
+        return document.getElementById('export-overlay')?.style.display === 'flex'
+            || document.getElementById('input-modal-overlay')?.style.display === 'flex'
+            || document.getElementById('shortcut-overlay')?.style.display === 'flex'
+            || document.getElementById('help-overlay')?.style.display === 'flex';
+    };
+
+    // Skip if typing or modal open
+    if (isTextInput || isModalOpen()) return;
+
+    // If keyboard MIDI is active, intercept keys for MIDI notes
+    if (keyboardMidiEnabled) {
+        // Always allow these shortcuts regardless of MIDI mode:
+        // - Space (play), Cmd/Ctrl+anything, Escape, Tab
+        // - L (loop), R (record), Shift+R (overdub), P (perform panel)
+        if (e.code === 'Space' || isMod || e.key === 'Escape' || e.key === 'Tab' ||
+            e.key === 'l' || (e.key === 'r' && !e.shiftKey) || (e.key === 'R' && e.shiftKey) || e.key === 'p') {
+            return; // Let normal handler process these
+        }
+
+        // M toggles MIDI mode off when active
+        if (e.key === 'm' && !e.repeat) {
+            toggleKeyboardMidi();
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+        }
+
+        // Check if this key maps to a MIDI note
+        const note = keyToMidi[e.key.toLowerCase()];
+        if (note !== undefined && !activeNotes.has(note)) {
+            activeNotes.add(note);
+            dispatchMidiNote(note, 127, 0);
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+        }
+    }
+    // If MIDI mode is not active, M toggles it on (but not in perform modes)
+    else if (e.key === 'm' && !isMod && !e.repeat) {
+        // Don't intercept M in perform mode or when perform toggle is active
+        if (appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) {
+            return;
+        }
+        // Don't intercept M in timeline if it will mute (selectedLayerId === null means timeline shortcuts apply)
+        if (appMode === 'timeline' && selectedLayerId === null) {
+            return;
+        }
+        // Otherwise toggle keyboard MIDI on
+        toggleKeyboardMidi();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+    }
+});
+
+document.addEventListener('keyup', e => {
+    // Handle MIDI note-offs
+    if (keyboardMidiEnabled) {
+        const note = keyToMidi[e.key.toLowerCase()];
+        if (note !== undefined && activeNotes.has(note)) {
+            activeNotes.delete(note);
+            dispatchMidiNote(note, 0, 0);
+            e.preventDefault();
+            return;
+        }
+    }
+});
 
 // ============ EFFECT CHAIN ============
 
@@ -1668,6 +2158,19 @@ function addToChain(effectName, overrideParams) {
         device.params.points = [[0, 0], [64, 64], [128, 128], [192, 192], [255, 255]];
     }
 
+    // Initialize perform device with 8 slots
+    if (effectName === 'perform') {
+        device.slots = Array.from({length: 8}, (_, i) => ({
+            key: String(i + 1),
+            label: `Slot ${i + 1}`,
+            action: 'none',
+            target: null,
+            adsr: { a: 0.01, d: 0.1, s: 1.0, r: 0.1 },
+            mode: 'toggle',
+            active: false
+        }));
+    }
+
     chain.push(device);
     selectedLayerId = device.id;
     pushHistory(`Add ${effectName}`);
@@ -1675,6 +2178,7 @@ function addToChain(effectName, overrideParams) {
     renderChain();
     renderLayers();
     schedulePreview();
+    _warnIfHeavyChain();
 }
 
 function removeFromChain(deviceId) {
@@ -1688,6 +2192,60 @@ function removeFromChain(deviceId) {
     renderChain();
     renderLayers();
     schedulePreview();
+}
+
+// ============ PERFORM DEVICE FUNCTIONS ============
+
+function triggerPerformSlot(deviceId, slotIdx) {
+    const device = _findItemInChain(chain, deviceId);
+    if (!device || device.name !== 'perform' || !device.slots || !device.slots[slotIdx]) return;
+
+    const slot = device.slots[slotIdx];
+
+    // Toggle or Hold mode
+    if (slot.mode === 'toggle') {
+        slot.active = !slot.active;
+    } else if (slot.mode === 'hold') {
+        slot.active = true;
+        // Hold requires keyup to deactivate (handled in keyboard listener)
+    }
+
+    // Execute slot action
+    executePerformAction(slot, device);
+
+    renderChain();
+    schedulePreview();
+}
+
+function releasePerformSlot(deviceId, slotIdx) {
+    const device = _findItemInChain(chain, deviceId);
+    if (!device || device.name !== 'perform' || !device.slots || !device.slots[slotIdx]) return;
+
+    const slot = device.slots[slotIdx];
+    if (slot.mode === 'hold') {
+        slot.active = false;
+        renderChain();
+        schedulePreview();
+    }
+}
+
+function executePerformAction(slot, performDevice) {
+    if (slot.action === 'none' || !slot.active) return;
+
+    // TODO: Implement action dispatch
+    // - toggle_track: Toggle track visibility
+    // - trigger_effect: Toggle effect bypass in current track
+    // - set_param: Set parameter value
+    console.log('[Perform] Execute action:', slot.action, slot.target);
+}
+
+function performSlotContextMenu(event, deviceId, slotIdx) {
+    // TODO: Right-click menu to configure slot
+    // - Change label
+    // - Set action type + target
+    // - Adjust ADSR
+    // - Change trigger mode
+    console.log('[Perform] Context menu for slot', slotIdx);
 }
 
 function toggleBypass(deviceId) {
@@ -1885,6 +2443,63 @@ function loadDevicePreset(deviceId, presetName) {
     }
 }
 
+function _renderPerformDevice(device) {
+    const bypassClass = device.bypassed ? 'bypassed' : '';
+    const powerClass = device.bypassed ? 'off' : 'on';
+    const mixPct = Math.round((device.mix ?? 1.0) * 100);
+
+    const slots = device.slots || [];
+    const slotsHtml = slots.map((slot, idx) => {
+        const activeClass = slot.active ? 'active' : '';
+        const modeLabel = { toggle: 'TGL', hold: 'HLD', oneshot: '1S', retrigger: 'RTG' }[slot.mode] || 'TGL';
+        const actionLabel = {
+            none: 'None',
+            toggle_track: `Track ${slot.target}`,
+            trigger_effect: slot.target,
+            set_param: `${slot.target?.effect}.${slot.target?.param}`
+        }[slot.action] || 'None';
+
+        return `
+            <div class="perform-slot ${activeClass}" data-slot-idx="${idx}"
+                 onclick="triggerPerformSlot(${device.id}, ${idx})"
+                 oncontextmenu="event.preventDefault(); performSlotContextMenu(event, ${device.id}, ${idx})">
+                <div class="slot-key">${esc(slot.key)}</div>
+                <div class="slot-label">${esc(slot.label)}</div>
+                <div class="slot-action">${esc(actionLabel)}</div>
+                <div class="slot-mode">${modeLabel}</div>
+                <div class="slot-adsr" title="A:${slot.adsr.a} D:${slot.adsr.d} S:${slot.adsr.s} R:${slot.adsr.r}">
+                    ADSR: ${slot.adsr.a.toFixed(2)}/${slot.adsr.d.toFixed(2)}/${slot.adsr.s.toFixed(2)}/${slot.adsr.r.toFixed(2)}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="device perform-device ${bypassClass}" data-device-id="${device.id}" draggable="true"
+             oncontextmenu="deviceContextMenu(event, ${device.id})">
+            <div class="device-header">
+                ${gripHTML()}
+                <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})"
+                        title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
+                <span class="device-name">Perform</span>
+                <span class="device-mix" title="Dry/Wet Mix: ${mixPct}%">
+                    <label>Dry/Wet</label>
+                    <input type="range" class="mix-slider" min="0" max="100" value="${mixPct}"
+                           data-device="${device.id}"
+                           oninput="updateDeviceMix(${device.id}, this.value)"
+                           onclick="event.stopPropagation()">
+                    <span class="mix-value">${mixPct}%</span>
+                </span>
+                <button class="more-btn" onclick="event.stopPropagation(); deviceContextMenu(event, ${device.id})"
+                        title="More options">&#8943;</button>
+            </div>
+            <div class="perform-grid">
+                ${slotsHtml}
+            </div>
+        </div>
+    `;
+}
+
 function _renderDeviceHTML(device) {
     // Render a group item
     if (device.type === 'group') {
@@ -1919,6 +2534,11 @@ function _renderDeviceHTML(device) {
                     ${childrenHtml}
                 </div>
             </div>`;
+    }
+
+    // Render perform device with custom UI
+    if (device.name === 'perform') {
+        return _renderPerformDevice(device);
     }
 
     // Render a normal effect device
@@ -2145,9 +2765,11 @@ function renderTrackList() {
         const effectSummary = effectCount > 0
             ? track.effects.map(e => e.name).slice(0, 3).join(', ') + (effectCount > 3 ? '...' : '')
             : 'Empty';
+        const frozenClass = track.frozen ? 'frozen' : '';
+        const frozenIcon = track.frozen ? '&#10052; ' : '';  // Snowflake
 
         html += `
-            <div class="track-strip ${selected ? 'selected' : ''}" data-track-idx="${idx}"
+            <div class="track-strip ${selected ? 'selected' : ''} ${frozenClass}" data-track-idx="${idx}"
                  onclick="selectTrack(${idx})" oncontextmenu="showTrackContextMenu(event, ${idx})">
                 <div class="track-header">
                     <div class="track-color-strip" style="background: ${track.color};"></div>
@@ -2155,6 +2777,7 @@ function renderTrackList() {
                             title="${track.collapsed ? 'Expand' : 'Collapse'}">
                         ${track.collapsed ? '&#9654;' : '&#9660;'}
                     </button>
+                    ${frozenIcon ? `<span style="margin-left: 4px; color: #6af;" title="Frozen">${frozenIcon}</span>` : ''}
                     <input type="text" class="track-name" value="${esc(track.name)}"
                            onclick="event.stopPropagation()"
                            ondblclick="this.select()"
@@ -2254,10 +2877,19 @@ function showTrackContextMenu(event, idx) {
     const menu = document.getElementById('ctx-menu');
     if (!menu) return;
 
+    const track = tracks[idx];
+    const canFreeze = !track.frozen && track.effects.length > 0;
+    const canFlatten = track.frozen && track.effects.length > 0;
+    const canUnfreeze = track.frozen;
+
     menu.innerHTML = `
         <button onclick="addTrackAt(${idx})">Add Above</button>
         <button onclick="addTrackAt(${idx + 1})">Add Below</button>
         <button onclick="duplicateTrack(${idx})">Duplicate</button>
+        <hr>
+        <button onclick="freezeTrack(${idx})" ${!canFreeze ? 'disabled' : ''}>&#10052; Freeze</button>
+        <button onclick="flattenTrack(${idx})" ${!canFlatten ? 'disabled' : ''}>Flatten</button>
+        <button onclick="unfreezeTrack(${idx})" ${!canUnfreeze ? 'disabled' : ''}>Unfreeze</button>
         <hr>
         <button onclick="deleteTrack(${idx})" ${tracks.length <= 1 ? 'disabled' : ''}>Delete</button>
         <button onclick="moveTrack(${idx}, ${idx - 1})" ${idx === 0 ? 'disabled' : ''}>Move Up</button>
@@ -2328,6 +2960,74 @@ function moveTrack(fromIdx, toIdx) {
     selectedTrackIdx = toIdx;
     pushHistory(`Move ${track.name}`);
     renderTrackList();
+}
+
+async function freezeTrack(idx) {
+    hideContextMenu();
+    const track = tracks[idx];
+    if (track.frozen || track.effects.length === 0) return;
+
+    showLoading('Freezing track...');
+    try {
+        const res = await fetch(`${API}/api/track/freeze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_index: idx,
+                effects: track.effects
+            })
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            hideLoading();
+            showToast(err.detail?.message || 'Freeze failed', 'error');
+            return;
+        }
+
+        const data = await res.json();
+        track.frozen = true;
+        hideLoading();
+        showToast(`Frozen ${data.frames_cached} frames`, 'success');
+        renderTrackList();
+        renderLayers();  // Update layer panel to show grayed-out state
+    } catch (e) {
+        hideLoading();
+        showErrorToast('Freeze failed', e.message);
+    }
+}
+
+function flattenTrack(idx) {
+    hideContextMenu();
+    const track = tracks[idx];
+    if (!track.frozen) return;
+
+    // Clear effects — frozen frames remain as the "baked" result
+    track.effects = [];
+    pushHistory(`Flatten ${track.name}`);
+    showToast('Track flattened (effects cleared)', 'info');
+    renderTrackList();
+    renderLayers();
+}
+
+async function unfreezeTrack(idx) {
+    hideContextMenu();
+    const track = tracks[idx];
+    if (!track.frozen) return;
+
+    try {
+        // Clear server-side cache
+        await fetch(`${API}/api/track/unfreeze?track_index=${idx}`, { method: 'POST' });
+
+        track.frozen = false;
+        pushHistory(`Unfreeze ${track.name}`);
+        showToast('Track unfrozen', 'info');
+        renderTrackList();
+        renderLayers();
+        schedulePreview();
+    } catch (e) {
+        showErrorToast('Unfreeze failed', e.message);
+    }
 }
 
 function hideContextMenu() {
@@ -3416,11 +4116,11 @@ async function previewChain() {
             const events = perfTriggerQueue.splice(0);
             const body = { frame_number: currentFrame };
             if (events.length > 0) body.trigger_events = events;
-            res = await fetch(`${API}/api/perform/frame`, {
+            res = await fetchWithRetry(`${API}/api/perform/frame`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
-            });
+            }, { context: 'Perform preview' });
         } else if (appMode === 'timeline' && window.timelineEditor) {
             // Timeline mode: send all active regions to server
             const regions = timelineEditor.getActiveRegions().map(r => ({
@@ -3430,17 +4130,35 @@ async function previewChain() {
                 muted: timelineEditor.isTrackMuted(r.trackId),
                 mask: r.mask || null,
             }));
-            res = await fetch(`${API}/api/preview/timeline`, {
+            res = await fetchWithRetry(`${API}/api/preview/timeline`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ frame_number: currentFrame, regions, mix: mixLevel }),
-            });
+            }, { context: 'Timeline preview' });
+        } else if (tracks.length > 1 || (tracks.length === 1 && tracks[0].effects.some(e => !e.bypassed))) {
+            // Multi-track preview: composite all tracks with blend modes + opacity
+            const trackData = tracks.map(t => ({
+                name: t.name,
+                effects: t.effects.filter(e => !e.bypassed).map(d => ({
+                    name: d.name, params: { ...d.params, mix: d.mix ?? 1.0 }
+                })),
+                opacity: t.opacity,
+                blend_mode: t.blendMode,
+                muted: t.mute,
+                solo: t.solo,
+                frozen: t.frozen || false
+            }));
+            res = await fetchWithRetry(`${API}/api/preview/multitrack`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frame_number: currentFrame, tracks: trackData }),
+            }, { context: 'Multi-track preview' });
         } else {
             // Flat chain behavior (Quick mode legacy / fallback)
             const activeEffects = chain
                 .filter(d => !d.bypassed)
                 .map(d => ({ name: d.name, params: { ...d.params, mix: d.mix ?? 1.0 } }));
-            res = await fetch(`${API}/api/preview`, {
+            res = await fetchWithRetry(`${API}/api/preview`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ effects: activeEffects, frame_number: currentFrame, mix: mixLevel }),
@@ -3468,7 +4186,7 @@ async function previewChain() {
         if (err.response) {
             try { handleApiError(await err.response.json(), 'Preview failed'); } catch (_) {}
         } else {
-            showToast('Preview failed: ' + err.message, 'warning');
+            showToast('Preview failed — check connection', 'warning', { label: 'Retry', fn: 'function(){previewChain()}' }, 6000);
         }
     }
 }
@@ -4076,6 +4794,19 @@ async function startExport() {
         params: { ...d.params },
     }));
 
+    // Multi-track data for composited export
+    const hasMultiTrack = tracks.length > 1 || (tracks.length === 1 && tracks[0].effects.some(e => !e.bypassed));
+    const multiTrackData = hasMultiTrack ? tracks.map(t => ({
+        name: t.name,
+        effects: t.effects.filter(e => !e.bypassed).map(d => ({
+            name: d.name, params: { ...d.params, mix: d.mix ?? 1.0 }
+        })),
+        opacity: t.opacity,
+        blend_mode: t.blendMode,
+        muted: t.mute,
+        solo: t.solo,
+    })) : null;
+
     const fmt = document.getElementById('export-format').value;
     const resPre = document.getElementById('export-resolution').value;
     const scaleFactor = document.getElementById('export-scale').value;
@@ -4151,6 +4882,11 @@ async function startExport() {
         }));
     }
 
+    // Include multi-track data for composited export
+    if (multiTrackData) {
+        settings.tracks = multiTrackData;
+    }
+
     showLoading('Exporting...');
     // Poll render progress during export
     const progressInterval = setInterval(async () => {
@@ -4168,11 +4904,11 @@ async function startExport() {
         const endpoint = (appMode === 'timeline' && settings.timeline_regions)
             ? `${API}/api/export/timeline`
             : `${API}/api/export`;
-        const res = await fetch(endpoint, {
+        const res = await fetchWithRetry(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings),
-        });
+        }, { context: 'Export', maxRetries: 2 });
         clearInterval(progressInterval);
         const data = await res.json();
         if (data.status === 'ok') {
@@ -4188,15 +4924,83 @@ async function startExport() {
                 fn: `function(){revealInFinder('${safePath}')}`
             }, 12000);
         } else {
-            handleApiError(data, 'Export failed');
+            // Check for resume capability (server reports last_successful_frame)
+            const detail = data.detail || data;
+            if (typeof detail === 'object' && detail.last_successful_frame >= 0) {
+                const lastFrame = detail.last_successful_frame;
+                const total = detail.total_frames || '?';
+                const hint = detail.hint || '';
+                const msg = `Export failed at frame ${lastFrame + 2}/${total}${hint ? ' — ' + hint : ''}`;
+                _lastExportSettings = { ...settings };
+                _lastExportResumeFrame = lastFrame + 1;
+                showToast(msg, 'error', {
+                    label: `Resume from frame ${lastFrame + 2}`,
+                    fn: `function(){resumeExport()}`
+                }, 20000);
+            } else {
+                handleApiError(data, 'Export failed');
+            }
         }
     } catch (err) {
         clearInterval(progressInterval);
-        showErrorToast(`Export error: ${err.message}`);
+        showErrorToast('Export error', err.message);
     } finally {
         hideLoading();
         btn.textContent = origText;
         btn.disabled = false;
+    }
+}
+
+// ============ EXPORT RESUME ============
+
+let _lastExportSettings = null;
+let _lastExportResumeFrame = 0;
+
+async function resumeExport() {
+    if (!_lastExportSettings) {
+        showErrorToast('No export to resume');
+        return;
+    }
+    // Set trim to start from the last successful frame
+    const fps = videoFps || 30;
+    _lastExportSettings.trim = {
+        mode: 'frames',
+        start_frame: _lastExportResumeFrame,
+        end_frame: null,
+    };
+    showToast(`Resuming export from frame ${_lastExportResumeFrame + 1}...`, 'info');
+    // Re-trigger export with updated settings
+    const btn = document.getElementById('export-go-btn');
+    const origText = btn ? btn.textContent : 'Export';
+    if (btn) { btn.textContent = 'Resuming...'; btn.disabled = true; }
+    showLoading('Resuming export...');
+
+    try {
+        const endpoint = `${API}/api/export`;
+        const res = await fetchWithRetry(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(_lastExportSettings),
+        }, { context: 'Export resume', maxRetries: 1 });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            closeExportDialog();
+            const safePath = (data.path || '').replace(/'/g, "\\'");
+            const fileName = safePath.split('/').pop();
+            showToast(`Export resumed & complete: ${fileName}`, 'success', {
+                label: 'Reveal in Finder',
+                fn: `function(){revealInFinder('${safePath}')}`
+            }, 12000);
+        } else {
+            handleApiError(data, 'Resume export failed');
+        }
+    } catch (err) {
+        showErrorToast('Resume export error', err.message);
+    } finally {
+        hideLoading();
+        if (btn) { btn.textContent = origText; btn.disabled = false; }
+        _lastExportSettings = null;
+        _lastExportResumeFrame = 0;
     }
 }
 
@@ -4441,7 +5245,7 @@ async function freezeRegion(regionId) {
             showToast('Freeze failed', 'error');
         }
     } catch (err) {
-        showToast(`Freeze error: ${err.message}`, 'error');
+        showErrorToast('Freeze error', err.message);
     }
 }
 
@@ -6398,6 +7202,7 @@ function perfUpdateEventDensityPosition() {
 
 // --- beforeunload: warn about unsaved performance data ---
 window.addEventListener('beforeunload', e => {
+    _autoSave(); // Save state before leaving
     if ((appMode === 'perform' || performToggleActive) && perfEventCount > 0) {
         e.preventDefault();
         e.returnValue = 'You have unsaved performance data. Leave?';
@@ -7130,17 +7935,20 @@ function toggleOverdub() {
 }
 
 function toggleLoop() {
-    isLooping = !isLooping;
+    if (!window.timelineEditor) return;
+
+    // If no loop region exists, create one spanning full video
+    if (timelineEditor.loopStart === null || timelineEditor.loopEnd === null) {
+        timelineEditor.setLoop(0, timelineEditor.totalFrames - 1);
+        isLooping = true;
+    } else {
+        // Toggle existing loop region on/off
+        timelineEditor.toggleLoop();
+        isLooping = timelineEditor.loopEnabled;
+    }
 
     const btn = document.getElementById('transport-loop');
     if (btn) btn.classList.toggle('active', isLooping);
-
-    // Wire to timeline editor loop
-    if (window.timelineEditor) {
-        timelineEditor.looping = isLooping;
-    }
-
-    showToast(isLooping ? 'Loop enabled' : 'Loop disabled', 'info', null, 1000);
 }
 
 function updateTransportTimecode() {
