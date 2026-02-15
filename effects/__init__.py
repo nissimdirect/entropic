@@ -423,7 +423,7 @@ EFFECTS = {
     "histogrameq": {
         "fn": histogram_eq,
         "category": "enhance",
-        "params": {},
+        "params": {"strength": 1.0},
         "description": "Per-channel histogram equalization (reveal hidden detail)",
     },
     "clahe": {
@@ -459,7 +459,7 @@ EFFECTS = {
     "autolevels": {
         "fn": auto_levels,
         "category": "enhance",
-        "params": {"cutoff": 2.0},
+        "params": {"cutoff": 5.0, "strength": 1.0},
         "description": "Auto-contrast histogram stretch (professional color correction)",
     },
     "median": {
@@ -495,7 +495,7 @@ EFFECTS = {
     "bytecorrupt": {
         "fn": byte_corrupt,
         "category": "destruction",
-        "params": {"amount": 50, "jpeg_quality": 75, "seed": 42},
+        "params": {"amount": 100, "jpeg_quality": 40, "seed": 42},
         "description": "JPEG data bending — corrupt compressed bytes for authentic glitch",
     },
     "blockcorrupt": {

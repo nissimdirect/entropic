@@ -630,7 +630,14 @@ def sidechain_crossfeed(
     total_frames: int = 1,
     key_frame: np.ndarray = None,
 ) -> np.ndarray:
-    """Alias → sidechain_cross with rgb_shift/spectral_split modes."""
+    """Cross-channel feed — mix color channels between two videos.
+
+    When no second video is loaded, generates a synthetic key by
+    channel-rotating the input (R→G→B→R) for self-interference.
+    """
+    if key_frame is None:
+        # Self-interference: rotate channels as synthetic key
+        key_frame = np.stack([frame[:, :, 1], frame[:, :, 2], frame[:, :, 0]], axis=2)
     return sidechain_cross(
         frame, mode=channel_map, strength=strength, seed=seed,
         frame_index=frame_index, total_frames=total_frames, key_frame=key_frame,

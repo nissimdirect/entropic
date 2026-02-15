@@ -2374,6 +2374,53 @@ body.lfo-map-mode .knob-container:not(.lfo-mapped) {
     color: var(--accent-secondary);
 }
 
+/* Automation-mapped knob */
+.knob-container.auto-mapped {
+    position: relative;
+}
+
+.knob-container.auto-mapped .knob {
+    border-color: var(--auto-lane-color, #4fc3f7);
+}
+
+.knob-container.auto-mapped .knob .arc-fill {
+    stroke: var(--auto-lane-color, #4fc3f7);
+}
+
+.knob-container.auto-mapped::after {
+    content: '';
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--auto-lane-color, #4fc3f7);
+    box-shadow: 0 0 4px var(--auto-lane-color, #4fc3f7);
+}
+
+.knob-container.auto-mapped label {
+    color: var(--auto-lane-color, #4fc3f7);
+}
+
+/* Combined: both LFO and automation */
+.knob-container.lfo-mapped.auto-mapped::after {
+    content: '~';
+    background: none;
+    box-shadow: none;
+    width: auto;
+    height: auto;
+    border-radius: 0;
+    color: var(--accent-secondary);
+    text-shadow: 0 0 4px var(--auto-lane-color, #4fc3f7);
+}
+
+/* Generic param-mapped indicator (either source) */
+body.lfo-map-mode .knob-container:not(.lfo-mapped):not(.auto-mapped) .knob:hover {
+    box-shadow: 0 0 12px rgba(123, 97, 255, 0.5);
+    cursor: crosshair;
+}
+
 /* === HISTOGRAM PANEL === */
 #histogram-panel {
     grid-column: 1 / -1;
@@ -2525,4 +2572,74 @@ body.lfo-map-mode .knob-container:not(.lfo-mapped) {
 .device:has(.cb-section) {
     min-width: 200px;
     max-width: 260px;
+}
+
+/* === PARAMETER ACCORDION (Essential/Advanced) === */
+.params-toggle {
+    width: 100%;
+    background: none;
+    border: none;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font: 10px 'SF Mono', monospace;
+    padding: 6px 0 2px;
+    cursor: pointer;
+    transition: color 0.2s;
+    margin-top: 4px;
+}
+.params-toggle:hover {
+    color: var(--text-primary);
+}
+.params-toggle.open {
+    color: var(--accent-secondary);
+}
+.params-advanced {
+    display: none;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+    opacity: 0;
+}
+.params-advanced.open {
+    display: flex;
+    max-height: 500px;
+    opacity: 1;
+}
+
+/* === AUTOMATION LANES === */
+.automation-toolbar {
+    display: flex;
+    gap: 4px;
+    padding: 2px 4px;
+    background: var(--bg-dark);
+    border-bottom: 1px solid var(--border);
+}
+.automation-toolbar button {
+    background: var(--bg-mid);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font: 9px 'SF Mono', monospace;
+    padding: 2px 8px;
+    cursor: pointer;
+    border-radius: 2px;
+}
+.automation-toolbar button:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+.automation-toolbar button.active {
+    background: var(--accent-secondary);
+    color: #fff;
+    border-color: var(--accent-secondary);
+}
+
+/* Context menu disabled items */
+.ctx-item.disabled {
+    color: var(--text-dim);
+    cursor: default;
+    font-weight: 600;
+    padding-left: 12px;
 }

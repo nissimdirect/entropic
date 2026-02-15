@@ -533,6 +533,106 @@ async def preview_timeline(req: TimelinePreviewRequest):
         raise HTTPException(status_code=500, detail="Timeline processing failed")
 
 
+class FreezeRegionRequest(BaseModel):
+    region_id: int
+    start_frame: int
+    end_frame: int
+    effects: list[dict]
+    automation: dict | None = None
+    lfo_config: dict | None = None
+    mix: float = 1.0
+
+
+@app.post("/api/timeline/freeze")
+async def freeze_region(req: FreezeRegionRequest):
+    """Render a region's frames with all effects+automation baked.
+
+    Returns path to the pre-rendered video file for frozen playback.
+    """
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail="No video loaded")
+
+    from core.video_io import extract_frames, reassemble_video, load_frame, save_frame
+    from core.automation import AutomationSession
+    from core.modulation import LfoModulator
+    import tempfile as tf
+
+    info = _state["video_info"]
+
+    auto_session = None
+    if req.automation:
+        auto_session = AutomationSession.from_dict(req.automation)
+
+    lfo_mod = LfoModulator(req.lfo_config) if req.lfo_config else None
+
+    with tf.TemporaryDirectory() as tmpdir:
+        frames_dir = Path(tmpdir) / "frames"
+        processed_dir = Path(tmpdir) / "processed"
+        frames_dir.mkdir()
+        processed_dir.mkdir()
+
+        frame_files = extract_frames(_state["video_path"], str(frames_dir))
+        total = len(frame_files)
+
+        start = max(0, req.start_frame)
+        end = min(total - 1, req.end_frame)
+
+        for i in range(start, end + 1):
+            if i >= len(frame_files):
+                break
+            frame = load_frame(frame_files[i])
+            effects = req.effects
+
+            if auto_session:
+                effects = auto_session.apply_to_chain(effects, i)
+            if lfo_mod:
+                effects = lfo_mod.apply_to_chain(effects, i, info["fps"])
+
+            if effects:
+                original = frame.copy() if req.mix < 1.0 else None
+                frame = apply_chain(frame, effects,
+                                    frame_index=i,
+                                    total_frames=total,
+                                    watermark=False)
+                if original is not None:
+                    mix = max(0.0, min(1.0, req.mix))
+                    frame = np.clip(
+                        original.astype(float) * (1 - mix) + frame.astype(float) * mix,
+                        0, 255
+                    ).astype(np.uint8)
+
+            save_frame(frame, str(processed_dir / f"frame_{i - start + 1:06d}.png"))
+
+        # Reassemble frozen region
+        freeze_name = f"freeze_region_{req.region_id}.mp4"
+        freeze_path = EXPORT_DIR / "frozen" / freeze_name
+        freeze_path.parent.mkdir(parents=True, exist_ok=True)
+
+        reassemble_video(
+            str(processed_dir), str(freeze_path), info["fps"],
+            quality="hi"
+        )
+
+    size_mb = freeze_path.stat().st_size / (1024 * 1024)
+    return {
+        "status": "ok",
+        "path": str(freeze_path),
+        "region_id": req.region_id,
+        "frames": end - start + 1,
+        "size_mb": round(size_mb, 1),
+    }
+
+
+@app.delete("/api/timeline/freeze/{region_id}")
+async def unfreeze_region(region_id: int):
+    """Delete a frozen region's pre-rendered video."""
+    freeze_path = EXPORT_DIR / "frozen" / f"freeze_region_{region_id}.mp4"
+    if freeze_path.exists():
+        freeze_path.unlink()
+        return {"status": "ok", "region_id": region_id}
+    return {"status": "not_found", "region_id": region_id}
+
+
 class TimelineExportRequest(BaseModel):
     timeline_regions: list[dict]
     format: str = "mp4"

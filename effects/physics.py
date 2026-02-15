@@ -15,6 +15,10 @@ import cv2
 # ─── State buffers ───
 _physics_state = {}
 
+# Number of warm-up iterations for single-frame preview.
+# This lets physics effects show visible displacement even on frame 0.
+_PREVIEW_WARMUP_FRAMES = 8
+
 
 def _get_state(key, h, w):
     """Get or create physics state for this effect instance."""
@@ -26,6 +30,11 @@ def _get_state(key, h, w):
             "vy": np.zeros((h, w), dtype=np.float32),  # y velocity
         }
     return _physics_state[key]
+
+
+def _is_preview(frame_index, total_frames):
+    """True when running in single-frame preview mode."""
+    return total_frames <= 1 and frame_index == 0
 
 
 def _remap_frame(frame, dx, dy, boundary="clamp"):
@@ -95,33 +104,35 @@ def pixel_liquify(
     h, w = frame.shape[:2]
     state = _get_state(f"liquify_{seed}", h, w)
 
-    t = frame_index * speed / 30.0
-    rng = np.random.default_rng(seed)
-
-    # Generate turbulent force field using layered Perlin-like noise
-    # Use sine waves at different frequencies for organic flow
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
     x_norm = x_grid / flow_scale
     y_norm = y_grid / flow_scale
 
-    # Multi-octave turbulence
-    fx = np.zeros((h, w), dtype=np.float32)
-    fy = np.zeros((h, w), dtype=np.float32)
-    for octave in range(3):
-        freq = 2 ** octave
-        amp = turbulence / freq
-        phase_x = rng.random() * 100
-        phase_y = rng.random() * 100
-        fx += amp * np.sin(x_norm * freq + t * 2.0 + phase_x) * np.cos(y_norm * freq * 0.7 + t * 1.5 + phase_y)
-        fy += amp * np.cos(x_norm * freq * 0.8 + t * 1.8 + phase_x) * np.sin(y_norm * freq + t * 2.2 + phase_y)
+    # In preview mode, warm up the displacement field so the effect is visible
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
 
-    # Apply forces to velocity
-    state["vx"] = state["vx"] * viscosity + fx * 0.1
-    state["vy"] = state["vy"] * viscosity + fy * 0.1
+    for step in range(iterations):
+        t = (frame_index + step) * speed / 30.0
+        rng = np.random.default_rng(seed)
 
-    # Update displacement
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+        # Multi-octave turbulence
+        fx = np.zeros((h, w), dtype=np.float32)
+        fy = np.zeros((h, w), dtype=np.float32)
+        for octave in range(3):
+            freq = 2 ** octave
+            amp = turbulence / freq
+            phase_x = rng.random() * 100
+            phase_y = rng.random() * 100
+            fx += amp * np.sin(x_norm * freq + t * 2.0 + phase_x) * np.cos(y_norm * freq * 0.7 + t * 1.5 + phase_y)
+            fy += amp * np.cos(x_norm * freq * 0.8 + t * 1.8 + phase_x) * np.sin(y_norm * freq + t * 2.2 + phase_y)
+
+        # Apply forces to velocity
+        state["vx"] = state["vx"] * viscosity + fx * 0.1
+        state["vy"] = state["vy"] * viscosity + fy * 0.1
+
+        # Update displacement
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
 
     # Clamp displacement to prevent pixels from going too far
     max_disp = max(h, w) * 0.3
@@ -130,7 +141,7 @@ def pixel_liquify(
 
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(f"liquify_{seed}", None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -166,40 +177,40 @@ def pixel_gravity(
     state = _get_state(key, h, w)
 
     rng = np.random.default_rng(seed)
-    t = frame_index / 30.0
-
-    # Generate attractor positions (seeded, so consistent across frames)
-    base_positions = rng.random((num_attractors, 2))
-    attractors_x = base_positions[:, 0] * w
-    attractors_y = base_positions[:, 1] * h
-
-    # Wander: attractors drift over time
-    if wander > 0:
-        for i in range(num_attractors):
-            attractors_x[i] += np.sin(t * 0.5 + i * 2.1) * w * wander * 0.1
-            attractors_y[i] += np.cos(t * 0.7 + i * 1.7) * h * wander * 0.1
-
-    # Compute gravitational force field
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
-    fx_total = np.zeros((h, w), dtype=np.float32)
-    fy_total = np.zeros((h, w), dtype=np.float32)
     radius_px = attractor_radius * max(h, w)
 
-    for i in range(num_attractors):
-        dx = attractors_x[i] - x_grid
-        dy = attractors_y[i] - y_grid
-        dist = np.sqrt(dx * dx + dy * dy) + 1.0
-        # Inverse-square with radius falloff
-        force = gravity_strength / (dist * dist) * np.exp(-dist / radius_px) * 1000
-        fx_total += dx / dist * force
-        fy_total += dy / dist * force
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
 
-    # Apply forces
-    state["vx"] = state["vx"] * damping + fx_total * 0.01
-    state["vy"] = state["vy"] * damping + fy_total * 0.01
+    for step in range(iterations):
+        t = (frame_index + step) / 30.0
 
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+        # Generate attractor positions (seeded, so consistent across frames)
+        _rng = np.random.default_rng(seed)
+        base_positions = _rng.random((num_attractors, 2))
+        attractors_x = base_positions[:, 0] * w
+        attractors_y = base_positions[:, 1] * h
+
+        if wander > 0:
+            for i in range(num_attractors):
+                attractors_x[i] += np.sin(t * 0.5 + i * 2.1) * w * wander * 0.1
+                attractors_y[i] += np.cos(t * 0.7 + i * 1.7) * h * wander * 0.1
+
+        fx_total = np.zeros((h, w), dtype=np.float32)
+        fy_total = np.zeros((h, w), dtype=np.float32)
+
+        for i in range(num_attractors):
+            dx = attractors_x[i] - x_grid
+            dy = attractors_y[i] - y_grid
+            dist = np.sqrt(dx * dx + dy * dy) + 1.0
+            force = gravity_strength / (dist * dist) * np.exp(-dist / radius_px) * 1000
+            fx_total += dx / dist * force
+            fy_total += dy / dist * force
+
+        state["vx"] = state["vx"] * damping + fx_total * 0.01
+        state["vy"] = state["vy"] * damping + fy_total * 0.01
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
 
     max_disp = max(h, w) * 0.4
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
@@ -207,7 +218,7 @@ def pixel_gravity(
 
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -242,41 +253,38 @@ def pixel_vortex(
     state = _get_state(key, h, w)
 
     rng = np.random.default_rng(seed)
-    t = frame_index / 30.0
-
-    # Vortex positions (stable, seeded)
     positions = rng.random((num_vortices, 2))
-    # Spin directions (alternating CW/CCW)
     spins = np.array([(-1) ** i for i in range(num_vortices)], dtype=np.float32)
 
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
-    fx_total = np.zeros((h, w), dtype=np.float32)
-    fy_total = np.zeros((h, w), dtype=np.float32)
     radius_px = radius * max(h, w)
 
-    for i in range(num_vortices):
-        cx = positions[i, 0] * w
-        cy = positions[i, 1] * h
-        dx = x_grid - cx
-        dy = y_grid - cy
-        dist = np.sqrt(dx * dx + dy * dy) + 1.0
-        falloff = np.exp(-dist / radius_px)
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
 
-        # Tangential force (spin) — perpendicular to radius
-        fx_spin = -dy / dist * spin_strength * spins[i] * falloff
-        fy_spin = dx / dist * spin_strength * spins[i] * falloff
+    for step in range(iterations):
+        fx_total = np.zeros((h, w), dtype=np.float32)
+        fy_total = np.zeros((h, w), dtype=np.float32)
 
-        # Radial force (pull inward)
-        fx_pull = -dx / dist * pull_strength * falloff
-        fy_pull = -dy / dist * pull_strength * falloff
+        for i in range(num_vortices):
+            cx = positions[i, 0] * w
+            cy = positions[i, 1] * h
+            dx = x_grid - cx
+            dy = y_grid - cy
+            dist = np.sqrt(dx * dx + dy * dy) + 1.0
+            falloff = np.exp(-dist / radius_px)
 
-        fx_total += fx_spin + fx_pull
-        fy_total += fy_spin + fy_pull
+            fx_spin = -dy / dist * spin_strength * spins[i] * falloff
+            fy_spin = dx / dist * spin_strength * spins[i] * falloff
+            fx_pull = -dx / dist * pull_strength * falloff
+            fy_pull = -dy / dist * pull_strength * falloff
 
-    state["vx"] = state["vx"] * damping + fx_total * 0.02
-    state["vy"] = state["vy"] * damping + fy_total * 0.02
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+            fx_total += fx_spin + fx_pull
+            fy_total += fy_spin + fy_pull
+
+        state["vx"] = state["vx"] * damping + fx_total * 0.02
+        state["vy"] = state["vy"] * damping + fy_total * 0.02
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
 
     max_disp = max(h, w) * 0.4
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
@@ -284,7 +292,7 @@ def pixel_vortex(
 
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -368,7 +376,7 @@ def pixel_explode(
 
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -472,7 +480,7 @@ def pixel_elastic(
 
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -505,34 +513,38 @@ def pixel_melt(
     key = f"melt_{seed}"
     state = _get_state(key, h, w)
 
-    t = frame_index / 30.0
     rng = np.random.default_rng(seed)
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
-
-    # Melt zone — progresses over time
-    progress = min(1.0, frame_index / max(total_frames * 0.7, 1))
-
-    if melt_source == "top":
-        melt_mask = np.clip((progress * h * 1.5 - y_grid) / (h * 0.2), 0, 1)
-    elif melt_source == "bottom":
-        melt_mask = np.clip((progress * h * 1.5 - (h - y_grid)) / (h * 0.2), 0, 1)
-    elif melt_source == "edges":
-        dist_x = np.minimum(x_grid, w - x_grid) / (w * 0.5)
-        dist_y = np.minimum(y_grid, h - y_grid) / (h * 0.5)
-        dist_edge = np.minimum(dist_x, dist_y)
-        melt_mask = np.clip((progress * 1.5 - dist_edge) / 0.2, 0, 1)
-    else:  # "all"
-        melt_mask = np.full((h, w), progress, dtype=np.float32)
-
-    # Forces: gravity down + heat sideways
     phase = rng.random() * 100
-    fy_force = gravity * melt_mask * 0.3
-    fx_force = heat * np.sin(x_grid / 20.0 + t * 2 + phase) * melt_mask * 0.2
 
-    state["vx"] = state["vx"] * viscosity + fx_force
-    state["vy"] = state["vy"] * viscosity + fy_force
-    state["dx"] += state["vx"] * melt_mask
-    state["dy"] += state["vy"] * melt_mask
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
+    # In preview, simulate total_frames worth of progression
+    sim_total = max(total_frames, iterations * 2)
+
+    for step in range(iterations):
+        sim_frame = frame_index + step
+        t = sim_frame / 30.0
+        progress = min(1.0, sim_frame / max(sim_total * 0.7, 1))
+
+        if melt_source == "top":
+            melt_mask = np.clip((progress * h * 1.5 - y_grid) / (h * 0.2), 0, 1)
+        elif melt_source == "bottom":
+            melt_mask = np.clip((progress * h * 1.5 - (h - y_grid)) / (h * 0.2), 0, 1)
+        elif melt_source == "edges":
+            dist_x = np.minimum(x_grid, w - x_grid) / (w * 0.5)
+            dist_y = np.minimum(y_grid, h - y_grid) / (h * 0.5)
+            dist_edge = np.minimum(dist_x, dist_y)
+            melt_mask = np.clip((progress * 1.5 - dist_edge) / 0.2, 0, 1)
+        else:  # "all"
+            melt_mask = np.full((h, w), progress, dtype=np.float32)
+
+        fy_force = gravity * melt_mask * 0.3
+        fx_force = heat * np.sin(x_grid / 20.0 + t * 2 + phase) * melt_mask * 0.2
+
+        state["vx"] = state["vx"] * viscosity + fx_force
+        state["vy"] = state["vy"] * viscosity + fy_force
+        state["dx"] += state["vx"] * melt_mask
+        state["dy"] += state["vy"] * melt_mask
 
     max_disp = max(h, w) * 0.5
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
@@ -540,7 +552,7 @@ def pixel_melt(
 
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -650,7 +662,7 @@ def pixel_blackhole(
         for c in range(min(3, result.shape[2] if result.ndim == 3 else 1)):
             result[:, :, c] += noise
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -722,7 +734,7 @@ def pixel_antigravity(
 
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -828,7 +840,7 @@ def pixel_magnetic(
 
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -863,40 +875,39 @@ def pixel_timewarp(
     key = f"timewarp_{seed}"
     state = _get_state(key, h, w)
 
-    # Extra state for echoes
     if "echoes_dx" not in state:
         state["echoes_dx"] = [np.zeros((h, w), dtype=np.float32) for _ in range(echo_count)]
         state["echoes_dy"] = [np.zeros((h, w), dtype=np.float32) for _ in range(echo_count)]
         state["time_dir"] = 1.0
 
-    rng = np.random.default_rng(seed + frame_index)
-    t = frame_index / 30.0
-
-    # Periodic time reversal
-    if rng.random() < reverse_probability * 0.1:
-        state["time_dir"] *= -1.0
-
-    # Sinusoidal time warping
-    time_factor = state["time_dir"] * (1.0 + np.sin(t * warp_speed * np.pi) * 0.5)
-
-    # Turbulent force
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
-    phase = rng.random() * 100
-    fx = 3.0 * np.sin(x_grid / 30.0 + t * 2 + phase) * np.cos(y_grid / 25.0 + t * 1.5)
-    fy = 3.0 * np.cos(x_grid / 25.0 + t * 1.8) * np.sin(y_grid / 30.0 + t * 2.2 + phase)
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
 
-    state["vx"] = state["vx"] * damping + fx * time_factor * 0.05
-    state["vy"] = state["vy"] * damping + fy * time_factor * 0.05
+    for step in range(iterations):
+        sim_frame = frame_index + step
+        rng = np.random.default_rng(seed + sim_frame)
+        t = sim_frame / 30.0
 
-    # Shift echo history
-    for i in range(echo_count - 1, 0, -1):
-        state["echoes_dx"][i] = state["echoes_dx"][i - 1].copy()
-        state["echoes_dy"][i] = state["echoes_dy"][i - 1].copy()
-    state["echoes_dx"][0] = state["dx"].copy()
-    state["echoes_dy"][0] = state["dy"].copy()
+        if rng.random() < reverse_probability * 0.1:
+            state["time_dir"] *= -1.0
 
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+        time_factor = state["time_dir"] * (1.0 + np.sin(t * warp_speed * np.pi) * 0.5)
+
+        phase = rng.random() * 100
+        fx = 3.0 * np.sin(x_grid / 30.0 + t * 2 + phase) * np.cos(y_grid / 25.0 + t * 1.5)
+        fy = 3.0 * np.cos(x_grid / 25.0 + t * 1.8) * np.sin(y_grid / 30.0 + t * 2.2 + phase)
+
+        state["vx"] = state["vx"] * damping + fx * time_factor * 0.05
+        state["vy"] = state["vy"] * damping + fy * time_factor * 0.05
+
+        for i in range(echo_count - 1, 0, -1):
+            state["echoes_dx"][i] = state["echoes_dx"][i - 1].copy()
+            state["echoes_dy"][i] = state["echoes_dy"][i - 1].copy()
+        state["echoes_dx"][0] = state["dx"].copy()
+        state["echoes_dy"][0] = state["dy"].copy()
+
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
 
     max_disp = max(h, w) * 0.3
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
@@ -914,7 +925,7 @@ def pixel_timewarp(
 
     result /= total_weight
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -991,7 +1002,7 @@ def pixel_dimensionfold(
 
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -1096,7 +1107,7 @@ def pixel_wormhole(
         result[:, :, 1] += glow * 0.6
         result[:, :, 2] += glow * 1.0
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -1198,7 +1209,7 @@ def pixel_quantum(
         result[:, :, 1] += barrier_vis * 30
         result[:, :, 2] += barrier_vis * 15
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -1292,7 +1303,7 @@ def pixel_darkenergy(
         for c in range(3):
             result[:, :, c] = result[:, :, c] * (1 - void_mask) + void_color[c] * void_mask
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -1407,7 +1418,7 @@ def pixel_superfluid(
             result[:, :, 2] += core_glow
             result[:, :, 1] += core_glow * 0.3
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -1528,7 +1539,7 @@ def pixel_bubbles(
         result[:, :, 1] += ring * 40
         result[:, :, 2] += ring * 50
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -1569,73 +1580,67 @@ def pixel_inkdrop(
     state = _get_state(key, h, w)
 
     rng = np.random.default_rng(seed)
-    t = frame_index / 30.0
-    progress = frame_index / max(total_frames - 1, 1)
-
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
 
-    # Generate drop positions and timing
     drop_positions = rng.random((num_drops, 2))
-    drop_phases = rng.random(num_drops) * np.pi * 2  # angular offset for tendrils
+    drop_phases = rng.random(num_drops) * np.pi * 2
 
-    fx_total = np.zeros((h, w), dtype=np.float32)
-    fy_total = np.zeros((h, w), dtype=np.float32)
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
+    sim_total = max(total_frames, iterations * 2)
 
-    for i in range(num_drops):
-        # Staggered drop timing
-        drop_start = i * drop_interval / max(num_drops - 1, 1) if num_drops > 1 else 0
-        if progress < drop_start:
-            continue
+    for step in range(iterations):
+        sim_frame = frame_index + step
+        t = sim_frame / 30.0
+        progress = sim_frame / max(sim_total - 1, 1)
 
-        drop_age = (progress - drop_start) / max(1.0 - drop_start, 0.01)
-        drop_age = min(drop_age, 1.0)
+        fx_total = np.zeros((h, w), dtype=np.float32)
+        fy_total = np.zeros((h, w), dtype=np.float32)
 
-        dx_pos = drop_positions[i, 0] * w
-        dy_pos = drop_positions[i, 1] * h
+        for i in range(num_drops):
+            drop_start = i * drop_interval / max(num_drops - 1, 1) if num_drops > 1 else 0
+            if progress < drop_start:
+                continue
 
-        dx = x_grid - dx_pos
-        dy = y_grid - dy_pos
-        dist = np.sqrt(dx * dx + dy * dy) + 0.1
+            drop_age = (progress - drop_start) / max(1.0 - drop_start, 0.01)
+            drop_age = min(drop_age, 1.0)
 
-        # Expanding diffusion front
-        front_radius = drop_age * max(h, w) * 0.2 * diffusion_rate
-        front_width = front_radius * 0.15 + 5.0
+            dx_pos = drop_positions[i, 0] * w
+            dy_pos = drop_positions[i, 1] * h
 
-        # Distance from the expanding front
-        dist_from_front = dist - front_radius
-        at_front = np.exp(-(dist_from_front ** 2) / (front_width ** 2))
+            dx = x_grid - dx_pos
+            dy = y_grid - dy_pos
+            dist = np.sqrt(dx * dx + dy * dy) + 0.1
 
-        # Radial expansion force
-        expand_force = at_front * diffusion_rate * 0.5
-        fx_total += dx / dist * expand_force
-        fy_total += dy / dist * expand_force
+            front_radius = drop_age * max(h, w) * 0.2 * diffusion_rate
+            front_width = front_radius * 0.15 + 5.0
+            dist_from_front = dist - front_radius
+            at_front = np.exp(-(dist_from_front ** 2) / (front_width ** 2))
 
-        # Surface tension: pulls front inward slightly (smoothing)
-        if surface_tension > 0:
-            tension_force = -surface_tension * at_front * np.sign(dist_from_front) * 0.3
-            fx_total += dx / dist * tension_force
-            fy_total += dy / dist * tension_force
+            expand_force = at_front * diffusion_rate * 0.5
+            fx_total += dx / dist * expand_force
+            fy_total += dy / dist * expand_force
 
-        # Marangoni convection (soap effect): creates tendrils/fingers
-        if marangoni > 0 and tendrils > 0:
-            angle = np.arctan2(dy, dx)
-            # Tendril pattern: sinusoidal modulation around the ring
-            tendril_pattern = np.sin(angle * tendrils + drop_phases[i] + t * 0.5)
-            tendril_force = tendril_pattern * at_front * marangoni * 0.4
+            if surface_tension > 0:
+                tension_force = -surface_tension * at_front * np.sign(dist_from_front) * 0.3
+                fx_total += dx / dist * tension_force
+                fy_total += dy / dist * tension_force
 
-            # Tendrils push outward at peaks, inward at troughs
-            fx_total += dx / dist * tendril_force * 0.3
-            fy_total += dy / dist * tendril_force * 0.3
+            if marangoni > 0 and tendrils > 0:
+                angle = np.arctan2(dy, dx)
+                tendril_pattern = np.sin(angle * tendrils + drop_phases[i] + t * 0.5)
+                tendril_force = tendril_pattern * at_front * marangoni * 0.4
 
-            # Tangential swirl at tendrils
-            swirl = tendril_pattern * at_front * marangoni * 0.2
-            fx_total += -dy / dist * swirl * 0.15
-            fy_total += dx / dist * swirl * 0.15
+                fx_total += dx / dist * tendril_force * 0.3
+                fy_total += dy / dist * tendril_force * 0.3
 
-    state["vx"] = state["vx"] * 0.88 + fx_total * 0.04
-    state["vy"] = state["vy"] * 0.88 + fy_total * 0.04
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+                swirl = tendril_pattern * at_front * marangoni * 0.2
+                fx_total += -dy / dist * swirl * 0.15
+                fy_total += dx / dist * swirl * 0.15
+
+        state["vx"] = state["vx"] * 0.88 + fx_total * 0.04
+        state["vy"] = state["vy"] * 0.88 + fy_total * 0.04
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
 
     max_disp = max(h, w) * 0.4
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
@@ -1643,14 +1648,12 @@ def pixel_inkdrop(
 
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
 
-    # Color shift at diffusion fronts
     if color_shift > 0:
         disp_mag = np.sqrt(state["dx"] ** 2 + state["dy"] ** 2)
         shift_mask = np.clip(disp_mag / (max(h, w) * 0.1), 0, 1) * color_shift
 
         if shift_mask.max() > 0.01:
             result = result.astype(np.float32)
-            # Hue rotation proportional to displacement
             r, g, b = result[:, :, 0], result[:, :, 1], result[:, :, 2]
             cos_a = np.cos(shift_mask * np.pi * 0.5)
             sin_a = np.sin(shift_mask * np.pi * 0.5)
@@ -1661,7 +1664,7 @@ def pixel_inkdrop(
             result[:, :, 1] = new_g
             result[:, :, 2] = new_b
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)
@@ -1699,46 +1702,46 @@ def pixel_haunt(
     key = f"haunt_{seed}"
     state = _get_state(key, h, w)
 
-    # Extra state: ghost buffer (accumulated afterimage)
     if "ghost" not in state:
         state["ghost"] = np.zeros((h, w, 3), dtype=np.float32)
 
     rng = np.random.default_rng(seed)
-    t = frame_index / 30.0
-
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
 
-    # Generate displacement force
-    if force_type == "turbulence":
-        phase_x = rng.random() * 100
-        phase_y = rng.random() * 100
-        fx = force_strength * np.sin(x_grid / 35.0 + t * 1.5 + phase_x) * np.cos(y_grid / 30.0 + t * 1.2 + phase_y)
-        fy = force_strength * np.cos(x_grid / 30.0 + t * 1.8 + phase_x) * np.sin(y_grid / 35.0 + t * 2.0 + phase_y)
-    elif force_type == "radial":
-        cx, cy = w / 2, h / 2
-        ddx = x_grid - cx
-        ddy = y_grid - cy
-        dist = np.sqrt(ddx * ddx + ddy * ddy) + 1.0
-        pulse = np.sin(t * 2) * force_strength
-        fx = ddx / dist * pulse * 0.2
-        fy = ddy / dist * pulse * 0.2
-    else:  # drift
-        angle = t * 0.3
-        fx = np.full((h, w), np.cos(angle) * force_strength * 0.3, dtype=np.float32)
-        fy = np.full((h, w), np.sin(angle) * force_strength * 0.3, dtype=np.float32)
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
 
-    state["vx"] = state["vx"] * damping + fx * 0.03
-    state["vy"] = state["vy"] * damping + fy * 0.03
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+    for step in range(iterations):
+        t = (frame_index + step) / 30.0
+
+        if force_type == "turbulence":
+            _rng = np.random.default_rng(seed)
+            phase_x = _rng.random() * 100
+            phase_y = _rng.random() * 100
+            fx = force_strength * np.sin(x_grid / 35.0 + t * 1.5 + phase_x) * np.cos(y_grid / 30.0 + t * 1.2 + phase_y)
+            fy = force_strength * np.cos(x_grid / 30.0 + t * 1.8 + phase_x) * np.sin(y_grid / 35.0 + t * 2.0 + phase_y)
+        elif force_type == "radial":
+            cx, cy = w / 2, h / 2
+            ddx = x_grid - cx
+            ddy = y_grid - cy
+            dist = np.sqrt(ddx * ddx + ddy * ddy) + 1.0
+            pulse = np.sin(t * 2) * force_strength
+            fx = ddx / dist * pulse * 0.2
+            fy = ddy / dist * pulse * 0.2
+        else:  # drift
+            angle = t * 0.3
+            fx = np.full((h, w), np.cos(angle) * force_strength * 0.3, dtype=np.float32)
+            fy = np.full((h, w), np.sin(angle) * force_strength * 0.3, dtype=np.float32)
+
+        state["vx"] = state["vx"] * damping + fx * 0.03
+        state["vy"] = state["vy"] * damping + fy * 0.03
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
+
+        state["ghost"] = state["ghost"] * ghost_persistence + frame.astype(np.float32) * (1.0 - ghost_persistence) * ghost_opacity
 
     max_disp = max(h, w) * 0.35
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
     state["dy"] = np.clip(state["dy"], -max_disp, max_disp)
-
-    # Ghost buffer: accumulate where pixels are NOW (before displacement)
-    # This captures what the frame looks like at each position
-    state["ghost"] = state["ghost"] * ghost_persistence + frame.astype(np.float32) * (1.0 - ghost_persistence) * ghost_opacity
 
     # Remap the current frame through displacement
     result = _remap_frame(frame, state["dx"], state["dy"], boundary)
@@ -1765,7 +1768,7 @@ def pixel_haunt(
         for c in range(3):
             result[:, :, c] += noise
 
-    if frame_index >= total_frames - 1:
+    if total_frames > 1 and frame_index >= total_frames - 1:
         _physics_state.pop(key, None)
 
     return np.clip(result, 0, 255).astype(np.uint8)

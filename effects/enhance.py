@@ -140,7 +140,8 @@ def emboss(
 
 def auto_levels(
     frame: np.ndarray,
-    cutoff: float = 2.0,
+    cutoff: float = 5.0,
+    strength: float = 1.0,
 ) -> np.ndarray:
     """Auto-contrast: stretch histogram to fill full range.
 
@@ -149,15 +150,20 @@ def auto_levels(
 
     Args:
         frame: Input frame (H, W, 3) uint8.
-        cutoff: Percentage of extreme pixels to clip (0.0-10.0).
+        cutoff: Percentage of extreme pixels to clip (0.0-25.0). Higher = more aggressive.
+        strength: Blend amount (0.0 = original, 1.0 = fully corrected).
 
     Returns:
         Auto-leveled frame.
     """
-    cutoff = max(0.0, min(10.0, float(cutoff)))
+    cutoff = max(0.0, min(25.0, float(cutoff)))
+    strength = max(0.0, min(1.0, float(strength)))
     img = Image.fromarray(frame)
-    result = ImageOps.autocontrast(img, cutoff=cutoff)
-    return np.array(result)
+    result = np.array(ImageOps.autocontrast(img, cutoff=cutoff))
+    if strength >= 1.0:
+        return result
+    blended = frame.astype(np.float32) * (1.0 - strength) + result.astype(np.float32) * strength
+    return np.clip(blended, 0, 255).astype(np.uint8)
 
 
 def median_filter(
@@ -233,21 +239,27 @@ def false_color(
 
 def histogram_eq(
     frame: np.ndarray,
+    strength: float = 1.0,
 ) -> np.ndarray:
     """Equalize histogram per channel — reveals hidden detail in over/underexposed footage.
 
     Args:
         frame: Input frame (H, W, 3) uint8.
+        strength: Blend amount (0.0 = original, 1.0 = fully equalized).
 
     Returns:
         Histogram-equalized frame.
     """
     import cv2
 
-    result = np.zeros_like(frame)
+    strength = max(0.0, min(1.0, float(strength)))
+    eq = np.zeros_like(frame)
     for i in range(3):
-        result[:, :, i] = cv2.equalizeHist(frame[:, :, i])
-    return result
+        eq[:, :, i] = cv2.equalizeHist(frame[:, :, i])
+    if strength >= 1.0:
+        return eq
+    blended = frame.astype(np.float32) * (1.0 - strength) + eq.astype(np.float32) * strength
+    return np.clip(blended, 0, 255).astype(np.uint8)
 
 
 def clahe(

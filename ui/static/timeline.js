@@ -29,6 +29,20 @@ class Region {
     }
 }
 
+class AutomationLaneUI {
+    constructor(id, regionId, effectIndex, paramName, color) {
+        this.id = id;
+        this.regionId = regionId;
+        this.effectIndex = effectIndex;
+        this.paramName = paramName;
+        this.color = color;
+        this.keyframes = [];  // [{frame, value, curve}] — value is 0-1 normalized
+        this.height = 60;
+        this.visible = true;
+        this.selected = false;
+    }
+}
+
 // ============ TIMELINE EDITOR ============
 
 class TimelineEditor {
@@ -65,6 +79,24 @@ class TimelineEditor {
         this.dragOrigEnd = 0;
         this.hoveredRegion = null;
         this.hoverEdge = null;      // 'left', 'right', null
+
+        // Automation state
+        this.automationLanes = [];  // AutomationLaneUI[]
+        this.nextLaneId = 0;
+        this.automationVisible = true;  // Toggle with 'A' key
+        this.selectedLaneId = null;
+        this.selectedBreakpoints = [];  // [{laneId, index}]
+        this.isDraggingBreakpoint = false;
+        this.dragBreakpointLane = null;
+        this.dragBreakpointIndex = -1;
+        this.drawMode = false;  // pencil mode (for Phase 2c)
+
+        // Automation lane colors (Ableton-inspired)
+        this.laneColors = [
+            '#ff5555', '#55aaff', '#55ff55', '#ffaa55',
+            '#ff55ff', '#55ffff', '#ffff55', '#aa55ff',
+            '#ff8888', '#88aaff', '#88ff88', '#ffcc88',
+        ];
 
         // Colors
         this.colors = {
@@ -155,6 +187,9 @@ class TimelineEditor {
             this.drawTrack(track, y, i);
             y += track.height;
         }
+
+        // Draw automation lanes
+        this.drawAutomationLanes();
 
         // Draw I/O markers (behind playhead)
         this.drawIOMarkers();
@@ -346,6 +381,17 @@ class TimelineEditor {
         ctx.lineWidth = isSelected ? 2 : 1;
         ctx.strokeRect(clampX + 0.5, ry + 0.5, clampW - 1, rh - 1);
 
+        // Frozen region overlay
+        if (region._frozen) {
+            ctx.fillStyle = 'rgba(100, 180, 255, 0.15)';
+            ctx.fillRect(clampX, ry, clampW, rh);
+            // Snowflake icon
+            ctx.fillStyle = '#88ccff';
+            ctx.font = '12px sans-serif';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('\u2744', clampX + clampW - 16, ry + rh / 2); // ❄
+        }
+
         // Region label
         if (rw > 40) {
             ctx.fillStyle = isSelected ? '#fff' : this.colors.text;
@@ -468,6 +514,525 @@ class TimelineEditor {
                 ctx.fillRect(clampX1, this.rulerHeight, clampX2 - clampX1, this.canvasH - this.rulerHeight);
             }
         }
+    }
+
+    // ============ AUTOMATION LANES ============
+
+    drawAutomationLanes() {
+        if (!this.automationVisible) return;
+
+        for (const lane of this.automationLanes) {
+            if (!lane.visible) continue;
+
+            // Find the track that contains the region this lane belongs to
+            const track = this.findTrackForRegion(lane.regionId);
+            if (!track) continue;
+
+            // Calculate Y position: after the track + any previous lanes
+            let laneY = this.getTrackY(track.id) + track.height;
+            const lanesForTrack = this.automationLanes.filter(l => {
+                const t = this.findTrackForRegion(l.regionId);
+                return t && t.id === track.id && l.visible;
+            });
+            const laneIndex = lanesForTrack.indexOf(lane);
+            laneY += laneIndex * lane.height;
+
+            this.drawLane(lane, laneY);
+        }
+    }
+
+    getTrackY(trackId) {
+        let y = this.rulerHeight;
+        for (const track of this.tracks) {
+            if (track.id === trackId) return y;
+            y += track.height;
+            // Add automation lane heights
+            const trackLanes = this.automationLanes.filter(l => {
+                const t = this.findTrackForRegion(l.regionId);
+                return t && t.id === track.id && l.visible;
+            });
+            if (this.automationVisible) {
+                y += trackLanes.length * 60;
+            }
+        }
+        return y;
+    }
+
+    getTotalHeight() {
+        let h = this.rulerHeight;
+        for (const track of this.tracks) {
+            h += track.height;
+            if (this.automationVisible) {
+                const trackLanes = this.automationLanes.filter(l => {
+                    const t = this.findTrackForRegion(l.regionId);
+                    return t && t.id === track.id && l.visible;
+                });
+                h += trackLanes.length * 60;
+            }
+        }
+        return h;
+    }
+
+    drawLane(lane, y) {
+        const ctx = this.ctx;
+        const w = this.canvasW;
+        const h = lane.height;
+
+        // Lane background
+        ctx.fillStyle = 'rgba(20, 20, 24, 0.9)';
+        ctx.fillRect(this.trackHeaderWidth, y, w - this.trackHeaderWidth, h);
+
+        // Lane header (in track header area)
+        ctx.fillStyle = '#1a1a20';
+        ctx.fillRect(0, y, this.trackHeaderWidth, h);
+
+        // Lane label
+        ctx.fillStyle = lane.color;
+        ctx.font = '9px Menlo, Monaco, monospace';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(lane.paramName, 8, y + h / 2);
+
+        // Color indicator bar
+        ctx.fillStyle = lane.color;
+        ctx.fillRect(this.trackHeaderWidth - 3, y, 3, h);
+
+        // Value grid lines (0.25, 0.5, 0.75)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.lineWidth = 1;
+        for (const val of [0.25, 0.5, 0.75]) {
+            const gy = y + h - val * h;
+            ctx.beginPath();
+            ctx.moveTo(this.trackHeaderWidth, gy);
+            ctx.lineTo(w, gy);
+            ctx.stroke();
+        }
+
+        // Draw interpolated line between keyframes
+        if (lane.keyframes.length > 0) {
+            ctx.strokeStyle = lane.color;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+
+            // Draw from left edge to right edge
+            const region = this.findRegion(lane.regionId);
+            const startFrame = region ? region.startFrame : 0;
+            const endFrame = region ? region.endFrame : this.totalFrames;
+
+            // Sample at pixel intervals for efficiency
+            const startX = this.frameToX(startFrame);
+            const endX = this.frameToX(endFrame);
+            let first = true;
+            for (let x = Math.max(this.trackHeaderWidth, startX); x <= Math.min(w, endX); x += 2) {
+                const f = this.xToFrame(x);
+                const val = this.getLaneValue(lane, f);
+                if (val === null) continue;
+                const py = y + h - val * h;
+                if (first) { ctx.moveTo(x, py); first = false; }
+                else ctx.lineTo(x, py);
+            }
+            ctx.stroke();
+
+            // Draw breakpoint dots
+            for (let i = 0; i < lane.keyframes.length; i++) {
+                const kf = lane.keyframes[i];
+                const x = this.frameToX(kf.frame);
+                const py = y + h - kf.value * h;
+
+                if (x < this.trackHeaderWidth || x > w) continue;
+
+                const isSelected = this.selectedBreakpoints.some(
+                    s => s.laneId === lane.id && s.index === i
+                );
+
+                // Dot
+                ctx.fillStyle = isSelected ? '#fff' : lane.color;
+                ctx.beginPath();
+                ctx.arc(x, py, isSelected ? 5 : 4, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Border
+                ctx.strokeStyle = isSelected ? lane.color : 'rgba(0,0,0,0.5)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+        }
+
+        // Bottom border
+        ctx.strokeStyle = '#2a2a30';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, y + h);
+        ctx.lineTo(w, y + h);
+        ctx.stroke();
+
+        // Selected lane highlight
+        if (lane.id === this.selectedLaneId) {
+            ctx.strokeStyle = lane.color + '44';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(this.trackHeaderWidth, y, w - this.trackHeaderWidth, h);
+        }
+    }
+
+    getLaneValue(lane, frame) {
+        const kfs = lane.keyframes;
+        if (kfs.length === 0) return null;
+        if (frame <= kfs[0].frame) return kfs[0].value;
+        if (frame >= kfs[kfs.length - 1].frame) return kfs[kfs.length - 1].value;
+
+        for (let i = 0; i < kfs.length - 1; i++) {
+            if (kfs[i].frame <= frame && frame <= kfs[i + 1].frame) {
+                const t = (frame - kfs[i].frame) / (kfs[i + 1].frame - kfs[i].frame);
+                const curve = kfs[i].curve || 'linear';
+                return this.interpolate(kfs[i].value, kfs[i + 1].value, t, curve, kfs[i].cp1, kfs[i].cp2);
+            }
+        }
+        return kfs[kfs.length - 1].value;
+    }
+
+    interpolate(a, b, t, curve, cp1, cp2) {
+        switch (curve) {
+            case 'ease_in': return a + (b - a) * t * t;
+            case 'ease_out': return a + (b - a) * (1 - (1 - t) ** 2);
+            case 'ease_in_out':
+                return t < 0.5
+                    ? a + (b - a) * 2 * t * t
+                    : a + (b - a) * (1 - (-2 * t + 2) ** 2 / 2);
+            case 'step': return a;
+            case 'sine': return a + (b - a) * (1 - Math.cos(t * Math.PI)) / 2;
+            case 'bezier': return this.bezierInterpolate(a, b, t, cp1, cp2);
+            default: return a + (b - a) * t; // linear
+        }
+    }
+
+    bezierInterpolate(a, b, t, cp1, cp2) {
+        // Cubic bezier with control points in normalized 0-1 space
+        cp1 = cp1 || [0.42, 0.0];
+        cp2 = cp2 || [0.58, 1.0];
+        // Newton's method to solve for u where B_x(u) = t
+        let u = t;
+        for (let iter = 0; iter < 8; iter++) {
+            const xU = 3 * (1 - u) ** 2 * u * cp1[0] +
+                        3 * (1 - u) * u ** 2 * cp2[0] +
+                        u ** 3;
+            const dx = 3 * (1 - u) ** 2 * cp1[0] +
+                       6 * (1 - u) * u * (cp2[0] - cp1[0]) +
+                       3 * u ** 2 * (1 - cp2[0]);
+            if (Math.abs(dx) < 1e-10) break;
+            u = Math.max(0, Math.min(1, u - (xU - t) / dx));
+        }
+        const y = 3 * (1 - u) ** 2 * u * cp1[1] +
+                  3 * (1 - u) * u ** 2 * cp2[1] +
+                  u ** 3;
+        return a + (b - a) * y;
+    }
+
+    // ============ MARQUEE SELECTION ============
+
+    startMarquee(x, y) {
+        this.marqueeStart = { x, y };
+        this.marqueeEnd = { x, y };
+        this.isMarqueeSelecting = true;
+    }
+
+    updateMarquee(x, y) {
+        this.marqueeEnd = { x, y };
+        this.draw();
+        // Draw marquee rectangle
+        const ctx = this.ctx;
+        const mx = Math.min(this.marqueeStart.x, x);
+        const my = Math.min(this.marqueeStart.y, y);
+        const mw = Math.abs(x - this.marqueeStart.x);
+        const mh = Math.abs(y - this.marqueeStart.y);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(mx, my, mw, mh);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.fillRect(mx, my, mw, mh);
+    }
+
+    endMarquee() {
+        if (!this.isMarqueeSelecting) return;
+        this.isMarqueeSelecting = false;
+
+        const x1 = Math.min(this.marqueeStart.x, this.marqueeEnd.x);
+        const x2 = Math.max(this.marqueeStart.x, this.marqueeEnd.x);
+        const y1 = Math.min(this.marqueeStart.y, this.marqueeEnd.y);
+        const y2 = Math.max(this.marqueeStart.y, this.marqueeEnd.y);
+
+        // Find all breakpoints within the marquee
+        this.selectedBreakpoints = [];
+        for (const lane of this.automationLanes) {
+            if (!lane.visible) continue;
+            const track = this.findTrackForRegion(lane.regionId);
+            if (!track) continue;
+
+            let laneY = this.getTrackY(track.id) + track.height;
+            const trackLanes = this.automationLanes.filter(l => {
+                const t = this.findTrackForRegion(l.regionId);
+                return t && t.id === track.id && l.visible;
+            });
+            const laneIdx = trackLanes.indexOf(lane);
+            laneY += laneIdx * lane.height;
+
+            for (let i = 0; i < lane.keyframes.length; i++) {
+                const kf = lane.keyframes[i];
+                const kfX = this.frameToX(kf.frame);
+                const kfY = laneY + lane.height - kf.value * lane.height;
+                if (kfX >= x1 && kfX <= x2 && kfY >= y1 && kfY <= y2) {
+                    this.selectedBreakpoints.push({ laneId: lane.id, index: i });
+                }
+            }
+        }
+        this.draw();
+    }
+
+    // ============ SHAPES LIBRARY ============
+
+    insertShape(lane, shapeName, startFrame, endFrame, numPoints) {
+        numPoints = numPoints || 16;
+        const duration = endFrame - startFrame;
+        if (duration <= 0) return;
+
+        const newKeyframes = [];
+        for (let i = 0; i <= numPoints; i++) {
+            const t = i / numPoints;
+            const frame = Math.round(startFrame + t * duration);
+            let value;
+
+            switch (shapeName) {
+                case 'ramp_up':
+                    value = t;
+                    break;
+                case 'ramp_down':
+                    value = 1 - t;
+                    break;
+                case 'sine':
+                    value = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+                    break;
+                case 'triangle':
+                    value = t < 0.5 ? t * 2 : 2 - t * 2;
+                    break;
+                case 'saw':
+                    value = t;
+                    break;
+                case 'square':
+                    value = t < 0.5 ? 1 : 0;
+                    break;
+                case 's_curve':
+                    value = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) ** 2;
+                    break;
+                default:
+                    value = t;
+            }
+
+            newKeyframes.push({ frame, value: Math.max(0, Math.min(1, value)), curve: 'linear' });
+        }
+
+        // Replace keyframes in the range, preserve outside
+        lane.keyframes = lane.keyframes.filter(kf => kf.frame < startFrame || kf.frame > endFrame);
+        lane.keyframes.push(...newKeyframes);
+        lane.keyframes.sort((a, b) => a.frame - b.frame);
+        this.draw();
+    }
+
+    // ============ COPY / PASTE ============
+
+    copySelectedBreakpoints() {
+        if (this.selectedBreakpoints.length === 0) return;
+        // Find the earliest frame to use as offset reference
+        let minFrame = Infinity;
+        const copied = [];
+        for (const sel of this.selectedBreakpoints) {
+            const lane = this.automationLanes.find(l => l.id === sel.laneId);
+            if (!lane) continue;
+            const kf = lane.keyframes[sel.index];
+            if (!kf) continue;
+            if (kf.frame < minFrame) minFrame = kf.frame;
+            copied.push({ laneId: sel.laneId, frame: kf.frame, value: kf.value, curve: kf.curve || 'linear' });
+        }
+        // Normalize to relative offsets
+        this.clipboard = copied.map(c => ({
+            frameOffset: c.frame - minFrame,
+            value: c.value,
+            curve: c.curve,
+            laneId: c.laneId,
+        }));
+        if (typeof showToast === 'function') {
+            showToast(`Copied ${this.clipboard.length} breakpoints`, 'info');
+        }
+    }
+
+    pasteBreakpoints() {
+        if (!this.clipboard || this.clipboard.length === 0) return;
+        const pasteFrame = this.playhead;
+        // If pasting to the same lane or the selected lane
+        const targetLaneId = this.selectedLaneId;
+        const targetLane = this.automationLanes.find(l => l.id === targetLaneId);
+
+        for (const item of this.clipboard) {
+            const frame = pasteFrame + item.frameOffset;
+            // Paste to original lane or target lane (cross-lane paste)
+            const lane = targetLane || this.automationLanes.find(l => l.id === item.laneId);
+            if (!lane) continue;
+            lane.keyframes.push({
+                frame,
+                value: item.value,
+                curve: item.curve,
+            });
+            lane.keyframes.sort((a, b) => a.frame - b.frame);
+        }
+        this.draw();
+        if (typeof showToast === 'function') {
+            showToast(`Pasted ${this.clipboard.length} breakpoints at frame ${pasteFrame}`, 'info');
+        }
+    }
+
+    // ============ DRAW MODE (PENCIL) ============
+
+    toggleDrawMode() {
+        this.drawMode = !this.drawMode;
+        this.canvas.style.cursor = this.drawMode ? 'cell' : 'crosshair';
+        if (typeof showToast === 'function') {
+            showToast(this.drawMode ? 'Draw mode ON' : 'Draw mode OFF', 'info');
+        }
+    }
+
+    drawModeStroke(lane, laneY, startX, endX, y) {
+        // Grid-quantized step automation
+        const gridSize = this.getDrawGridSize();
+        const startFrame = this.xToFrame(Math.min(startX, endX));
+        const endFrame = this.xToFrame(Math.max(startX, endX));
+
+        for (let f = startFrame; f <= endFrame; f += gridSize) {
+            const value = Math.max(0, Math.min(1, (laneY + lane.height - y) / lane.height));
+            const existing = lane.keyframes.findIndex(kf => kf.frame === f);
+            if (existing >= 0) {
+                lane.keyframes[existing].value = value;
+            } else {
+                lane.keyframes.push({ frame: f, value, curve: 'step' });
+            }
+        }
+        lane.keyframes.sort((a, b) => a.frame - b.frame);
+        this.draw();
+    }
+
+    getDrawGridSize() {
+        // Adaptive grid: fewer points when zoomed out, more when zoomed in
+        if (this.zoom > 8) return 1;
+        if (this.zoom > 4) return 5;
+        if (this.zoom > 1) return 10;
+        return 30;
+    }
+
+    // ============ SIMPLIFY (RDP) ============
+
+    simplifyLane(laneId, tolerance) {
+        tolerance = tolerance || 0.02;
+        const lane = this.automationLanes.find(l => l.id === laneId);
+        if (!lane || lane.keyframes.length <= 2) return;
+
+        const simplified = this._rdpSimplify(lane.keyframes, tolerance);
+        const removed = lane.keyframes.length - simplified.length;
+        lane.keyframes = simplified;
+        this.draw();
+        if (typeof showToast === 'function' && removed > 0) {
+            showToast(`Simplified: removed ${removed} points`, 'info');
+        }
+    }
+
+    _rdpSimplify(keyframes, tolerance) {
+        if (keyframes.length <= 2) return keyframes;
+
+        const first = keyframes[0];
+        const last = keyframes[keyframes.length - 1];
+        let maxDist = 0;
+        let maxIdx = 0;
+
+        for (let i = 1; i < keyframes.length - 1; i++) {
+            const kf = keyframes[i];
+            const t = last.frame === first.frame ? 0 : (kf.frame - first.frame) / (last.frame - first.frame);
+            const expected = first.value + t * (last.value - first.value);
+            const dist = Math.abs(kf.value - expected);
+            if (dist > maxDist) {
+                maxDist = dist;
+                maxIdx = i;
+            }
+        }
+
+        if (maxDist > tolerance) {
+            const left = this._rdpSimplify(keyframes.slice(0, maxIdx + 1), tolerance);
+            const right = this._rdpSimplify(keyframes.slice(maxIdx), tolerance);
+            return left.slice(0, -1).concat(right);
+        }
+        return [first, last];
+    }
+
+    // ============ LANE CONTEXT MENU ============
+
+    showLaneContextMenu(e, lane) {
+        e.preventDefault();
+        const region = this.findRegion(lane.regionId);
+        const startFrame = region ? region.startFrame : 0;
+        const endFrame = region ? region.endFrame : this.totalFrames;
+
+        // Determine selection range for shape insertion
+        const selFrames = this.selectedBreakpoints
+            .filter(s => s.laneId === lane.id)
+            .map(s => lane.keyframes[s.index]?.frame)
+            .filter(f => f !== undefined);
+        const shapeStart = selFrames.length > 0 ? Math.min(...selFrames) : startFrame;
+        const shapeEnd = selFrames.length > 0 ? Math.max(...selFrames) : endFrame;
+
+        if (typeof showContextMenu === 'function') {
+            window._laneCtxData = { lane, shapeStart, shapeEnd };
+            showContextMenu(e, [
+                { label: 'Insert: Ramp Up', action: 'shape_ramp_up' },
+                { label: 'Insert: Ramp Down', action: 'shape_ramp_down' },
+                { label: 'Insert: Sine', action: 'shape_sine' },
+                { label: 'Insert: Triangle', action: 'shape_triangle' },
+                { label: 'Insert: Saw', action: 'shape_saw' },
+                { label: 'Insert: Square', action: 'shape_square' },
+                { label: 'Insert: S-Curve', action: 'shape_s_curve' },
+                '---',
+                { label: 'Simplify', action: 'simplifyLane' },
+                { label: 'Flatten to Static', action: 'flattenLaneToStatic' },
+                '---',
+                { label: 'Delete Lane', action: 'deleteLane', danger: true },
+            ]);
+        }
+    }
+
+    addAutomationLane(regionId, effectIndex, paramName) {
+        const color = this.laneColors[this.automationLanes.length % this.laneColors.length];
+        const lane = new AutomationLaneUI(this.nextLaneId++, regionId, effectIndex, paramName, color);
+        this.automationLanes.push(lane);
+        this.draw();
+        return lane;
+    }
+
+    removeAutomationLane(laneId) {
+        this.automationLanes = this.automationLanes.filter(l => l.id !== laneId);
+        if (this.selectedLaneId === laneId) this.selectedLaneId = null;
+        this.draw();
+    }
+
+    toggleAutomationVisibility() {
+        this.automationVisible = !this.automationVisible;
+        this.draw();
+    }
+
+    getAutomationSessionData() {
+        // Convert UI lanes to {lanes: [{effect_idx, param, keyframes: [[frame, value]], curve}, ...]}
+        return {
+            lanes: this.automationLanes.filter(l => l.keyframes.length > 0).map(l => ({
+                effect_idx: l.effectIndex,
+                param: l.paramName,
+                keyframes: l.keyframes.map(kf => [kf.frame, kf.value]),
+                curve: l.keyframes[0]?.curve || 'linear',
+            }))
+        };
     }
 
     // ============ ZOOM / SCROLL ============
@@ -703,7 +1268,7 @@ class TimelineEditor {
     // ============ HIT TESTING ============
 
     hitTest(canvasX, canvasY) {
-        // Returns: { type: 'ruler'|'track-header'|'region'|'empty', track?, region?, edge? }
+        // Returns: { type: 'ruler'|'track-header'|'region'|'lane-header'|'lane-body'|'breakpoint'|'lane-line'|'empty', ...}
 
         // Ruler area
         if (canvasY < this.rulerHeight) {
@@ -729,8 +1294,65 @@ class TimelineEditor {
                     return { type: 'track-header', track };
                 }
                 y += track.height;
+
+                // Check automation lane headers
+                if (this.automationVisible) {
+                    const trackLanes = this.automationLanes.filter(l => {
+                        const t = this.findTrackForRegion(l.regionId);
+                        return t && t.id === track.id && l.visible;
+                    });
+                    for (const lane of trackLanes) {
+                        if (canvasY >= y && canvasY < y + lane.height) {
+                            return { type: 'lane-header', lane };
+                        }
+                        y += lane.height;
+                    }
+                }
             }
             return { type: 'empty' };
+        }
+
+        // Timeline area — check automation lanes first (they overlay tracks)
+        if (this.automationVisible) {
+            let y = this.rulerHeight;
+            for (const track of this.tracks) {
+                y += track.height;
+
+                const trackLanes = this.automationLanes.filter(l => {
+                    const t = this.findTrackForRegion(l.regionId);
+                    return t && t.id === track.id && l.visible;
+                });
+
+                for (const lane of trackLanes) {
+                    if (canvasY >= y && canvasY < y + lane.height) {
+                        // Check for breakpoint click (within 6px)
+                        for (let i = 0; i < lane.keyframes.length; i++) {
+                            const kf = lane.keyframes[i];
+                            const kfX = this.frameToX(kf.frame);
+                            const kfY = y + lane.height - kf.value * lane.height;
+                            const dist = Math.sqrt((canvasX - kfX) ** 2 + (canvasY - kfY) ** 2);
+                            if (dist <= 6) {
+                                return { type: 'breakpoint', lane, index: i, laneY: y };
+                            }
+                        }
+
+                        // Check if clicking on the interpolated line (within 4px)
+                        if (lane.keyframes.length > 0) {
+                            const frame = this.xToFrame(canvasX);
+                            const val = this.getLaneValue(lane, frame);
+                            if (val !== null) {
+                                const lineY = y + lane.height - val * lane.height;
+                                if (Math.abs(canvasY - lineY) <= 4) {
+                                    return { type: 'lane-line', lane, frame, value: val, laneY: y };
+                                }
+                            }
+                        }
+
+                        return { type: 'lane-body', lane, laneY: y };
+                    }
+                    y += lane.height;
+                }
+            }
         }
 
         // Timeline area — check regions
@@ -752,6 +1374,15 @@ class TimelineEditor {
                 return { type: 'track-body', track };
             }
             y += track.height;
+
+            // Skip automation lanes in Y calculation
+            if (this.automationVisible) {
+                const trackLanes = this.automationLanes.filter(l => {
+                    const t = this.findTrackForRegion(l.regionId);
+                    return t && t.id === track.id && l.visible;
+                });
+                y += trackLanes.length * 60;
+            }
         }
 
         return { type: 'empty' };
@@ -782,6 +1413,42 @@ class TimelineEditor {
         document.addEventListener('mousemove', e => {
             if (this.isDragging) this.onMouseMove(e);
         });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', e => {
+            const isTyping = document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT';
+            if (isTyping) return;
+
+            if ((e.key === 'a' || e.key === 'A') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                this.toggleAutomationVisibility();
+            }
+            // Cmd/Ctrl+C = copy breakpoints
+            if ((e.metaKey || e.ctrlKey) && e.key === 'c' && this.selectedBreakpoints.length > 0) {
+                e.preventDefault();
+                this.copySelectedBreakpoints();
+            }
+            // Cmd/Ctrl+V = paste breakpoints
+            if ((e.metaKey || e.ctrlKey) && e.key === 'v' && this.clipboard?.length > 0) {
+                e.preventDefault();
+                this.pasteBreakpoints();
+            }
+            // B = toggle draw mode
+            if (e.key === 'b' || e.key === 'B') {
+                this.toggleDrawMode();
+            }
+            // Delete/Backspace = delete selected breakpoints
+            if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedBreakpoints.length > 0) {
+                e.preventDefault();
+                // Delete in reverse order to preserve indices
+                const sorted = [...this.selectedBreakpoints].sort((a, b) => b.index - a.index);
+                for (const sel of sorted) {
+                    const lane = this.automationLanes.find(l => l.id === sel.laneId);
+                    if (lane) lane.keyframes.splice(sel.index, 1);
+                }
+                this.selectedBreakpoints = [];
+                this.draw();
+            }
+        });
     }
 
     getCanvasPos(e) {
@@ -792,6 +1459,46 @@ class TimelineEditor {
     onMouseDown(e) {
         const pos = this.getCanvasPos(e);
         const hit = this.hitTest(pos.x, pos.y);
+
+        // Right-click on region → show context menu (handled in app.js)
+        if (e.button === 2 && hit.type === 'region') {
+            this.selectedRegionId = hit.region.id;
+            this.selectedTrackId = hit.track.id;
+            this.draw();
+            if (typeof onRegionRightClick === 'function') {
+                onRegionRightClick(e, hit.region);
+            }
+            return;
+        }
+
+        // Right-click on breakpoint → delete it
+        if (e.button === 2 && hit.type === 'breakpoint') {
+            hit.lane.keyframes.splice(hit.index, 1);
+            this.draw();
+            return;
+        }
+
+        // Right-click on lane → show shapes/simplify context menu
+        if (e.button === 2 && (hit.type === 'lane-body' || hit.type === 'lane-header' || hit.type === 'lane-line')) {
+            this.showLaneContextMenu(e, hit.lane);
+            return;
+        }
+
+        // Draw mode: click-drag in lane creates step automation
+        if (this.drawMode && hit.type === 'lane-body') {
+            this.isDragging = true;
+            this.dragType = 'draw';
+            this.dragBreakpointLane = hit.lane;
+            this.dragLaneY = hit.laneY;
+            this.dragStartX = pos.x;
+            // Add first point
+            const frame = this.xToFrame(pos.x);
+            const value = Math.max(0, Math.min(1, (hit.laneY + hit.lane.height - pos.y) / hit.lane.height));
+            hit.lane.keyframes.push({ frame, value, curve: 'step' });
+            hit.lane.keyframes.sort((a, b) => a.frame - b.frame);
+            this.draw();
+            return;
+        }
 
         if (hit.type === 'ruler') {
             // Click ruler → set playhead
@@ -814,6 +1521,66 @@ class TimelineEditor {
 
         if (hit.type === 'track-header') {
             this.selectedTrackId = hit.track.id;
+            this.draw();
+            return;
+        }
+
+        if (hit.type === 'lane-header') {
+            this.selectedLaneId = hit.lane.id;
+            this.draw();
+            return;
+        }
+
+        if (hit.type === 'breakpoint') {
+            // Start dragging breakpoint
+            this.selectedLaneId = hit.lane.id;
+            if (!e.shiftKey) {
+                this.selectedBreakpoints = [{ laneId: hit.lane.id, index: hit.index }];
+            } else {
+                // Shift+click to add to selection
+                const exists = this.selectedBreakpoints.some(
+                    s => s.laneId === hit.lane.id && s.index === hit.index
+                );
+                if (!exists) {
+                    this.selectedBreakpoints.push({ laneId: hit.lane.id, index: hit.index });
+                }
+            }
+            this.isDragging = true;
+            this.dragType = 'breakpoint';
+            this.dragBreakpointLane = hit.lane;
+            this.dragBreakpointIndex = hit.index;
+            this.dragStartX = pos.x;
+            this.dragStartY = pos.y;
+            this.dragOrigBreakpoint = { ...hit.lane.keyframes[hit.index] };
+            this.dragLaneY = hit.laneY;
+            this.draw();
+            return;
+        }
+
+        if (hit.type === 'lane-line') {
+            // Click on interpolated line → insert new breakpoint
+            const newKf = { frame: hit.frame, value: hit.value, curve: 'linear' };
+            hit.lane.keyframes.push(newKf);
+            hit.lane.keyframes.sort((a, b) => a.frame - b.frame);
+            const newIndex = hit.lane.keyframes.indexOf(newKf);
+            this.selectedLaneId = hit.lane.id;
+            this.selectedBreakpoints = [{ laneId: hit.lane.id, index: newIndex }];
+            this.isDragging = true;
+            this.dragType = 'breakpoint';
+            this.dragBreakpointLane = hit.lane;
+            this.dragBreakpointIndex = newIndex;
+            this.dragStartX = pos.x;
+            this.dragStartY = pos.y;
+            this.dragOrigBreakpoint = { ...newKf };
+            this.dragLaneY = hit.laneY;
+            this.draw();
+            return;
+        }
+
+        if (hit.type === 'lane-body') {
+            // Double-click handled separately; single click selects lane
+            this.selectedLaneId = hit.lane.id;
+            this.selectedBreakpoints = [];
             this.draw();
             return;
         }
@@ -873,6 +1640,36 @@ class TimelineEditor {
             if (this.dragType === 'playhead') {
                 const frame = this.xToFrame(pos.x);
                 this.setPlayhead(Math.max(0, Math.min(frame, this.totalFrames - 1)));
+            } else if (this.dragType === 'breakpoint') {
+                // Drag breakpoint: X maps to frame, Y maps to 0-1 value
+                const lane = this.dragBreakpointLane;
+                const kf = lane.keyframes[this.dragBreakpointIndex];
+                if (!kf) return;
+
+                // Frame (with snap to playhead if close)
+                let newFrame = this.xToFrame(pos.x);
+                const playheadDist = Math.abs(pos.x - this.frameToX(this.playhead));
+                if (playheadDist < 8) {
+                    newFrame = this.playhead; // Snap to playhead
+                }
+                newFrame = Math.max(0, Math.min(this.totalFrames - 1, newFrame));
+                kf.frame = newFrame;
+
+                // Value (inverted Y, with shift for fine control)
+                const deltaY = pos.y - this.dragStartY;
+                const precision = e.shiftKey ? 4 : 1; // Shift = 4x finer
+                const valueDelta = (-deltaY / (lane.height * precision));
+                let newValue = this.dragOrigBreakpoint.value + valueDelta;
+                newValue = Math.max(0, Math.min(1, newValue));
+                kf.value = newValue;
+
+                // Re-sort keyframes by frame
+                lane.keyframes.sort((a, b) => a.frame - b.frame);
+                // Update index in selection
+                this.dragBreakpointIndex = lane.keyframes.indexOf(kf);
+                this.selectedBreakpoints = [{ laneId: lane.id, index: this.dragBreakpointIndex }];
+
+                this.draw();
             } else if (this.dragType === 'region-move') {
                 const frameDelta = this.xToFrame(pos.x) - this.dragStartFrame;
                 const newStart = Math.max(0, this.dragOrigStart + frameDelta);
@@ -885,6 +1682,14 @@ class TimelineEditor {
                 const frame = Math.max(0, this.xToFrame(pos.x));
                 this.dragTarget.startFrame = Math.min(frame, this.dragTarget.endFrame - 1);
                 this.draw();
+            } else if (this.dragType === 'draw') {
+                // Draw mode: add points as mouse moves
+                this.drawModeStroke(
+                    this.dragBreakpointLane,
+                    this.dragLaneY,
+                    this.dragStartX, pos.x, pos.y
+                );
+                this.dragStartX = pos.x;
             } else if (this.dragType === 'region-resize-r') {
                 const frame = Math.min(this.totalFrames - 1, this.xToFrame(pos.x));
                 this.dragTarget.endFrame = Math.max(frame, this.dragTarget.startFrame + 1);
@@ -895,7 +1700,13 @@ class TimelineEditor {
 
         // Hover: update cursor based on hit
         const hit = this.hitTest(pos.x, pos.y);
-        if (hit.type === 'region' && hit.edge) {
+        if (hit.type === 'breakpoint') {
+            this.canvas.style.cursor = 'pointer';
+        } else if (hit.type === 'lane-line') {
+            this.canvas.style.cursor = 'cell';
+        } else if (hit.type === 'lane-body' || hit.type === 'lane-header') {
+            this.canvas.style.cursor = 'default';
+        } else if (hit.type === 'region' && hit.edge) {
             this.canvas.style.cursor = 'col-resize';
         } else if (hit.type === 'region') {
             this.canvas.style.cursor = 'grab';
@@ -946,6 +1757,21 @@ class TimelineEditor {
         const pos = this.getCanvasPos(e);
         const hit = this.hitTest(pos.x, pos.y);
 
+        if (hit.type === 'lane-body') {
+            // Double-click empty lane area → insert breakpoint
+            const frame = this.xToFrame(pos.x);
+            const valueY = (hit.laneY + hit.lane.height - pos.y) / hit.lane.height;
+            const value = Math.max(0, Math.min(1, valueY));
+            const newKf = { frame, value, curve: 'linear' };
+            hit.lane.keyframes.push(newKf);
+            hit.lane.keyframes.sort((a, b) => a.frame - b.frame);
+            const newIndex = hit.lane.keyframes.indexOf(newKf);
+            this.selectedLaneId = hit.lane.id;
+            this.selectedBreakpoints = [{ laneId: hit.lane.id, index: newIndex }];
+            this.draw();
+            return;
+        }
+
         if (hit.type === 'track-body') {
             // Double-click empty track → create a small region at click point
             const frame = this.xToFrame(pos.x);
@@ -985,6 +1811,15 @@ class TimelineEditor {
                     mask: r.mask,
                 })),
             })),
+            automationLanes: this.automationLanes.map(l => ({
+                id: l.id,
+                regionId: l.regionId,
+                effectIndex: l.effectIndex,
+                paramName: l.paramName,
+                color: l.color,
+                keyframes: l.keyframes,
+                visible: l.visible,
+            })),
             playhead: this.playhead,
             inPoint: this.inPoint,
             outPoint: this.outPoint,
@@ -1011,6 +1846,14 @@ class TimelineEditor {
             return track;
         });
 
+        // Restore automation lanes
+        this.automationLanes = (data.automationLanes || []).map(l => {
+            const lane = new AutomationLaneUI(l.id, l.regionId, l.effectIndex, l.paramName, l.color);
+            lane.keyframes = l.keyframes || [];
+            lane.visible = l.visible ?? true;
+            return lane;
+        });
+
         // Update ID counters
         this.nextTrackId = Math.max(0, ...this.tracks.map(t => t.id)) + 1;
         let maxRegionId = -1;
@@ -1020,6 +1863,9 @@ class TimelineEditor {
             }
         }
         this.nextRegionId = maxRegionId + 1;
+        this.nextLaneId = this.automationLanes.length > 0
+            ? Math.max(...this.automationLanes.map(l => l.id)) + 1
+            : 0;
 
         this.playhead = data.playhead || 0;
         this.inPoint = data.inPoint ?? null;

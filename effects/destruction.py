@@ -355,8 +355,8 @@ def datamosh(
 
 def byte_corrupt(
     frame: np.ndarray,
-    amount: int = 20,
-    jpeg_quality: int = 75,
+    amount: int = 100,
+    jpeg_quality: int = 40,
     seed: int = 42,
     frame_index: int = 0,
     total_frames: int = 1,
@@ -368,7 +368,7 @@ def byte_corrupt(
 
     Args:
         frame: (H, W, 3) uint8 RGB array.
-        amount: Number of bytes to corrupt (1-500).
+        amount: Number of bytes to corrupt (1-2000).
         jpeg_quality: JPEG quality for intermediate encoding (lower = more artifacts).
         seed: Random seed.
 
@@ -377,7 +377,7 @@ def byte_corrupt(
     """
     from PIL import Image
 
-    amount = max(1, min(500, int(amount)))
+    amount = max(1, min(2000, int(amount)))
     jpeg_quality = max(1, min(95, int(jpeg_quality)))
     rng = np.random.RandomState(seed + frame_index)
 
@@ -796,7 +796,7 @@ def flow_distort(
     if frame_index == 0 or st["prev"] is None or st["prev"].shape != frame.shape:
         # On first frame: synthesize a fake "previous" by shifting the current frame
         # This allows preview mode to show the effect working
-        shift_x, shift_y = 5, 3
+        shift_x, shift_y = 20, 12
         M = np.float32([[1, 0, shift_x], [0, 1, shift_y]])
         prev_synth = cv2.warpAffine(frame, M, (w, h), borderMode=cv2.BORDER_WRAP)
         st["prev"] = prev_synth

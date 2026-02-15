@@ -58,6 +58,44 @@ def _sine(a, b, t):
     return a + (b - a) * (1.0 - math.cos(t * math.pi)) / 2.0
 
 
+def _bezier(a, b, t, cp1=None, cp2=None):
+    """Cubic bezier interpolation with optional control points.
+
+    cp1, cp2 are (x, y) tuples in normalized 0-1 space.
+    If not provided, defaults to ease_in_out-like curve.
+    """
+    if cp1 is None:
+        cp1 = (0.42, 0.0)
+    if cp2 is None:
+        cp2 = (0.58, 1.0)
+
+    # Solve cubic bezier: P(t) = (1-t)^3*P0 + 3(1-t)^2*t*P1 + 3(1-t)*t^2*P2 + t^3*P3
+    # For value axis only (P0.y=0, P3.y=1, map to a→b)
+    # First solve for the bezier parameter u that gives us x=t
+    # Using Newton's method to find u where B_x(u) = t
+    u = t  # initial guess
+    for _ in range(8):
+        # Bezier x(u) with P0=(0,0), P1=cp1, P2=cp2, P3=(1,1)
+        x_u = (3.0 * (1 - u) ** 2 * u * cp1[0] +
+               3.0 * (1 - u) * u ** 2 * cp2[0] +
+               u ** 3)
+        # Derivative of x with respect to u
+        dx = (3.0 * (1 - u) ** 2 * cp1[0] +
+              6.0 * (1 - u) * u * (cp2[0] - cp1[0]) +
+              3.0 * u ** 2 * (1 - cp2[0]))
+        if abs(dx) < 1e-10:
+            break
+        u = u - (x_u - t) / dx
+        u = max(0.0, min(1.0, u))
+
+    # Now evaluate bezier y(u)
+    y = (3.0 * (1 - u) ** 2 * u * cp1[1] +
+         3.0 * (1 - u) * u ** 2 * cp2[1] +
+         u ** 3)
+
+    return a + (b - a) * y
+
+
 CURVES = {
     "linear": _lerp,
     "ease_in": _ease_in,
@@ -65,6 +103,7 @@ CURVES = {
     "ease_in_out": _ease_in_out,
     "step": _step,
     "sine": _sine,
+    "bezier": _bezier,
 }
 
 
@@ -73,7 +112,9 @@ CURVES = {
 class AutomationLane:
     """A single parameter's automation: keyframes + interpolation curve.
 
-    Keyframes: [(frame_index, value), ...]
+    Keyframes: [(frame_index, value), ...] or extended format
+        [(frame, value, curve_type, cp1, cp2), ...]
+    where curve_type/cp1/cp2 are optional per-segment overrides.
     Frames are absolute (0 = first frame of video).
     """
 
@@ -81,18 +122,48 @@ class AutomationLane:
         self.effect_idx = effect_idx
         self.param_name = param_name
         self.keyframes = sorted(keyframes or [], key=lambda kf: kf[0])
-        self.curve = curve
+        self.curve = curve  # default curve for segments without override
 
-    def add_keyframe(self, frame, value):
-        """Add or update a keyframe at the given frame."""
+    def add_keyframe(self, frame, value, curve=None, cp1=None, cp2=None):
+        """Add or update a keyframe at the given frame.
+
+        Args:
+            frame: Frame index.
+            value: Parameter value (0-1 normalized for UI lanes).
+            curve: Optional per-segment curve override (applied to segment AFTER this kf).
+            cp1, cp2: Optional bezier control points [(x,y)] for 'bezier' curve.
+        """
         # Remove existing keyframe at this frame
         self.keyframes = [kf for kf in self.keyframes if kf[0] != frame]
-        self.keyframes.append((frame, value))
+        if curve or cp1 or cp2:
+            self.keyframes.append((frame, value, curve, cp1, cp2))
+        else:
+            self.keyframes.append((frame, value))
         self.keyframes.sort(key=lambda kf: kf[0])
 
     def remove_keyframe(self, frame):
         """Remove keyframe at exact frame."""
         self.keyframes = [kf for kf in self.keyframes if kf[0] != frame]
+
+    @staticmethod
+    def _kf_frame(kf):
+        return kf[0]
+
+    @staticmethod
+    def _kf_value(kf):
+        return kf[1]
+
+    @staticmethod
+    def _kf_curve(kf):
+        return kf[2] if len(kf) > 2 and kf[2] else None
+
+    @staticmethod
+    def _kf_cp1(kf):
+        return kf[3] if len(kf) > 3 and kf[3] else None
+
+    @staticmethod
+    def _kf_cp2(kf):
+        return kf[4] if len(kf) > 4 and kf[4] else None
 
     def get_value(self, frame):
         """Get interpolated value at a frame. Returns None if no keyframes."""
@@ -100,40 +171,74 @@ class AutomationLane:
             return None
 
         # Before first keyframe: hold first value
-        if frame <= self.keyframes[0][0]:
-            return self.keyframes[0][1]
+        if frame <= self._kf_frame(self.keyframes[0]):
+            return self._kf_value(self.keyframes[0])
 
         # After last keyframe: hold last value
-        if frame >= self.keyframes[-1][0]:
-            return self.keyframes[-1][1]
+        if frame >= self._kf_frame(self.keyframes[-1]):
+            return self._kf_value(self.keyframes[-1])
 
         # Find surrounding keyframes
         for i in range(len(self.keyframes) - 1):
-            f0, v0 = self.keyframes[i]
-            f1, v1 = self.keyframes[i + 1]
+            kf0 = self.keyframes[i]
+            kf1 = self.keyframes[i + 1]
+            f0, v0 = self._kf_frame(kf0), self._kf_value(kf0)
+            f1, v1 = self._kf_frame(kf1), self._kf_value(kf1)
+
             if f0 <= frame <= f1:
                 if f1 == f0:
                     return v0
                 t = (frame - f0) / (f1 - f0)
-                interp = CURVES.get(self.curve, _lerp)
+
+                # Per-segment curve override (stored on the starting keyframe)
+                seg_curve = self._kf_curve(kf0) or self.curve
+                interp = CURVES.get(seg_curve, _lerp)
+
+                if seg_curve == "bezier":
+                    cp1 = self._kf_cp1(kf0)
+                    cp2 = self._kf_cp2(kf0)
+                    return _bezier(v0, v1, t, cp1, cp2)
                 return interp(v0, v1, t)
 
-        return self.keyframes[-1][1]
+        return self._kf_value(self.keyframes[-1])
 
     def to_dict(self):
+        # Serialize keyframes with optional extended data
+        kfs_out = []
+        for kf in self.keyframes:
+            if len(kf) > 2 and (kf[2] or kf[3] or kf[4]):
+                kfs_out.append({
+                    "frame": kf[0],
+                    "value": kf[1],
+                    "curve": kf[2],
+                    "cp1": kf[3],
+                    "cp2": kf[4],
+                })
+            else:
+                kfs_out.append([kf[0], kf[1]])
         return {
             "effect_idx": self.effect_idx,
             "param": self.param_name,
-            "keyframes": self.keyframes,
+            "keyframes": kfs_out,
             "curve": self.curve,
         }
 
     @classmethod
     def from_dict(cls, d):
+        # Deserialize keyframes (support both [frame, val] and {frame, value, curve, cp1, cp2})
+        keyframes = []
+        for kf in d.get("keyframes", []):
+            if isinstance(kf, dict):
+                keyframes.append((
+                    kf["frame"], kf["value"],
+                    kf.get("curve"), kf.get("cp1"), kf.get("cp2"),
+                ))
+            else:
+                keyframes.append(tuple(kf))
         return cls(
             effect_idx=d["effect_idx"],
             param_name=d["param"],
-            keyframes=[tuple(kf) for kf in d["keyframes"]],
+            keyframes=keyframes,
             curve=d.get("curve", "linear"),
         )
 
@@ -206,6 +311,27 @@ class AutomationSession:
         for lane_data in d.get("lanes", []):
             session.lanes.append(AutomationLane.from_dict(lane_data))
         return session
+
+    def bake_lane(self, effect_idx, param_name, start_frame, end_frame):
+        """Convert a lane's automation to per-frame static values.
+
+        Returns list of (frame, value) tuples — one per frame.
+        Useful for Freeze/Flatten: bake automation into static params.
+        """
+        lane = self.get_lane(effect_idx, param_name)
+        if not lane:
+            return []
+        return [(f, lane.get_value(f)) for f in range(start_frame, end_frame + 1)]
+
+    def bake_all(self, effects_list, start_frame, end_frame):
+        """Bake all automation into per-frame effect lists.
+
+        Returns: {frame: effects_list_with_overrides, ...}
+        """
+        result = {}
+        for f in range(start_frame, end_frame + 1):
+            result[f] = self.apply_to_chain(effects_list, f)
+        return result
 
     def save(self, path):
         """Save automation to JSON file."""

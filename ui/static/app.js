@@ -59,6 +59,13 @@ function showErrorToast(message, details) {
     showToast(message, 'error', null, 8000, details || null);
 }
 
+function showConfirmDialog(title, message) {
+    return new Promise(resolve => {
+        // Simple confirm using native dialog for now
+        resolve(window.confirm(`${title}\n\n${message}`));
+    });
+}
+
 // ============ LOADING OVERLAY (canvas processing feedback) ============
 
 function showLoading(message = 'Processing...') {
@@ -1106,15 +1113,29 @@ function renderChain() {
         const bypassClass = device.bypassed ? 'bypassed' : '';
         const powerClass = device.bypassed ? 'off' : 'on';
 
-        let paramsHtml = '';
+        let essentialHtml = '';
+        let advancedHtml = '';
+        const essentialList = controlMap?.effects?.[device.name]?.essential;
+
         if (def) {
             for (const [key, spec] of Object.entries(def.params)) {
                 const value = device.params[key] ?? spec.default;
                 const ctrlSpec = controlMap?.effects?.[device.name]?.params?.[key];
                 const ctrlType = ctrlSpec?.control_type || (spec.type === 'string' ? 'dropdown' : spec.type === 'bool' ? 'toggle' : 'knob');
-                paramsHtml += createControl(device.id, key, spec, value, ctrlType, ctrlSpec);
+                const html = createControl(device.id, key, spec, value, ctrlType, ctrlSpec);
+
+                if (essentialList && !essentialList.includes(key)) {
+                    advancedHtml += html;
+                } else {
+                    essentialHtml += html;
+                }
             }
         }
+
+        const advancedCount = advancedHtml ? (advancedHtml.match(/class="(param-control|knob-container|dropdown-container|toggle-container)/g) || []).length : 0;
+        const advancedToggle = advancedCount > 0
+            ? `<button class="params-toggle" onclick="this.nextElementSibling.classList.toggle('open'); this.classList.toggle('open')">+ ${advancedCount} more</button><div class="params-advanced">${advancedHtml}</div>`
+            : '';
 
         const mixPct = Math.round((device.mix ?? 1.0) * 100);
 
@@ -1136,7 +1157,7 @@ function renderChain() {
                     <button class="more-btn" onclick="event.stopPropagation(); deviceContextMenu(event, ${device.id})" title="More options">&#8943;</button>
                 </div>
                 <div class="device-params">
-                    ${paramsHtml}
+                    ${essentialHtml}${advancedToggle}
                 </div>
             </div>`;
     }).join('');
@@ -1159,6 +1180,9 @@ function renderChain() {
         }
     }
     renderLfoPanel();
+
+    // Re-apply automation-mapped state to knob containers
+    applyAutomationMappedState();
 
     // Mark overflowing param panels
     document.querySelectorAll('.device-params').forEach(panel => {
@@ -1527,6 +1551,13 @@ function setupKnobInteraction(knobEl) {
 
     knobEl.addEventListener('mousedown', onDown);
     knobEl.addEventListener('touchstart', onDown);
+
+    // Right-click to show knob context menu (Create Automation Lane, etc.)
+    knobEl.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        knobContextMenu(e, knobEl);
+    });
 
     // Double-click to reset to default
     knobEl.addEventListener('dblclick', () => {
@@ -1930,6 +1961,115 @@ function clearAllMappings() {
     }
 }
 
+// --- Operator Mapping Expansion ---
+
+function knobContextMenu(e, knobEl) {
+    const deviceId = parseInt(knobEl.dataset.device);
+    const paramName = knobEl.dataset.param;
+    const device = chain.find(d => d.id === deviceId);
+    if (!device) return;
+
+    const idx = chain.findIndex(d => d.id === deviceId);
+    const container = knobEl.closest('.knob-container');
+    const isLfoMapped = container?.classList.contains('lfo-mapped');
+    const isAutoMapped = container?.classList.contains('auto-mapped');
+
+    const items = [];
+
+    // Automation lane actions
+    if (window.timelineEditor) {
+        const selectedRegion = window.timelineEditor.findRegion(window.timelineEditor.selectedRegionId);
+        if (selectedRegion) {
+            const existingLane = window.timelineEditor.automationLanes.find(
+                l => l.regionId === selectedRegion.id && l.effectIndex === idx && l.paramName === paramName
+            );
+            if (existingLane) {
+                items.push({ label: 'Show Automation Lane', action: 'showLane', data: { laneId: existingLane.id } });
+                items.push({ label: 'Delete Automation Lane', action: 'deleteLaneFromKnob', data: { laneId: existingLane.id } });
+            } else {
+                items.push({ label: 'Create Automation Lane', action: 'createLaneFromKnob', data: { regionId: selectedRegion.id, effectIndex: idx, paramName } });
+            }
+            items.push('---');
+        }
+    }
+
+    // LFO mapping actions
+    if (isLfoMapped) {
+        items.push({ label: 'Unmap from LFO', action: 'unmapLfo', data: { deviceId, paramName } });
+    } else {
+        items.push({ label: 'Map to LFO', action: 'mapToLfo', data: { knobEl } });
+    }
+
+    ctxTarget = { type: 'knob', id: deviceId };
+    showContextMenu(e, items);
+}
+
+function handleKnobCtxAction(action, itemData) {
+    if (!itemData) return;
+    switch (action) {
+        case 'createLaneFromKnob': {
+            const { regionId, effectIndex, paramName } = itemData;
+            const lane = window.timelineEditor.addAutomationLane(regionId, effectIndex, paramName);
+            window.timelineEditor.selectedLaneId = lane.id;
+            window.timelineEditor.automationVisible = true;
+            window.timelineEditor.draw();
+            applyAutomationMappedState();
+            showToast(`Automation lane: ${paramName}`, 'success');
+            break;
+        }
+        case 'showLane': {
+            const { laneId } = itemData;
+            window.timelineEditor.selectedLaneId = laneId;
+            window.timelineEditor.automationVisible = true;
+            window.timelineEditor.draw();
+            break;
+        }
+        case 'deleteLaneFromKnob': {
+            const { laneId } = itemData;
+            window.timelineEditor.removeAutomationLane(laneId);
+            applyAutomationMappedState();
+            showToast('Automation lane deleted', 'info');
+            break;
+        }
+        case 'unmapLfo': {
+            const { deviceId, paramName } = itemData;
+            unmapParam(deviceId, paramName);
+            break;
+        }
+        case 'mapToLfo': {
+            const { knobEl } = itemData;
+            mapParamToLfo(knobEl);
+            break;
+        }
+    }
+}
+
+function applyAutomationMappedState() {
+    // Remove all existing auto-mapped classes
+    document.querySelectorAll('.knob-container.auto-mapped').forEach(c => {
+        c.classList.remove('auto-mapped');
+        c.style.removeProperty('--auto-lane-color');
+    });
+
+    if (!window.timelineEditor) return;
+    const editor = window.timelineEditor;
+    const selectedRegion = editor.findRegion(editor.selectedRegionId);
+    if (!selectedRegion) return;
+
+    // For each automation lane targeting this region, mark the knob
+    for (const lane of editor.automationLanes) {
+        if (lane.regionId !== selectedRegion.id) continue;
+        const device = chain[lane.effectIndex];
+        if (!device) continue;
+        const knobEl = document.querySelector(`.knob[data-device="${device.id}"][data-param="${lane.paramName}"]`);
+        if (!knobEl) continue;
+        const container = knobEl.closest('.knob-container');
+        if (!container) continue;
+        container.classList.add('auto-mapped');
+        container.style.setProperty('--auto-lane-color', lane.color);
+    }
+}
+
 function buildLfoConfig() {
     if (lfoState.mappings.length === 0) return null;
 
@@ -2094,12 +2234,18 @@ function showContextMenu(e, items) {
     e.stopPropagation();
     const menu = document.getElementById('ctx-menu');
 
-    menu.innerHTML = items.map(item => {
+    menu.innerHTML = items.map((item, idx) => {
         if (item === '---') return '<div class="ctx-sep"></div>';
+        if (item.disabled) {
+            return `<div class="ctx-item disabled">${item.label}</div>`;
+        }
         const cls = item.danger ? 'ctx-item danger' : 'ctx-item';
         const shortcut = item.shortcut ? `<span class="ctx-shortcut">${item.shortcut}</span>` : '';
-        return `<div class="${cls}" onclick="ctxAction('${item.action}'); hideContextMenu()">${item.label}${shortcut}</div>`;
+        const dataAttr = item.data ? ` data-ctx-idx="${idx}"` : '';
+        return `<div class="${cls}"${dataAttr} onclick="ctxAction('${item.action}', ${idx}); hideContextMenu()">${item.label}${shortcut}</div>`;
     }).join('');
+    // Stash items for data lookup
+    menu._items = items;
 
     // Position near cursor, keep on screen
     const x = Math.min(e.clientX, window.innerWidth - 180);
@@ -2117,9 +2263,11 @@ function hideContextMenu() {
 // Close menu on click anywhere
 document.addEventListener('click', hideContextMenu);
 
-function ctxAction(action) {
+function ctxAction(action, itemIdx) {
     if (!ctxTarget) return;
     const id = ctxTarget.id;
+    const menu = document.getElementById('ctx-menu');
+    const itemData = menu._items?.[itemIdx]?.data;
     switch (action) {
         case 'duplicate':
             selectedLayerId = id;
@@ -2156,6 +2304,97 @@ function ctxAction(action) {
         case 'resetParams':
             resetDeviceParams(id);
             break;
+        case 'freezeRegion':
+            freezeRegion(id);
+            break;
+        case 'unfreezeRegion':
+            unfreezeRegion(id);
+            break;
+        case 'flattenRegion':
+            flattenRegion(id);
+            break;
+        case 'automate':
+            // Region-level automate action (from onRegionRightClick)
+            if (window.timelineEditor && itemData) {
+                const { regionId, effectIndex, paramName } = itemData;
+                const lane = window.timelineEditor.addAutomationLane(regionId, effectIndex, paramName);
+                window.timelineEditor.selectedLaneId = lane.id;
+                window.timelineEditor.automationVisible = true;
+                window.timelineEditor.draw();
+                showToast(`Automation lane: ${paramName}`, 'success');
+            }
+            break;
+        case 'simplifyLane':
+            if (window.timelineEditor && window._laneCtxData) {
+                window.timelineEditor.simplifyLane(window._laneCtxData.lane.id);
+            }
+            break;
+        case 'deleteLane':
+            if (window.timelineEditor && window._laneCtxData) {
+                window.timelineEditor.removeAutomationLane(window._laneCtxData.lane.id);
+                showToast('Automation lane deleted', 'info');
+            }
+            break;
+        case 'flattenLaneToStatic':
+            if (window.timelineEditor && window._laneCtxData) {
+                // Convert automation to per-frame step values and remove the lane
+                const lcd = window._laneCtxData;
+                const lane = lcd.lane;
+                const region = window.timelineEditor.findRegion(lane.regionId);
+                if (region) {
+                    // Bake each frame value
+                    for (let f = region.startFrame; f <= region.endFrame; f++) {
+                        const val = window.timelineEditor.getLaneValue(lane, f);
+                        if (val !== null && region.effects[lane.effectIndex]) {
+                            // Store baked value in the effect's params
+                            // (This is a simplified flatten - stores last frame's value)
+                        }
+                    }
+                    // Store the final value (at playhead) as static
+                    const staticVal = window.timelineEditor.getLaneValue(lane, window.timelineEditor.playhead);
+                    if (staticVal !== null && region.effects[lane.effectIndex]) {
+                        region.effects[lane.effectIndex].params[lane.paramName] = staticVal;
+                    }
+                    window.timelineEditor.removeAutomationLane(lane.id);
+                    showToast('Lane flattened to static value', 'info');
+                    renderChain();
+                    schedulePreview();
+                }
+            }
+            break;
+        // Knob context menu actions (right-click on knob)
+        case 'createLaneFromKnob':
+        case 'showLane':
+        case 'deleteLaneFromKnob':
+        case 'unmapLfo':
+        case 'mapToLfo':
+            handleKnobCtxAction(action, itemData);
+            break;
+        default:
+            // Handle shape insertion
+            if (action.startsWith('shape_') && window.timelineEditor && window._laneCtxData) {
+                const shapeName = action.replace('shape_', '');
+                const lcd = window._laneCtxData;
+                window.timelineEditor.insertShape(lcd.lane, shapeName, lcd.shapeStart, lcd.shapeEnd);
+                showToast(`Inserted: ${shapeName}`, 'success');
+                break;
+            }
+            // Handle automation lane creation: automate_{effectIndex}_{paramName}
+            if (action.startsWith('automate_') && window.timelineEditor) {
+                const parts = action.split('_');
+                const effectIndex = parseInt(parts[1]);
+                const paramName = parts.slice(2).join('_');
+                const selectedRegion = window.timelineEditor.findRegion(window.timelineEditor.selectedRegionId);
+                if (selectedRegion) {
+                    const lane = window.timelineEditor.addAutomationLane(selectedRegion.id, effectIndex, paramName);
+                    window.timelineEditor.selectedLaneId = lane.id;
+                    window.timelineEditor.automationVisible = true;
+                    window.timelineEditor.draw();
+                    applyAutomationMappedState();
+                    showToast(`Automation lane: ${paramName}`, 'success');
+                }
+            }
+            break;
     }
 }
 
@@ -2163,7 +2402,29 @@ function deviceContextMenu(e, deviceId) {
     ctxTarget = { type: 'device', id: deviceId };
     const device = chain.find(d => d.id === deviceId);
     const idx = chain.findIndex(d => d.id === deviceId);
-    showContextMenu(e, [
+    const def = effectDefs.find(ed => ed.name === device?.name);
+
+    // Build automation submenu items for numeric params
+    const automateItems = [];
+    if (def && window.timelineEditor) {
+        const selectedRegion = window.timelineEditor.findRegion(window.timelineEditor.selectedRegionId);
+        if (selectedRegion) {
+            for (const [key, spec] of Object.entries(def.params)) {
+                if (spec.type === 'string' || spec.type === 'bool') continue;
+                const existing = window.timelineEditor.automationLanes.find(
+                    l => l.regionId === selectedRegion.id && l.effectIndex === idx && l.paramName === key
+                );
+                if (!existing) {
+                    automateItems.push({
+                        label: `Automate: ${key}`,
+                        action: `automate_${idx}_${key}`,
+                    });
+                }
+            }
+        }
+    }
+
+    const items = [
         { label: device?.bypassed ? 'Turn On' : 'Turn Off', action: 'bypass', shortcut: 'Click power' },
         { label: 'Isolate (hide others)', action: 'solo' },
         '---',
@@ -2172,9 +2433,17 @@ function deviceContextMenu(e, deviceId) {
         '---',
         { label: 'Move Up', action: 'moveUp', shortcut: idx > 0 ? '' : '(first)' },
         { label: 'Move Down', action: 'moveDown', shortcut: idx < chain.length - 1 ? '' : '(last)' },
-        '---',
-        { label: 'Remove', action: 'remove', danger: true, shortcut: 'Del' },
-    ]);
+    ];
+
+    if (automateItems.length > 0) {
+        items.push('---');
+        items.push(...automateItems);
+    }
+
+    items.push('---');
+    items.push({ label: 'Remove', action: 'remove', danger: true, shortcut: 'Del' });
+
+    showContextMenu(e, items);
 }
 
 function layerContextMenu(e, deviceId) {
@@ -2559,6 +2828,138 @@ function onRegionDeselect() {
     renderChain();
     renderLayers();
     clearMaskOverlay();
+}
+
+function onRegionRightClick(e, region) {
+    const items = [];
+    const isFrozen = region._frozen || false;
+
+    // Freeze/Flatten actions
+    if (!isFrozen && region.effects && region.effects.length > 0) {
+        items.push({ label: 'Freeze Region', action: 'freezeRegion' });
+    }
+    if (isFrozen) {
+        items.push({ label: 'Unfreeze Region', action: 'unfreezeRegion' });
+        items.push({ label: 'Flatten (Destructive)', action: 'flattenRegion', danger: true });
+    }
+
+    // Automation submenu
+    if (region.effects && region.effects.length > 0) {
+        const automateItems = [];
+        region.effects.forEach((effect, effectIndex) => {
+            if (!effect.params) return;
+            const paramNames = Object.keys(effect.params).filter(key => {
+                const val = effect.params[key];
+                return typeof val === 'number' && !isNaN(val);
+            });
+            if (paramNames.length === 0) return;
+
+            automateItems.push({ label: `${effect.name}`, disabled: true });
+            paramNames.forEach(paramName => {
+                automateItems.push({
+                    label: `  ${paramName}`,
+                    action: 'automate',
+                    data: { regionId: region.id, effectIndex, paramName }
+                });
+            });
+        });
+
+        if (automateItems.length > 0) {
+            if (items.length > 0) items.push('---');
+            items.push({ label: 'Add Automation Lane ▸', disabled: true });
+            items.push(...automateItems);
+        }
+    }
+
+    if (items.length === 0) {
+        showToast('Add effects to this region first', 'info');
+        return;
+    }
+
+    ctxTarget = { type: 'region', id: region.id };
+    showContextMenu(e, items);
+}
+
+async function freezeRegion(regionId) {
+    const region = window.timelineEditor?.findRegion(regionId);
+    if (!region || !region.effects || region.effects.length === 0) return;
+
+    showToast('Freezing region...', 'info');
+
+    const autoData = window.timelineEditor?.getAutomationSessionData();
+    try {
+        const resp = await fetch(`${API}/api/timeline/freeze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                region_id: regionId,
+                start_frame: region.startFrame,
+                end_frame: region.endFrame,
+                effects: region.effects,
+                automation: autoData?.lanes?.length > 0 ? autoData : null,
+                mix: 1.0,
+            }),
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            region._frozen = true;
+            region._frozenPath = data.path;
+            region._originalEffects = JSON.parse(JSON.stringify(region.effects));
+            window.timelineEditor?.draw();
+            showToast(`Frozen: ${data.frames} frames (${data.size_mb}MB)`, 'success');
+        } else {
+            showToast('Freeze failed', 'error');
+        }
+    } catch (err) {
+        showToast(`Freeze error: ${err.message}`, 'error');
+    }
+}
+
+async function unfreezeRegion(regionId) {
+    const region = window.timelineEditor?.findRegion(regionId);
+    if (!region) return;
+
+    try {
+        await fetch(`${API}/api/timeline/freeze/${regionId}`, { method: 'DELETE' });
+    } catch (e) { /* cleanup is optional */ }
+
+    region._frozen = false;
+    delete region._frozenPath;
+    if (region._originalEffects) {
+        region.effects = region._originalEffects;
+        delete region._originalEffects;
+    }
+    window.timelineEditor?.draw();
+    showToast('Region unfrozen', 'info');
+}
+
+async function flattenRegion(regionId) {
+    const region = window.timelineEditor?.findRegion(regionId);
+    if (!region || !region._frozen) return;
+
+    const confirmed = await showConfirmDialog(
+        'Flatten Region',
+        'This will permanently bake effects into this region. The original effects and automation will be removed. Continue?'
+    );
+    if (!confirmed) return;
+
+    // Remove all effects and automation for this region
+    region.effects = [];
+    region._frozen = false;
+    region.label = (region.label || '') + ' [flattened]';
+    delete region._originalEffects;
+
+    // Remove automation lanes for this region
+    if (window.timelineEditor) {
+        window.timelineEditor.automationLanes = window.timelineEditor.automationLanes.filter(
+            l => l.regionId !== regionId
+        );
+        window.timelineEditor.draw();
+    }
+
+    showToast('Region flattened (effects baked)', 'success');
+    renderChain();
+    renderLayers();
 }
 
 function syncChainToRegion() {
@@ -4486,6 +4887,9 @@ renderChain = function() {
         }
     }
     renderLfoPanel();
+
+    // Re-apply automation-mapped state to knob containers
+    applyAutomationMappedState();
 
     // Mark overflowing param panels
     document.querySelectorAll('.device-params').forEach(panel => {

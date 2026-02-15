@@ -52,7 +52,6 @@ def test_effect_produces_output(effect_name):
     assert result is not None, f"{effect_name}: returned None"
     assert result.shape == frame.shape, f"{effect_name}: shape mismatch {result.shape} vs {frame.shape}"
     assert result.dtype == np.uint8, f"{effect_name}: wrong dtype {result.dtype}"
-    return result
 
 
 @pytest.mark.parametrize("effect_name", PHYSICS_EFFECTS)

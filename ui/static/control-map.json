@@ -33,6 +33,7 @@
   "effects": {
     "pixelsort": {
       "category": "glitch",
+      "essential": ["threshold", "sort_by", "direction"],
       "params": {
         "threshold": {
           "control_type": "knob",
@@ -64,6 +65,7 @@
     },
     "channelshift": {
       "category": "glitch",
+      "essential": ["r_offset", "g_offset", "b_offset"],
       "params": {
         "r_offset": {
           "control_type": "xy-pad",
@@ -102,6 +104,7 @@
     },
     "displacement": {
       "category": "glitch",
+      "essential": ["block_size", "intensity"],
       "params": {
         "block_size": {
           "control_type": "knob",
@@ -138,6 +141,7 @@
     },
     "bitcrush": {
       "category": "glitch",
+      "essential": ["color_depth", "resolution_scale"],
       "params": {
         "color_depth": {
           "control_type": "knob",
@@ -163,6 +167,7 @@
     },
     "wave": {
       "category": "distortion",
+      "essential": ["amplitude", "frequency"],
       "params": {
         "amplitude": {
           "control_type": "knob",
@@ -196,6 +201,7 @@
     },
     "mirror": {
       "category": "distortion",
+      "essential": ["axis", "position"],
       "params": {
         "axis": {
           "control_type": "dropdown",
@@ -220,6 +226,7 @@
     },
     "chromatic": {
       "category": "distortion",
+      "essential": ["offset", "direction"],
       "params": {
         "offset": {
           "control_type": "knob",
@@ -243,6 +250,7 @@
     },
     "scanlines": {
       "category": "texture",
+      "essential": ["line_width", "opacity"],
       "params": {
         "line_width": {
           "control_type": "knob",
@@ -282,6 +290,7 @@
     },
     "vhs": {
       "category": "texture",
+      "essential": ["tracking", "noise_amount", "color_bleed"],
       "params": {
         "tracking": {
           "control_type": "knob",
@@ -328,6 +337,7 @@
     },
     "noise": {
       "category": "texture",
+      "essential": ["amount", "noise_type"],
       "params": {
         "amount": {
           "control_type": "knob",
@@ -362,6 +372,7 @@
     },
     "blur": {
       "category": "texture",
+      "essential": ["radius", "blur_type"],
       "params": {
         "radius": {
           "control_type": "knob",
@@ -385,6 +396,7 @@
     },
     "sharpen": {
       "category": "texture",
+      "essential": ["amount"],
       "params": {
         "amount": {
           "control_type": "knob",
@@ -400,6 +412,7 @@
     },
     "edges": {
       "category": "texture",
+      "essential": ["threshold", "mode"],
       "params": {
         "threshold": {
           "control_type": "knob",
@@ -423,6 +436,7 @@
     },
     "posterize": {
       "category": "texture",
+      "essential": ["levels"],
       "params": {
         "levels": {
           "control_type": "knob",
@@ -438,6 +452,7 @@
     },
     "hueshift": {
       "category": "color",
+      "essential": ["degrees"],
       "params": {
         "degrees": {
           "control_type": "hue-wheel",
@@ -453,6 +468,7 @@
     },
     "contrast": {
       "category": "color",
+      "essential": ["amount"],
       "params": {
         "amount": {
           "control_type": "knob",
@@ -476,6 +492,7 @@
     },
     "saturation": {
       "category": "color",
+      "essential": ["amount"],
       "params": {
         "amount": {
           "control_type": "knob",
@@ -499,6 +516,7 @@
     },
     "exposure": {
       "category": "color",
+      "essential": ["stops"],
       "params": {
         "stops": {
           "control_type": "slider",
@@ -524,6 +542,7 @@
     },
     "invert": {
       "category": "color",
+      "essential": ["channel", "amount"],
       "params": {
         "channel": {
           "control_type": "dropdown",
@@ -547,6 +566,7 @@
     },
     "temperature": {
       "category": "color",
+      "essential": ["temp"],
       "params": {
         "temp": {
           "control_type": "slider",
@@ -565,6 +585,662 @@
             "label_left": "Cool",
             "label_right": "Warm"
           }
+        }
+      }
+    },
+    "pencilsketch": {
+      "category": "distortion",
+      "essential": ["sigma_s", "sigma_r"],
+      "params": {
+        "sigma_s": {
+          "control_type": "knob",
+          "label": "Spatial Sigma",
+          "min": 10.0,
+          "max": 200.0,
+          "step": 1.0,
+          "default": 60.0,
+          "data_type": "float",
+          "advanced": false
+        },
+        "sigma_r": {
+          "control_type": "knob",
+          "label": "Range Sigma",
+          "min": 0.01,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.07,
+          "data_type": "float",
+          "advanced": false
+        },
+        "shade": {
+          "control_type": "knob",
+          "label": "Shade",
+          "min": 0.0,
+          "max": 0.2,
+          "step": 0.01,
+          "default": 0.05,
+          "data_type": "float",
+          "advanced": true
+        }
+      }
+    },
+    "smear": {
+      "category": "distortion",
+      "essential": ["direction", "decay"],
+      "params": {
+        "direction": {
+          "control_type": "dropdown",
+          "label": "Direction",
+          "options": ["horizontal", "vertical", "diagonal_left", "diagonal_right"],
+          "default": "horizontal",
+          "data_type": "string",
+          "advanced": false
+        },
+        "decay": {
+          "control_type": "knob",
+          "label": "Decay",
+          "min": 0.5,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.95,
+          "data_type": "float",
+          "advanced": false
+        },
+        "animate": {
+          "control_type": "toggle",
+          "label": "Animate",
+          "default": false,
+          "data_type": "bool",
+          "advanced": true
+        }
+      }
+    },
+    "tvstatic": {
+      "category": "texture",
+      "essential": ["intensity", "sync_drift"],
+      "params": {
+        "intensity": {
+          "control_type": "knob",
+          "label": "Intensity",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.8,
+          "data_type": "float",
+          "advanced": false
+        },
+        "sync_drift": {
+          "control_type": "knob",
+          "label": "Sync Drift",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.3,
+          "data_type": "float",
+          "advanced": false
+        },
+        "seed": {
+          "control_type": "number-input",
+          "label": "Seed",
+          "min": 0,
+          "max": 99999,
+          "step": 1,
+          "default": 42,
+          "data_type": "int",
+          "advanced": true,
+          "randomize": true
+        }
+      }
+    },
+    "contours": {
+      "category": "texture",
+      "essential": ["levels", "outline_only"],
+      "params": {
+        "levels": {
+          "control_type": "knob",
+          "label": "Levels",
+          "min": 2,
+          "max": 32,
+          "step": 1,
+          "default": 8,
+          "data_type": "int",
+          "advanced": false
+        },
+        "outline_only": {
+          "control_type": "toggle",
+          "label": "Outline Only",
+          "default": false,
+          "data_type": "bool",
+          "advanced": false
+        }
+      }
+    },
+    "asciiart": {
+      "category": "texture",
+      "essential": ["charset", "width", "color_mode"],
+      "params": {
+        "charset": {
+          "control_type": "dropdown",
+          "label": "Charset",
+          "options": ["basic", "dense", "block"],
+          "default": "basic",
+          "data_type": "string",
+          "advanced": false
+        },
+        "width": {
+          "control_type": "knob",
+          "label": "Width",
+          "min": 40,
+          "max": 160,
+          "step": 10,
+          "default": 80,
+          "data_type": "int",
+          "advanced": false
+        },
+        "color_mode": {
+          "control_type": "dropdown",
+          "label": "Color Mode",
+          "options": ["mono", "green", "amber", "original"],
+          "default": "mono",
+          "data_type": "string",
+          "advanced": false
+        },
+        "invert": {
+          "control_type": "toggle",
+          "label": "Invert",
+          "default": false,
+          "data_type": "bool",
+          "advanced": true
+        }
+      }
+    },
+    "brailleart": {
+      "category": "texture",
+      "essential": ["width", "threshold", "dither"],
+      "params": {
+        "width": {
+          "control_type": "knob",
+          "label": "Width",
+          "min": 40,
+          "max": 160,
+          "step": 10,
+          "default": 80,
+          "data_type": "int",
+          "advanced": false
+        },
+        "threshold": {
+          "control_type": "knob",
+          "label": "Threshold",
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "default": 128,
+          "data_type": "int",
+          "advanced": false
+        },
+        "dither": {
+          "control_type": "toggle",
+          "label": "Dither",
+          "default": true,
+          "data_type": "bool",
+          "advanced": false
+        },
+        "invert": {
+          "control_type": "toggle",
+          "label": "Invert",
+          "default": false,
+          "data_type": "bool",
+          "advanced": true
+        }
+      }
+    },
+    "duotone": {
+      "category": "color",
+      "essential": ["shadow_color", "highlight_color"],
+      "params": {
+        "shadow_color": {
+          "control_type": "color-picker",
+          "label": "Shadow Color",
+          "default": [0, 0, 80],
+          "data_type": "rgb",
+          "advanced": false
+        },
+        "highlight_color": {
+          "control_type": "color-picker",
+          "label": "Highlight Color",
+          "default": [255, 200, 100],
+          "data_type": "rgb",
+          "advanced": false
+        }
+      }
+    },
+    "gradient_map": {
+      "category": "color",
+      "essential": ["shadow_color", "highlight_color"],
+      "params": {
+        "shadow_color": {
+          "control_type": "color-picker",
+          "label": "Shadow Color",
+          "default": [0, 0, 80],
+          "data_type": "rgb",
+          "advanced": false
+        },
+        "highlight_color": {
+          "control_type": "color-picker",
+          "label": "Highlight Color",
+          "default": [255, 200, 100],
+          "data_type": "rgb",
+          "advanced": false
+        }
+      }
+    },
+    "levels": {
+      "category": "color",
+      "essential": ["input_black", "input_white", "gamma"],
+      "params": {
+        "input_black": {
+          "control_type": "knob",
+          "label": "Input Black",
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": false
+        },
+        "input_white": {
+          "control_type": "knob",
+          "label": "Input White",
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "default": 255,
+          "data_type": "int",
+          "advanced": false
+        },
+        "gamma": {
+          "control_type": "knob",
+          "label": "Gamma",
+          "min": 0.1,
+          "max": 5.0,
+          "step": 0.1,
+          "default": 1.0,
+          "data_type": "float",
+          "advanced": false
+        },
+        "output_black": {
+          "control_type": "knob",
+          "label": "Output Black",
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": true
+        },
+        "output_white": {
+          "control_type": "knob",
+          "label": "Output White",
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "default": 255,
+          "data_type": "int",
+          "advanced": true
+        }
+      }
+    },
+    "curves": {
+      "category": "color",
+      "essential": ["points", "channel"],
+      "params": {
+        "points": {
+          "control_type": "knob",
+          "label": "Points",
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "default": 128,
+          "data_type": "int",
+          "advanced": false
+        },
+        "channel": {
+          "control_type": "dropdown",
+          "label": "Channel",
+          "options": ["master", "red", "green", "blue"],
+          "default": "master",
+          "data_type": "string",
+          "advanced": false
+        },
+        "interpolation": {
+          "control_type": "dropdown",
+          "label": "Interpolation",
+          "options": ["cubic", "linear"],
+          "default": "cubic",
+          "data_type": "string",
+          "advanced": true
+        }
+      }
+    },
+    "hsladjust": {
+      "category": "color",
+      "essential": ["target_hue", "hue_shift", "saturation"],
+      "params": {
+        "target_hue": {
+          "control_type": "dropdown",
+          "label": "Target Hue",
+          "options": ["all", "reds", "greens", "blues", "cyans", "magentas", "yellows"],
+          "default": "all",
+          "data_type": "string",
+          "advanced": false
+        },
+        "hue_shift": {
+          "control_type": "knob",
+          "label": "Hue Shift",
+          "min": -180,
+          "max": 180,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": false
+        },
+        "saturation": {
+          "control_type": "knob",
+          "label": "Saturation",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": false
+        },
+        "lightness": {
+          "control_type": "knob",
+          "label": "Lightness",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": true
+        }
+      }
+    },
+    "colorbalance": {
+      "category": "color",
+      "essential": ["midtones_r", "midtones_g", "midtones_b"],
+      "params": {
+        "midtones_r": {
+          "control_type": "slider",
+          "label": "Midtones Red",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": false,
+          "center_detent": true,
+          "center_value": 0
+        },
+        "midtones_g": {
+          "control_type": "slider",
+          "label": "Midtones Green",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": false,
+          "center_detent": true,
+          "center_value": 0
+        },
+        "midtones_b": {
+          "control_type": "slider",
+          "label": "Midtones Blue",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": false,
+          "center_detent": true,
+          "center_value": 0
+        },
+        "shadows_r": {
+          "control_type": "slider",
+          "label": "Shadows Red",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": true
+        },
+        "highlights_r": {
+          "control_type": "slider",
+          "label": "Highlights Red",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": true
+        }
+      }
+    },
+    "kaleidoscope": {
+      "category": "distortion",
+      "essential": ["segments", "rotation"],
+      "params": {
+        "segments": {
+          "control_type": "knob",
+          "label": "Segments",
+          "min": 2,
+          "max": 16,
+          "step": 1,
+          "default": 6,
+          "data_type": "int",
+          "advanced": false
+        },
+        "rotation": {
+          "control_type": "knob",
+          "label": "Rotation",
+          "min": 0,
+          "max": 360,
+          "step": 1,
+          "default": 0,
+          "data_type": "int",
+          "advanced": false
+        }
+      }
+    },
+    "mosaic": {
+      "category": "texture",
+      "essential": ["block_size"],
+      "params": {
+        "block_size": {
+          "control_type": "knob",
+          "label": "Block Size",
+          "min": 2,
+          "max": 64,
+          "step": 1,
+          "default": 8,
+          "data_type": "int",
+          "advanced": false
+        }
+      }
+    },
+    "emboss": {
+      "category": "texture",
+      "essential": ["amount"],
+      "params": {
+        "amount": {
+          "control_type": "knob",
+          "label": "Amount",
+          "min": 0.0,
+          "max": 3.0,
+          "step": 0.1,
+          "default": 1.0,
+          "data_type": "float",
+          "advanced": false
+        },
+        "transparent_bg": {
+          "control_type": "toggle",
+          "label": "Transparent BG",
+          "default": false,
+          "data_type": "bool",
+          "advanced": true
+        }
+      }
+    },
+    "solarize": {
+      "category": "color",
+      "essential": ["threshold"],
+      "params": {
+        "threshold": {
+          "control_type": "knob",
+          "label": "Threshold",
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "default": 128,
+          "data_type": "int",
+          "advanced": false
+        },
+        "brightness": {
+          "control_type": "knob",
+          "label": "Brightness",
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.1,
+          "default": 1.0,
+          "data_type": "float",
+          "advanced": true
+        }
+      }
+    },
+    "threshold_effect": {
+      "category": "texture",
+      "essential": ["threshold"],
+      "params": {
+        "threshold": {
+          "control_type": "knob",
+          "label": "Threshold",
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "default": 128,
+          "data_type": "int",
+          "advanced": false
+        }
+      }
+    },
+    "grain": {
+      "category": "texture",
+      "essential": ["intensity", "grain_size"],
+      "params": {
+        "intensity": {
+          "control_type": "knob",
+          "label": "Intensity",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.4,
+          "data_type": "float",
+          "advanced": false
+        },
+        "grain_size": {
+          "control_type": "knob",
+          "label": "Grain Size",
+          "min": 1,
+          "max": 8,
+          "step": 1,
+          "default": 2,
+          "data_type": "int",
+          "advanced": false
+        },
+        "seed": {
+          "control_type": "number-input",
+          "label": "Seed",
+          "min": 0,
+          "max": 99999,
+          "step": 1,
+          "default": 42,
+          "data_type": "int",
+          "advanced": true,
+          "randomize": true
+        }
+      }
+    },
+    "zoom_blur": {
+      "category": "texture",
+      "essential": ["strength", "center_x", "center_y"],
+      "params": {
+        "strength": {
+          "control_type": "knob",
+          "label": "Strength",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.3,
+          "data_type": "float",
+          "advanced": false
+        },
+        "center_x": {
+          "control_type": "knob",
+          "label": "Center X",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.5,
+          "data_type": "float",
+          "advanced": false
+        },
+        "center_y": {
+          "control_type": "knob",
+          "label": "Center Y",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.5,
+          "data_type": "float",
+          "advanced": false
+        }
+      }
+    },
+    "tilt_shift": {
+      "category": "texture",
+      "essential": ["focus_center", "focus_width"],
+      "params": {
+        "focus_center": {
+          "control_type": "knob",
+          "label": "Focus Center",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.5,
+          "data_type": "float",
+          "advanced": false
+        },
+        "focus_width": {
+          "control_type": "knob",
+          "label": "Focus Width",
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01,
+          "default": 0.2,
+          "data_type": "float",
+          "advanced": false
+        },
+        "blur_amount": {
+          "control_type": "knob",
+          "label": "Blur Amount",
+          "min": 1,
+          "max": 20,
+          "step": 1,
+          "default": 10,
+          "data_type": "int",
+          "advanced": true
         }
       }
     }
