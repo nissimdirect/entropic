@@ -1366,6 +1366,17 @@ def pixel_darkenergy(
     key = f"darkenergy_{seed}"
     state = _get_state(key, h, w)
 
+    # Parse hex color strings from UI color picker
+    if isinstance(void_color, str):
+        c = void_color.strip().lstrip('#')
+        if len(c) == 6:
+            try:
+                void_color = (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
+            except ValueError:
+                void_color = (5, 0, 15)
+        else:
+            void_color = (5, 0, 15)
+
     if "expansion_factor" not in state:
         state["expansion_factor"] = 1.0
 
@@ -2176,9 +2187,19 @@ def pixel_risograph(
     if palette in _RISOGRAPH_PALETTES and _RISOGRAPH_PALETTES[palette] is not None:
         color_a, color_b = _RISOGRAPH_PALETTES[palette]
 
-    # Handle list/tuple color args
-    color_a = tuple(int(c) for c in color_a)
-    color_b = tuple(int(c) for c in color_b)
+    # Handle list/tuple/hex color args
+    def _parse_color(col, default):
+        if isinstance(col, str):
+            c = col.strip().lstrip('#')
+            if len(c) == 6:
+                try:
+                    return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
+                except ValueError:
+                    return default
+            return default
+        return tuple(int(c) for c in col)
+    color_a = _parse_color(color_a, (0, 90, 180))
+    color_b = _parse_color(color_b, (220, 50, 50))
 
     # Convert to grayscale for separation
     gray = np.mean(frame.astype(np.float32), axis=2) / 255.0

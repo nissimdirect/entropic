@@ -30,8 +30,17 @@ def scanlines(frame: np.ndarray, line_width: int = 2, opacity: float = 0.3,
     opacity = max(0.0, min(1.0, float(opacity)))
     flicker = bool(flicker)
 
-    # Normalize color to 3-element RGB — UI may send [value, 0] from 'xy' knob
-    if isinstance(color, (int, float)):
+    # Normalize color to 3-element RGB — UI may send hex string or [value, 0] from 'xy' knob
+    if isinstance(color, str):
+        c = color.strip().lstrip('#')
+        if len(c) == 6:
+            try:
+                color = (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
+            except ValueError:
+                color = (0, 0, 0)
+        else:
+            color = (0, 0, 0)
+    elif isinstance(color, (int, float)):
         color = (int(color), int(color), int(color))
     elif isinstance(color, (tuple, list)):
         if len(color) < 3:

@@ -58,12 +58,21 @@ def _clamp_rgb(color, default=(128, 128, 128)) -> tuple:
     """Normalize and clamp a color value to a valid RGB (R, G, B) tuple.
 
     Handles various input types from the UI:
+    - hex string: '#ff0000' or 'ff0000'
     - tuple/list with 3 elements: standard RGB
     - tuple/list with 2 elements: from 'xy' knob (pad with 0)
     - single number: grayscale (repeat to all channels)
     - None/invalid: returns default
     """
     if color is None:
+        return tuple(default)
+    if isinstance(color, str):
+        c = color.strip().lstrip('#')
+        if len(c) == 6:
+            try:
+                return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
+            except ValueError:
+                return tuple(default)
         return tuple(default)
     if isinstance(color, (int, float)):
         v = max(0, min(255, int(color)))

@@ -140,7 +140,19 @@ def edge_detect(frame: np.ndarray, threshold: float = 0.3,
     edges = (magnitude > threshold_scaled).astype(np.float32)
 
     if mode == "edges_only":
-        # Colored edges on black background
+        # Colored edges on black background — handle hex string from color picker
+        if isinstance(edge_color, str):
+            c = edge_color.strip().lstrip('#')
+            if len(c) == 6:
+                try:
+                    edge_color = (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
+                except ValueError:
+                    edge_color = (255, 255, 255)
+            else:
+                edge_color = (255, 255, 255)
+        elif isinstance(edge_color, (int, float)):
+            v = max(0, min(255, int(edge_color)))
+            edge_color = (v, v, v)
         r, g, b = edge_color
         r = max(0, min(255, r))
         g = max(0, min(255, g))
