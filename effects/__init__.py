@@ -188,6 +188,7 @@ EFFECTS = {
         "fn": edge_detect,
         "category": "texture",
         "params": {"threshold": 0.3, "mode": "overlay", "edge_color": (255, 255, 255)},
+        "param_ranges": {"threshold": {"min": 0.01, "max": 1.0}},
         "description": "Edge detection (overlay/neon/edges-only, colorizable edges, non-linear threshold)",
     },
     "posterize": {
@@ -214,6 +215,7 @@ EFFECTS = {
         "fn": tape_saturation,
         "category": "color",
         "params": {"drive": 1.5, "warmth": 0.3},
+        "param_ranges": {"drive": {"min": 0.5, "max": 5.0}, "warmth": {"min": 0.0, "max": 1.0}},
         "description": "Analog tape saturation curve (tanh soft-clip + warmth)",
     },
     "cyanotype": {
@@ -232,12 +234,14 @@ EFFECTS = {
         "fn": chroma_key,
         "category": "color",
         "params": {"hue": 120.0, "tolerance": 30.0, "softness": 10.0, "replace_color": "black"},
+        "param_ranges": {"hue": {"min": 0.0, "max": 360.0}, "tolerance": {"min": 5.0, "max": 90.0}, "softness": {"min": 0.0, "max": 50.0}},
         "description": "Green screen — key out a color range for transparency",
     },
     "luma_key": {
         "fn": luma_key,
         "category": "color",
         "params": {"threshold": 0.3, "mode": "dark", "softness": 10.0},
+        "param_ranges": {"threshold": {"min": 0.0, "max": 1.0}, "softness": {"min": 0.0, "max": 50.0}},
         "description": "Luminance key — key out dark or bright areas for transparency",
     },
     "hueshift": {
@@ -250,18 +254,21 @@ EFFECTS = {
         "fn": contrast_crush,
         "category": "color",
         "params": {"amount": 50, "curve": "linear"},
+        "param_ranges": {"amount": {"min": 0, "max": 150}},
         "description": "Extreme contrast manipulation",
     },
     "saturation": {
         "fn": saturation_warp,
         "category": "color",
         "params": {"amount": 1.5, "channel": "all"},
+        "param_ranges": {"amount": {"min": 0.0, "max": 4.0}},
         "description": "Boost or kill saturation",
     },
     "exposure": {
         "fn": brightness_exposure,
         "category": "color",
         "params": {"stops": 1.0, "clip_mode": "clip"},
+        "param_ranges": {"stops": {"min": -3.0, "max": 3.0}},
         "description": "Push exposure up or down",
     },
     "invert": {
@@ -635,6 +642,7 @@ EFFECTS = {
         "fn": pixel_elastic,
         "category": "distortion",
         "params": {"stiffness": 0.3, "mass": 1.0, "force_type": "turbulence", "force_strength": 5.0, "damping": 0.9, "seed": 42, "boundary": "mirror"},
+        "param_ranges": {"stiffness": {"min": 0.05, "max": 0.8}, "mass": {"min": 0.1, "max": 5.0}, "force_strength": {"min": 1.0, "max": 20.0}, "damping": {"min": 0.8, "max": 0.99}},
         "description": "Elastic — pixels on springs that stretch, bounce, and snap back",
     },
     "pixelmelt": {
@@ -661,6 +669,7 @@ EFFECTS = {
         "fn": pixel_magnetic,
         "category": "distortion",
         "params": {"field_type": "dipole", "strength": 6.0, "poles": 2, "rotation_speed": 0.5, "damping": 0.92, "seed": 42, "boundary": "wrap"},
+        "param_ranges": {"strength": {"min": 1.0, "max": 20.0}, "poles": {"min": 1, "max": 8}, "rotation_speed": {"min": 0.0, "max": 2.0}, "damping": {"min": 0.8, "max": 0.99}},
         "description": "Magnetic fields — pixels curve along dipole/quadrupole/toroidal field lines",
     },
     "pixeltimewarp": {
@@ -685,6 +694,7 @@ EFFECTS = {
         "fn": pixel_quantum,
         "category": "distortion",
         "params": {"tunnel_prob": 0.3, "barrier_count": 4, "barrier_width": 0.05, "uncertainty": 5.0, "superposition": 0.4, "decoherence": 0.02, "seed": 42, "boundary": "wrap"},
+        "param_ranges": {"tunnel_prob": {"min": 0.0, "max": 1.0}, "barrier_count": {"min": 1, "max": 10}, "barrier_width": {"min": 0.01, "max": 0.15}, "uncertainty": {"min": 1.0, "max": 15.0}, "superposition": {"min": 0.0, "max": 1.0}, "decoherence": {"min": 0.0, "max": 0.1}},
         "description": "Quantum — pixels tunnel through barriers and split into superposition ghosts",
     },
     "pixeldarkenergy": {

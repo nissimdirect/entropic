@@ -1119,6 +1119,10 @@ class TimelineEditor {
     startPlayback() {
         if (this.isPlaying) return;
         this.isPlaying = true;
+        // Kick off pre-cache for upcoming frames
+        if (typeof prefetchFrames === 'function') {
+            prefetchFrames(this.playhead);
+        }
         const interval = 1000 / this.fps;
         this.playInterval = setInterval(() => {
             if (this.playhead >= this.totalFrames - 1) {
@@ -1140,6 +1144,10 @@ class TimelineEditor {
         if (this.playInterval) {
             clearInterval(this.playInterval);
             this.playInterval = null;
+        }
+        // Free cached frames
+        if (typeof clearFrameCache === 'function') {
+            clearFrameCache();
         }
     }
 

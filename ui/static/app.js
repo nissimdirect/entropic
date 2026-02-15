@@ -230,6 +230,11 @@ let currentFrame = 0;
 let totalFrames = 100;
 let deviceIdCounter = 0;
 let previewDebounce = null;
+// Playback frame pre-cache
+const frameCache = new Map();       // frame_number -> dataUrl
+const frameCacheInFlight = new Set(); // frame numbers currently being fetched
+const FRAME_CACHE_LOOKAHEAD = 8;    // how many frames to pre-fetch ahead
+const FRAME_CACHE_MAX = 30;         // max cached frames before eviction
 let selectedLayerId = null;
 let mixLevel = 1.0;              // Wet/dry mix: 0.0 = original, 1.0 = full effect
 let appMode = 'timeline';        // 'quick' | 'timeline' | 'perform'
@@ -1559,6 +1564,86 @@ function setupKnobInteraction(knobEl) {
         knobContextMenu(e, knobEl);
     });
 
+    // Click on value text to type a specific number
+    const container = knobEl.closest('.knob-container');
+    const valueSpan = container?.querySelector('.knob-value');
+    if (valueSpan) {
+        valueSpan.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (valueSpan.querySelector('.knob-value-input')) return; // already editing
+
+            const deviceId = parseInt(knobEl.dataset.device);
+            const paramName = knobEl.dataset.param;
+            const device = chain.find(d => d.id === deviceId);
+            if (!device) return;
+            const def = effectDefs.find(ef => ef.name === device.name);
+            const spec = def?.params[paramName];
+            if (!spec) return;
+
+            const currentVal = parseFloat(knobEl.dataset.value);
+            const displayVal = spec.type === 'int' ? Math.round(currentVal) : currentVal.toFixed(2);
+
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.className = 'knob-value-input';
+            input.value = displayVal;
+            input.step = spec.type === 'int' ? '1' : '0.01';
+            input.min = spec.min;
+            input.max = spec.max;
+
+            const originalText = valueSpan.textContent;
+            valueSpan.textContent = '';
+            valueSpan.appendChild(input);
+            input.select();
+            input.focus();
+
+            const commit = () => {
+                let newVal = parseFloat(input.value);
+                if (isNaN(newVal)) {
+                    cancel();
+                    return;
+                }
+                newVal = Math.max(spec.min, Math.min(spec.max, newVal));
+                if (spec.type === 'int') newVal = Math.round(newVal);
+
+                knobEl.dataset.value = newVal;
+                updateKnobVisual(knobEl, newVal, spec.min, spec.max, spec.type);
+                if (spec.type === 'xy') {
+                    device.params[paramName] = [newVal, 0];
+                } else if (spec.type === 'bool') {
+                    device.params[paramName] = newVal > 0.5;
+                } else {
+                    device.params[paramName] = newVal;
+                }
+                pushHistory(`${device.name}: ${paramName}`);
+                syncChainToRegion();
+                schedulePreview();
+            };
+
+            const cancel = () => {
+                if (input.parentElement === valueSpan) {
+                    valueSpan.textContent = originalText;
+                }
+            };
+
+            input.addEventListener('keydown', (ke) => {
+                ke.stopPropagation(); // prevent app shortcuts
+                if (ke.key === 'Enter') {
+                    commit();
+                } else if (ke.key === 'Escape') {
+                    cancel();
+                }
+            });
+
+            input.addEventListener('blur', () => {
+                // Only commit if input is still in DOM (not already cancelled)
+                if (input.parentElement === valueSpan) {
+                    commit();
+                }
+            });
+        });
+    }
+
     // Double-click to reset to default
     knobEl.addEventListener('dblclick', () => {
         const deviceId = parseInt(knobEl.dataset.device);
@@ -1597,7 +1682,7 @@ function updateKnobVisual(knobEl, value, min, max, type) {
 
     if (indicator) indicator.style.transform = `translateX(-50%) rotate(${angle}deg)`;
     if (arcFill) arcFill.setAttribute('stroke-dasharray', `${dashLen} ${arcLen}`);
-    if (valueSpan) {
+    if (valueSpan && !valueSpan.querySelector('.knob-value-input')) {
         valueSpan.textContent = type === 'int' ? Math.round(value) : value.toFixed(2);
     }
 }
@@ -2153,9 +2238,18 @@ function reorderChain(fromId, toId) {
 
 // ============ PREVIEW ============
 
-function schedulePreview() {
+function schedulePreview(fromPlayhead) {
     if (!videoLoaded) return;
     clearTimeout(previewDebounce);
+    // During timeline playback, skip debounce for fluid updates
+    if (window.timelineEditor?.isPlaying) {
+        // If called from param/chain change (not playhead advance), invalidate cache
+        if (!fromPlayhead && frameCache.size > 0) clearFrameCache();
+        previewChain();
+        return;
+    }
+    // Non-playback call: invalidate cache (params/chain may have changed)
+    if (frameCache.size > 0) clearFrameCache();
     previewDebounce = setTimeout(previewChain, 150);
 }
 
@@ -2163,6 +2257,16 @@ async function previewChain() {
     if (!videoLoaded) return;
     // Perform mode uses its own preview loop — skip
     if ((appMode === 'perform' || performToggleActive) && perfPlaying) return;
+
+    const isPlaying = window.timelineEditor?.isPlaying;
+
+    // During playback, check frame cache first
+    if (isPlaying && frameCache.has(currentFrame)) {
+        showPreview(frameCache.get(currentFrame));
+        updateMaskOverlay();
+        prefetchFrames(currentFrame);
+        return;
+    }
 
     try {
         let res;
@@ -2205,6 +2309,13 @@ async function previewChain() {
         const data = await res.json();
         showPreview(data.preview);
         updateMaskOverlay();
+
+        // Cache the result during playback
+        if (isPlaying) {
+            frameCache.set(currentFrame, data.preview);
+            prefetchFrames(currentFrame);
+        }
+
         // Show warning if video-level effects were skipped
         if (data.warning) {
             showErrorToast(data.warning);
@@ -2216,6 +2327,60 @@ async function previewChain() {
     } catch (err) {
         showToast('Preview failed: ' + err.message, 'warning');
     }
+}
+
+// Pre-fetch upcoming frames during playback (fire-and-forget, overlapped)
+function prefetchFrames(fromFrame) {
+    if (appMode !== 'timeline' || !window.timelineEditor) return;
+
+    // Evict old frames if cache is too large
+    if (frameCache.size > FRAME_CACHE_MAX) {
+        const keysToDelete = [];
+        for (const key of frameCache.keys()) {
+            if (key < fromFrame - 2) keysToDelete.push(key);
+            if (frameCache.size - keysToDelete.length <= FRAME_CACHE_MAX / 2) break;
+        }
+        keysToDelete.forEach(k => frameCache.delete(k));
+    }
+
+    for (let i = 1; i <= FRAME_CACHE_LOOKAHEAD; i++) {
+        const targetFrame = fromFrame + i;
+        if (targetFrame >= totalFrames) break;
+        if (frameCache.has(targetFrame) || frameCacheInFlight.has(targetFrame)) continue;
+
+        frameCacheInFlight.add(targetFrame);
+        fetchFrameForCache(targetFrame).then(dataUrl => {
+            if (dataUrl && window.timelineEditor?.isPlaying) {
+                frameCache.set(targetFrame, dataUrl);
+            }
+            frameCacheInFlight.delete(targetFrame);
+        }).catch(() => {
+            frameCacheInFlight.delete(targetFrame);
+        });
+    }
+}
+
+// Fetch a single frame for the pre-cache
+async function fetchFrameForCache(frameNum) {
+    const regions = window.timelineEditor.getActiveRegions().map(r => ({
+        start: r.startFrame,
+        end: r.endFrame,
+        effects: (r.effects || []).filter(e => !e.bypassed),
+        muted: window.timelineEditor.isTrackMuted(r.trackId),
+        mask: r.mask || null,
+    }));
+    const res = await fetch(`${API}/api/preview/timeline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ frame_number: frameNum, regions, mix: mixLevel }),
+    });
+    const data = await res.json();
+    return data.preview;
+}
+
+function clearFrameCache() {
+    frameCache.clear();
+    frameCacheInFlight.clear();
 }
 
 function showPreview(dataUrl) {
@@ -2798,7 +2963,7 @@ function onTimelinePlayheadChange(frame) {
     if (el && el.style.display === 'block') {
         el.textContent = el.textContent.replace(/Frame \d+\/\d+/, `Frame ${currentFrame}/${totalFrames}`);
     }
-    schedulePreview();
+    schedulePreview(true);
 }
 
 function onRegionSelect(region) {

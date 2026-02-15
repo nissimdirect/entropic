@@ -104,18 +104,29 @@ async def list_effects():
     effects = []
     for name, entry in EFFECTS.items():
         params = {}
+        ranges = entry.get("param_ranges", {})
         for k, v in entry["params"].items():
+            r = ranges.get(k, {})
             if isinstance(v, bool):
                 params[k] = {"type": "bool", "default": v}
             elif isinstance(v, int):
-                params[k] = {"type": "int", "default": v, "min": 0, "max": max(v * 4, 10)}
+                params[k] = {
+                    "type": "int", "default": v,
+                    "min": r.get("min", 0),
+                    "max": r.get("max", max(v * 4, 10)),
+                }
             elif isinstance(v, float):
-                params[k] = {"type": "float", "default": v, "min": 0.0, "max": max(v * 4, 2.0), "step": 0.01}
+                params[k] = {
+                    "type": "float", "default": v,
+                    "min": r.get("min", 0.0),
+                    "max": r.get("max", max(v * 4, 2.0)),
+                    "step": r.get("step", 0.01),
+                }
             elif isinstance(v, tuple):
                 if len(v) == 3 and all(isinstance(c, (int, float)) and 0 <= c <= 255 for c in v):
                     params[k] = {"type": "rgb", "default": list(v)}
                 else:
-                    params[k] = {"type": "xy", "default": list(v), "min": -100, "max": 100}
+                    params[k] = {"type": "xy", "default": list(v), "min": r.get("min", -100), "max": r.get("max", 100)}
             elif isinstance(v, list):
                 params[k] = {"type": "list", "default": v}
             elif isinstance(v, str):

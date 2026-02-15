@@ -459,6 +459,9 @@ def spectral_freeze(
     key = f"spectral_freeze_{seed}"
     state = _spectral_freeze_state.get(key, {"frozen": None, "freeze_frame": -999})
 
+    # Guard: interval must be >= 1 to avoid division by zero
+    interval = max(1, interval)
+
     # Capture spectrum at intervals
     if frame_index % interval == 0:
         frozen = []
@@ -509,6 +512,9 @@ def visual_reverb(
     """
     key = f"visual_reverb_{seed}"
     state = _reverb_state.get(key, {"ir": None})
+
+    # Guard: ir_interval must be >= 1 to avoid division by zero
+    ir_interval = max(1, ir_interval)
 
     # Update impulse response at intervals
     if frame_index % ir_interval == 0:

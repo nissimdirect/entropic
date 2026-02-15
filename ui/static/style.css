@@ -10,8 +10,8 @@
     --bg-hover: #35353d;
     --border: #3a3a42;
     --text-primary: #e0e0e0;
-    --text-secondary: #888;
-    --text-dim: #555;
+    --text-secondary: #999;
+    --text-dim: #7a7a7a;
     --accent: #ff3d3d;
     --accent-glow: #ff3d3d33;
     --accent-secondary: #7b61ff;
@@ -1272,6 +1272,27 @@ h3 .count {
     font-size: 9px;
     color: var(--text-secondary);
     margin-top: 3px;
+    cursor: text;
+}
+
+.knob-value-input {
+    width: 48px;
+    font-size: 9px;
+    font-family: inherit;
+    color: var(--text-primary);
+    background: var(--bg-dark);
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    padding: 1px 3px;
+    text-align: center;
+    outline: none;
+    -moz-appearance: textfield;
+}
+
+.knob-value-input::-webkit-outer-spin-button,
+.knob-value-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
     font-variant-numeric: tabular-nums;
 }
 

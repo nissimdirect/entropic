@@ -899,6 +899,8 @@ def pixel_timewarp(
     key = f"timewarp_{seed}"
     state = _get_state(key, h, w)
 
+    # Guard: at least 1 echo to avoid empty list indexing
+    echo_count = max(1, echo_count)
     if "echoes_dx" not in state:
         state["echoes_dx"] = [np.zeros((h, w), dtype=np.float32) for _ in range(echo_count)]
         state["echoes_dy"] = [np.zeros((h, w), dtype=np.float32) for _ in range(echo_count)]
@@ -1497,7 +1499,12 @@ def pixel_bubbles(
 
     # Generate portal positions and radii (seeded)
     positions = rng.random((num_portals, 2))
-    radii_frac = rng.uniform(min_radius, max_radius, num_portals)
+    # Guard: ensure min_radius < max_radius for uniform sampling
+    safe_min = min(min_radius, max_radius)
+    safe_max = max(min_radius, max_radius)
+    if safe_max <= safe_min:
+        safe_max = safe_min + 0.01
+    radii_frac = rng.uniform(safe_min, safe_max, num_portals)
 
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
     fx_total = np.zeros((h, w), dtype=np.float32)
