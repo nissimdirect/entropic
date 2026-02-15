@@ -71,10 +71,16 @@ class TestOriginalModes:
         assert not np.array_equal(r2, f2), f"Mode '{mode}' did not modify the frame"
 
     def test_first_frame_returns_copy(self, frame_pair):
-        """frame_index=0 should return a copy of the input (initialization)."""
+        """frame_index=0 in video mode returns a copy (initialization).
+        In preview mode (total_frames<=10), warmup produces visible output.
+        """
         f1, _ = frame_pair
-        result = datamosh(f1, frame_index=0, total_frames=1)
+        # Video mode: first frame is unchanged initialization
+        result = datamosh(f1, frame_index=0, total_frames=30)
         np.testing.assert_array_equal(result, f1)
+        # Preview mode: warmup should modify the frame
+        result_preview = datamosh(f1.copy(), frame_index=0, total_frames=1)
+        assert not np.array_equal(result_preview, f1), "Preview warmup should modify frame"
 
     def test_intensity_clamped(self, frame_pair):
         """Intensity should be clamped to [0.1, 100.0]."""

@@ -98,6 +98,9 @@ def datamosh(
         "donor_buffer": [], "frozen_frame": None, "pframe_flow": None,
     })
 
+    # Detect preview mode — same logic as physics warmup
+    is_preview = frame_index == 0 and total_frames <= 10
+
     # Reset on first frame or if prev_frame is uninitialized/wrong size
     if frame_index == 0 or st["prev_frame"] is None or st["prev_frame"].shape != frame.shape:
         st["prev_frame"] = frame.copy()
@@ -105,8 +108,15 @@ def datamosh(
         st["donor_buffer"] = [frame.copy()]
         st["frozen_frame"] = frame.copy()
         st["pframe_flow"] = None
-        _cleanup_destruction_if_done(state_key, frame_index, total_frames)
-        return frame.copy()
+        if not is_preview:
+            _cleanup_destruction_if_done(state_key, frame_index, total_frames)
+            return frame.copy()
+        # Preview warmup: create synthetic previous frame with displacement
+        # so the mosh pipeline has something to work with
+        shift_x = int(max(2, w * 0.03 * intensity))
+        shift_y = int(max(2, h * 0.02 * intensity))
+        m = np.float32([[1, 0, shift_x], [0, 1, shift_y]])
+        st["prev_frame"] = cv2.warpAffine(frame, m, (w, h), borderMode=cv2.BORDER_WRAP)
 
     # Maintain donor buffer (ring buffer of recent frames)
     st["donor_buffer"].append(frame.copy())
