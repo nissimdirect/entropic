@@ -6,26 +6,108 @@ const API = '';
 
 // ============ TOAST / MODAL SYSTEM (replaces alert/prompt) ============
 
-function showToast(message, type = 'info', action = null, duration = 4000) {
+function showToast(message, type = 'info', action = null, duration = null, details = null) {
     const container = document.getElementById('toast-container');
     if (!container) return;
+    if (duration === null) {
+        duration = (type === 'error' || type === 'warning') ? 8000 : 4000;
+    }
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    let html = `<span>${esc(message)}</span>`;
+    toast.setAttribute('role', 'alert');
+    toast.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+    let html = `<span class="toast-icon">${_toastIcon(type)}</span>`;
+    html += `<span class="toast-msg">${esc(message)}</span>`;
+    if (details) {
+        html += `<button class="toast-details-btn" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='block'?'none':'block';event.stopPropagation()">Details</button>`;
+        html += `<pre class="toast-details">${esc(typeof details === 'string' ? details : String(details))}</pre>`;
+    }
     if (action) {
-        html += `<button class="toast-action" onclick="(${action.fn})()">${esc(action.label)}</button>`;
+        html += `<button class="toast-action" onclick="(${action.fn})();event.stopPropagation()">${esc(action.label)}</button>`;
     }
     toast.innerHTML = html;
-    container.appendChild(toast);
-    setTimeout(() => {
+    toast.addEventListener('click', () => {
+        clearTimeout(toast._timer);
         toast.style.opacity = '0';
-        toast.style.transition = 'opacity 0.3s';
+        toast.style.transform = 'translateX(100%)';
+        toast.style.transition = 'opacity 0.3s, transform 0.3s';
         setTimeout(() => toast.remove(), 300);
+    });
+    toast.style.cursor = 'pointer';
+    container.appendChild(toast);
+    toast._timer = setTimeout(() => {
+        if (toast.parentNode) {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(100%)';
+            toast.style.transition = 'opacity 0.3s, transform 0.3s';
+            setTimeout(() => toast.remove(), 300);
+        }
     }, duration);
 }
 
-function showErrorToast(message) {
-    showToast(message, 'error', null, 6000);
+function _toastIcon(type) {
+    switch (type) {
+        case 'success': return '&#10003;';
+        case 'error': return '&#10007;';
+        case 'warning': return '&#9888;';
+        case 'info': return '&#8505;';
+        default: return '';
+    }
+}
+
+function showErrorToast(message, details) {
+    showToast(message, 'error', null, 8000, details || null);
+}
+
+// ============ LOADING OVERLAY (canvas processing feedback) ============
+
+function showLoading(message = 'Processing...') {
+    let overlay = document.getElementById('loading-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'loading-overlay';
+        overlay.innerHTML = `
+            <div class="loading-content">
+                <div class="loading-spinner"></div>
+                <div class="loading-message"></div>
+                <div class="loading-progress" style="display:none">
+                    <div class="loading-progress-bar"><div class="loading-progress-fill"></div></div>
+                    <div class="loading-progress-text"></div>
+                </div>
+            </div>`;
+        const canvasArea = document.getElementById('canvas-area');
+        if (canvasArea) canvasArea.appendChild(overlay);
+    }
+    overlay.querySelector('.loading-message').textContent = message;
+    overlay.querySelector('.loading-progress').style.display = 'none';
+    overlay.style.display = 'flex';
+}
+
+function hideLoading() {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+function updateProgress(current, total, message) {
+    const overlay = document.getElementById('loading-overlay');
+    if (!overlay) return;
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+    const progressEl = overlay.querySelector('.loading-progress');
+    progressEl.style.display = 'block';
+    overlay.querySelector('.loading-progress-fill').style.width = pct + '%';
+    overlay.querySelector('.loading-progress-text').textContent =
+        message ? `${message} ${pct}%` : `${pct}%`;
+    if (message) overlay.querySelector('.loading-message').textContent = message;
+}
+
+// Debounced warning for perform layer sync failures (avoids toast spam during playback)
+let _perfSyncWarnLast = 0;
+function _perfSyncWarn() {
+    const now = Date.now();
+    if (now - _perfSyncWarnLast > 5000) {
+        _perfSyncWarnLast = now;
+        showToast('Layer sync failed — check server connection', 'warning');
+    }
 }
 
 // Input modal state
@@ -315,7 +397,8 @@ function renderBrowser() {
     }
 }
 
-// Collapsed state persists across renders (reset on page reload)
+// Collapsed state: all folders start collapsed, toggling is tracked here
+let _categoriesInitialized = false;
 const _collapsedCategories = new Set();
 
 function toggleCategory(cat) {
@@ -338,11 +421,35 @@ function renderBrowserCategories() {
         groups[cat].push(def.name);
     }
 
-    // Sort category names, but put common ones first
-    const order = ['GLITCH', 'DISTORTION', 'TEXTURE', 'COLOR', 'TEMPORAL', 'MODULATION', 'ENHANCE', 'DESTRUCTION'];
-    const sorted = order.filter(c => groups[c]);
-    for (const c of Object.keys(groups)) {
-        if (!sorted.includes(c)) sorted.push(c);
+    // Use server-provided category order, fall back to hardcoded
+    let sorted;
+    if (categoryOrder.length > 0) {
+        sorted = categoryOrder.map(c => c.toUpperCase()).filter(c => groups[c]);
+        // Append any categories not in the server order
+        for (const c of Object.keys(groups)) {
+            if (!sorted.includes(c)) sorted.push(c);
+        }
+    } else {
+        const order = ['GLITCH', 'DISTORTION', 'TEXTURE', 'COLOR', 'TEMPORAL', 'MODULATION', 'ENHANCE', 'DESTRUCTION'];
+        sorted = order.filter(c => groups[c]);
+        for (const c of Object.keys(groups)) {
+            if (!sorted.includes(c)) sorted.push(c);
+        }
+    }
+
+    // On first render, collapse all folders by default
+    if (!_categoriesInitialized) {
+        _categoriesInitialized = true;
+        for (const cat of sorted) {
+            _collapsedCategories.add(cat);
+        }
+    }
+
+    // Resolve display label from server categories or fall back to raw key
+    function catLabel(cat) {
+        const lower = cat.toLowerCase();
+        if (categoryLabels[lower]) return categoryLabels[lower];
+        return cat;
     }
 
     let html = '';
@@ -354,7 +461,7 @@ function renderBrowserCategories() {
         html += `<div class="cat-folder${collapsed ? ' collapsed' : ''}" data-cat="${esc(cat)}">
             <div class="cat-header" onclick="toggleCategory('${esc(cat)}')">
                 <span class="cat-arrow">${arrow}</span>
-                <span class="cat-name">${esc(cat)}</span>
+                <span class="cat-name">${esc(catLabel(cat))}</span>
                 <span class="count">${names.length}</span>
             </div>
             <div class="cat-items">`;
@@ -442,7 +549,7 @@ function setupDragDrop() {
                 for (const fx of effects) {
                     addToChain(fx.name, fx.params || {});
                 }
-            } catch (err) { console.error('Bad recipe data:', err); }
+            } catch (err) { showErrorToast('Invalid recipe data', err.message); }
         }
     });
 
@@ -510,18 +617,30 @@ async function uploadVideo(file) {
 
     const form = new FormData();
     form.append('file', file);
+    showLoading('Uploading...');
 
     try {
-        const res = await fetch(`${API}/api/upload`, { method: 'POST', body: form });
-        if (!res.ok) {
-            const errBody = await res.text();
-            showErrorToast(`Upload failed: ${res.status} ${res.statusText}`);
-            console.error('Upload error response:', errBody);
-            fileNameEl.classList.remove('uploading');
-            return;
-        }
-        const data = await res.json();
+        const data = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `${API}/api/upload`);
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) updateProgress(e.loaded, e.total, 'Uploading');
+            };
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try { resolve(JSON.parse(xhr.responseText)); }
+                    catch (e) { reject(new Error('Invalid server response')); }
+                } else {
+                    reject(new Error(`${xhr.status} ${xhr.statusText}`));
+                }
+            };
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.ontimeout = () => reject(new Error('Upload timed out'));
+            xhr.send(form);
+        });
+
         fileNameEl.classList.remove('uploading');
+        hideLoading();
 
         videoLoaded = true;
         totalFrames = data.info.total_frames || 100;
@@ -534,10 +653,11 @@ async function uploadVideo(file) {
 
         showPreview(data.preview);
         updateFrameInfo(data.info);
+        showToast(`Loaded: ${file.name}`, 'success');
 
         // Suggest perform toggle (toast with action)
         if (appMode === 'timeline' && !performToggleActive) {
-            showToast('Video loaded. Try the Perform mixer?', 'info', {
+            showToast('Try the Perform mixer?', 'info', {
                 label: 'Open Mixer',
                 fn: "function(){togglePerformPanel()}",
             }, 5000);
@@ -555,8 +675,8 @@ async function uploadVideo(file) {
             timelineEditor.fitToWindow();
         }
     } catch (err) {
-        console.error('Upload failed:', err);
-        showErrorToast(`Upload error: ${err.message}`);
+        hideLoading();
+        showErrorToast(`Upload failed: ${err.message}`, err.stack);
         fileNameEl.classList.remove('uploading');
     }
 }
@@ -675,7 +795,7 @@ function setupKeyboard() {
         // Space = Play/pause (mode-dependent)
         if (e.code === 'Space' && videoLoaded) {
             e.preventDefault();
-            if (appMode === 'perform') {
+            if (appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) {
                 perfTogglePlay();
             } else if (appMode === 'timeline' && window.timelineEditor) {
                 timelineEditor.togglePlayback();
@@ -885,6 +1005,11 @@ function addToChain(effectName, overrideParams) {
         } else {
             device.params[k] = v.default;
         }
+    }
+
+    // Inject default points for curves effect (list params not serialized by API)
+    if (effectName === 'curves' && !device.params.points) {
+        device.params.points = [[0, 0], [64, 64], [128, 128], [192, 192], [255, 255]];
     }
 
     chain.push(device);
@@ -1922,7 +2047,7 @@ async function previewChain() {
             perfSyncWithServer(data.layer_states);
         }
     } catch (err) {
-        console.error('Preview failed:', err);
+        showToast('Preview failed: ' + err.message, 'warning');
     }
 }
 
@@ -2107,7 +2232,7 @@ async function randomizeChain() {
         renderLayers();
         schedulePreview();
     } catch (err) {
-        console.error('Randomize failed:', err);
+        showErrorToast('Randomize failed: ' + err.message);
     }
 }
 
@@ -2217,6 +2342,7 @@ async function startExport() {
         }));
     }
 
+    showLoading('Exporting...');
     try {
         const endpoint = (appMode === 'timeline' && settings.timeline_regions)
             ? `${API}/api/export/timeline`
@@ -2242,6 +2368,7 @@ async function startExport() {
     } catch (err) {
         showErrorToast(`Export error: ${err.message}`);
     } finally {
+        hideLoading();
         btn.textContent = origText;
         btn.disabled = false;
     }
@@ -2690,7 +2817,7 @@ async function loadPresets() {
         presets = data.presets || [];
         renderPresets();
     } catch (err) {
-        console.error('Failed to load presets:', err);
+        showToast('Failed to load presets', 'warning');
     }
 }
 
@@ -2845,7 +2972,7 @@ async function perfInitLayers() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ layer_id: perfLayers[1].layer_id, effects: quickChain }),
-                }).catch(() => {});
+                }).catch(() => showToast('Layer sync failed', 'warning'));
             }
 
             // Init client-side states
@@ -3123,7 +3250,7 @@ function perfSetTriggerMode(layerId, mode) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ layer_id: layerId, trigger_mode: mode }),
-        }).catch(() => {});
+        }).catch(() => _perfSyncWarn());
         renderMixer();
     }
 }
@@ -3137,7 +3264,7 @@ function perfSetAdsrPreset(layerId, preset) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ layer_id: layerId, adsr_preset: preset }),
-        }).catch(() => {});
+        }).catch(() => _perfSyncWarn());
     }
 }
 
@@ -3150,7 +3277,7 @@ function perfSetBlendMode(layerId, mode) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ layer_id: layerId, blend_mode: mode }),
-        }).catch(() => {});
+        }).catch(() => _perfSyncWarn());
         if (!perfPlaying) schedulePreview();
     }
 }
@@ -3164,7 +3291,7 @@ function perfSetChokeGroup(layerId, value) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ layer_id: layerId, choke_group: layer.choke_group }),
-        }).catch(() => {});
+        }).catch(() => _perfSyncWarn());
     }
 }
 
@@ -3257,7 +3384,7 @@ syncChainToRegion = function() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ layer_id: layer.layer_id, effects }),
-            }).catch(() => {});
+            }).catch(() => _perfSyncWarn());
             renderMixer();
         }
     }
@@ -3325,7 +3452,7 @@ async function perfReorderLayers() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ layer_id: layer.layer_id, z_order: i }),
-                }).catch(() => {})
+                }).catch(() => _perfSyncWarn())
             );
         }
     }
@@ -3686,6 +3813,7 @@ async function perfRender() {
     const btn = document.querySelector('.transport-right .primary');
     const origText = btn ? btn.textContent : '';
     if (btn) { btn.textContent = 'Rendering...'; btn.disabled = true; }
+    showLoading('Rendering performance...');
 
     try {
         const res = await fetch(`${API}/api/perform/render`, {
@@ -3712,6 +3840,7 @@ async function perfRender() {
     } catch (err) {
         showErrorToast(`Render error: ${err.message}`);
     } finally {
+        hideLoading();
         if (btn) { btn.textContent = origText; btn.disabled = false; }
     }
 }
@@ -3871,6 +4000,489 @@ window.addEventListener('beforeunload', e => {
         e.returnValue = 'You have unsaved performance data. Leave?';
     }
 });
+
+// ============ COLOR SUITE: HISTOGRAM, CURVES EDITOR, HSL/COLOR BALANCE ============
+
+// --- Histogram Panel ---
+function toggleHistogramPanel() {
+    const panel = document.getElementById('histogram-panel');
+    panel.classList.toggle('collapsed');
+    if (!panel.classList.contains('collapsed')) {
+        fetchHistogram();
+    }
+}
+
+let _histogramPending = false;
+async function fetchHistogram() {
+    if (!videoLoaded || _histogramPending) return;
+    _histogramPending = true;
+    try {
+        const res = await fetch(`${API}/api/histogram`, { method: 'POST' });
+        if (!res.ok) return;
+        const data = await res.json();
+        drawHistogram(data);
+    } catch (e) {
+        // Silent fail — histogram is non-critical
+    } finally {
+        _histogramPending = false;
+    }
+}
+
+function drawHistogram(data) {
+    const canvas = document.getElementById('histogram-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;   // 256
+    const h = canvas.height;  // 100
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0a0a0c';
+    ctx.fillRect(0, 0, w, h);
+
+    // Find max across all channels for Y-axis scaling
+    const allMax = Math.max(
+        Math.max(...data.r),
+        Math.max(...data.g),
+        Math.max(...data.b),
+        Math.max(...data.luma)
+    );
+    if (allMax === 0) return;
+
+    const channels = [
+        { bins: data.luma, color: 'rgba(255,255,255,0.2)' },
+        { bins: data.b, color: 'rgba(0,128,255,0.3)' },
+        { bins: data.g, color: 'rgba(0,255,0,0.3)' },
+        { bins: data.r, color: 'rgba(255,0,0,0.3)' },
+    ];
+
+    for (const ch of channels) {
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        for (let i = 0; i < 256; i++) {
+            const barH = (ch.bins[i] / allMax) * h;
+            ctx.lineTo(i, h - barH);
+        }
+        ctx.lineTo(255, h);
+        ctx.closePath();
+        ctx.fillStyle = ch.color;
+        ctx.fill();
+    }
+}
+
+// Hook into preview updates to refresh histogram
+const _origPreviewChain = previewChain;
+previewChain = async function() {
+    await _origPreviewChain();
+    // After preview updates, refresh histogram if panel is open
+    const panel = document.getElementById('histogram-panel');
+    if (panel && !panel.classList.contains('collapsed')) {
+        fetchHistogram();
+    }
+};
+
+// --- Curves Canvas Editor ---
+// Tracks per-device curves state: { [deviceId]: { channel, points: {master, r, g, b} } }
+const curvesState = {};
+
+function getCurvesKey(deviceId) {
+    if (!curvesState[deviceId]) {
+        curvesState[deviceId] = {
+            channel: 'master',
+            points: {
+                master: [[0, 0], [255, 255]],
+                r: [[0, 0], [255, 255]],
+                g: [[0, 0], [255, 255]],
+                b: [[0, 0], [255, 255]],
+            },
+            dragging: -1,
+        };
+    }
+    return curvesState[deviceId];
+}
+
+function renderCurvesEditor(deviceId, device) {
+    const state = getCurvesKey(deviceId);
+    // Initialize from device params if they exist
+    if (device.params.points && device.params.points.length >= 2) {
+        const ch = device.params.channel || 'master';
+        state.points[ch] = JSON.parse(JSON.stringify(device.params.points));
+    }
+
+    return `
+        <div class="curves-editor" data-curves-device="${deviceId}">
+            <div class="curves-channel-tabs">
+                <button class="curves-channel-tab ${state.channel === 'master' ? 'active' : ''}" data-ch="master" data-device="${deviceId}" onclick="curvesSetChannel(${deviceId},'master')">M</button>
+                <button class="curves-channel-tab ${state.channel === 'r' ? 'active' : ''}" data-ch="r" data-device="${deviceId}" onclick="curvesSetChannel(${deviceId},'r')">R</button>
+                <button class="curves-channel-tab ${state.channel === 'g' ? 'active' : ''}" data-ch="g" data-device="${deviceId}" onclick="curvesSetChannel(${deviceId},'g')">G</button>
+                <button class="curves-channel-tab ${state.channel === 'b' ? 'active' : ''}" data-ch="b" data-device="${deviceId}" onclick="curvesSetChannel(${deviceId},'b')">B</button>
+            </div>
+            <canvas class="curves-canvas" width="200" height="200" data-device="${deviceId}"></canvas>
+            <div class="curves-hint">click = add point | drag = move | right-click = delete</div>
+        </div>`;
+}
+
+function curvesSetChannel(deviceId, ch) {
+    const state = getCurvesKey(deviceId);
+    // Save current points to device params before switching
+    const device = chain.find(d => d.id === deviceId);
+    if (device) {
+        device.params.channel = ch;
+        device.params.points = state.points[ch];
+    }
+    state.channel = ch;
+    renderChain();
+}
+
+function setupCurvesCanvas(canvas) {
+    const deviceId = parseInt(canvas.dataset.device);
+    const state = getCurvesKey(deviceId);
+
+    drawCurves(canvas, state);
+
+    canvas.addEventListener('mousedown', e => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.round((e.offsetX / rect.width) * 255);
+        const y = Math.round(255 - (e.offsetY / rect.height) * 255);
+
+        const pts = state.points[state.channel];
+
+        // Right-click: delete nearest point (but not endpoints)
+        if (e.button === 2) {
+            e.preventDefault();
+            const idx = findNearestPoint(pts, x, y);
+            if (idx > 0 && idx < pts.length - 1) {
+                pts.splice(idx, 1);
+                curvesSync(deviceId, state);
+                drawCurves(canvas, state);
+            }
+            return;
+        }
+
+        // Left-click: check if near existing point to drag, or add new point
+        const idx = findNearestPoint(pts, x, y);
+        const dist = Math.sqrt((pts[idx][0] - x) ** 2 + (pts[idx][1] - y) ** 2);
+        if (dist < 15) {
+            // Drag existing point (but not fixed endpoints if they're at 0 or 255)
+            state.dragging = idx;
+        } else {
+            // Add new point
+            pts.push([x, y]);
+            pts.sort((a, b) => a[0] - b[0]);
+            state.dragging = pts.findIndex(p => p[0] === x && p[1] === y);
+            curvesSync(deviceId, state);
+            drawCurves(canvas, state);
+        }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+        if (state.dragging < 0) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.round(Math.max(0, Math.min(255, (e.offsetX / rect.width) * 255)));
+        const y = Math.round(Math.max(0, Math.min(255, 255 - (e.offsetY / rect.height) * 255)));
+
+        const pts = state.points[state.channel];
+        const idx = state.dragging;
+
+        // Endpoints are locked to x=0 and x=255
+        if (idx === 0) {
+            pts[idx] = [0, y];
+        } else if (idx === pts.length - 1) {
+            pts[idx] = [255, y];
+        } else {
+            // Constrain between neighbors
+            const minX = pts[idx - 1][0] + 1;
+            const maxX = pts[idx + 1][0] - 1;
+            pts[idx] = [Math.max(minX, Math.min(maxX, x)), y];
+        }
+        drawCurves(canvas, state);
+    });
+
+    const endDrag = () => {
+        if (state.dragging >= 0) {
+            state.dragging = -1;
+            curvesSync(deviceId, state);
+        }
+    };
+    canvas.addEventListener('mouseup', endDrag);
+    canvas.addEventListener('mouseleave', endDrag);
+
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+function findNearestPoint(pts, x, y) {
+    let best = 0, bestDist = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+        const d = Math.sqrt((pts[i][0] - x) ** 2 + (pts[i][1] - y) ** 2);
+        if (d < bestDist) { bestDist = d; best = i; }
+    }
+    return best;
+}
+
+function curvesSync(deviceId, state) {
+    const device = chain.find(d => d.id === deviceId);
+    if (device) {
+        device.params.points = state.points[state.channel];
+        device.params.channel = state.channel;
+        schedulePreview();
+    }
+}
+
+function drawCurves(canvas, state) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    const pts = state.points[state.channel];
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0a0a0c';
+    ctx.fillRect(0, 0, w, h);
+
+    // Grid lines
+    ctx.strokeStyle = '#1a1a1e';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 4; i++) {
+        const p = (i / 4) * w;
+        ctx.beginPath();
+        ctx.moveTo(p, 0); ctx.lineTo(p, h);
+        ctx.moveTo(0, p); ctx.lineTo(w, p);
+        ctx.stroke();
+    }
+
+    // Diagonal baseline (identity)
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    ctx.lineTo(w, 0);
+    ctx.stroke();
+
+    // Draw the curve
+    const chColors = { master: '#fff', r: '#ff6666', g: '#66ff66', b: '#6688ff' };
+    ctx.strokeStyle = chColors[state.channel] || '#fff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    // Generate smooth curve using monotone interpolation (linear between points for simplicity)
+    for (let px = 0; px < w; px++) {
+        const inVal = (px / w) * 255;
+        const outVal = interpolateCurve(pts, inVal);
+        const sy = h - (outVal / 255) * h;
+        if (px === 0) ctx.moveTo(px, sy);
+        else ctx.lineTo(px, sy);
+    }
+    ctx.stroke();
+
+    // Draw control points
+    for (let i = 0; i < pts.length; i++) {
+        const sx = (pts[i][0] / 255) * w;
+        const sy = h - (pts[i][1] / 255) * h;
+        ctx.beginPath();
+        ctx.arc(sx, sy, i === state.dragging ? 6 : 4, 0, Math.PI * 2);
+        ctx.fillStyle = i === state.dragging ? '#fff' : (chColors[state.channel] || '#fff');
+        ctx.fill();
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+}
+
+function interpolateCurve(pts, x) {
+    if (pts.length < 2) return x;
+    // Find surrounding points
+    if (x <= pts[0][0]) return pts[0][1];
+    if (x >= pts[pts.length - 1][0]) return pts[pts.length - 1][1];
+    for (let i = 0; i < pts.length - 1; i++) {
+        if (x >= pts[i][0] && x <= pts[i + 1][0]) {
+            const t = (x - pts[i][0]) / (pts[i + 1][0] - pts[i][0]);
+            return pts[i][1] + t * (pts[i + 1][1] - pts[i][1]);
+        }
+    }
+    return x;
+}
+
+// --- HSL Color Strip ---
+function renderHslStrip(deviceId, targetHue) {
+    const hueRanges = {
+        all: null,
+        reds: [350, 30],
+        oranges: [15, 45],
+        yellows: [45, 75],
+        greens: [75, 165],
+        cyans: [165, 195],
+        blues: [195, 255],
+        magentas: [255, 350],
+    };
+
+    if (targetHue === 'all') {
+        // Full rainbow gradient
+        return `<div class="hsl-color-strip" style="background:linear-gradient(to right,
+            hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%),
+            hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%),
+            hsl(360,100%,50%));opacity:0.6"></div>`;
+    }
+
+    const range = hueRanges[targetHue];
+    if (!range) return '';
+
+    // Build gradient showing affected hue range
+    const start = range[0];
+    const end = range[1];
+    return `<div class="hsl-color-strip" style="background:linear-gradient(to right,
+        hsl(${start},100%,50%), hsl(${(start + end) / 2},100%,50%), hsl(${end},100%,50%));
+        opacity:0.6"></div>`;
+}
+
+// --- Color Balance Grouped Rendering ---
+function renderColorBalanceGrouped(deviceId, device, def) {
+    const groups = [
+        { label: 'Shadows', params: ['shadows_r', 'shadows_g', 'shadows_b'] },
+        { label: 'Midtones', params: ['midtones_r', 'midtones_g', 'midtones_b'] },
+        { label: 'Highlights', params: ['highlights_r', 'highlights_g', 'highlights_b'] },
+    ];
+
+    let html = '';
+    for (const group of groups) {
+        html += `<div class="cb-section"><div class="cb-section-label">${group.label}</div><div class="cb-sliders">`;
+        for (const pName of group.params) {
+            const spec = def.params[pName];
+            if (!spec) continue;
+            const value = device.params[pName] ?? spec.default;
+            const ctrlSpec = controlMap?.effects?.[device.name]?.params?.[pName];
+            html += createControl(deviceId, pName, spec, value, 'knob', ctrlSpec);
+        }
+        html += `</div></div>`;
+    }
+
+    // Add preserve_luminosity toggle
+    const plSpec = def.params['preserve_luminosity'];
+    if (plSpec) {
+        const plVal = device.params['preserve_luminosity'] ?? plSpec.default;
+        html += createControl(deviceId, 'preserve_luminosity', plSpec, plVal, 'toggle');
+    }
+
+    return html;
+}
+
+// --- Override renderChain to inject custom color controls ---
+const _origRenderChain = renderChain;
+renderChain = function() {
+    const rack = document.getElementById('chain-rack');
+    document.getElementById('chain-count').textContent = `${chain.length} device${chain.length !== 1 ? 's' : ''}`;
+
+    rack.innerHTML = chain.map(device => {
+        const def = effectDefs.find(e => e.name === device.name);
+        const bypassClass = device.bypassed ? 'bypassed' : '';
+        const powerClass = device.bypassed ? 'off' : 'on';
+
+        let paramsHtml = '';
+        if (def) {
+            if (device.name === 'curves') {
+                // Replace standard controls with curves canvas editor
+                paramsHtml = renderCurvesEditor(device.id, device);
+                // Still render interpolation dropdown
+                const interpSpec = def.params['interpolation'];
+                if (interpSpec) {
+                    const val = device.params['interpolation'] ?? interpSpec.default;
+                    const ctrlSpec = controlMap?.effects?.[device.name]?.params?.['interpolation'];
+                    paramsHtml += createControl(device.id, 'interpolation', interpSpec, val, 'dropdown', ctrlSpec);
+                }
+            } else if (device.name === 'colorbalance') {
+                // Grouped color balance rendering
+                paramsHtml = renderColorBalanceGrouped(device.id, device, def);
+            } else if (device.name === 'hsladjust') {
+                // Standard params + color strip
+                for (const [key, spec] of Object.entries(def.params)) {
+                    const value = device.params[key] ?? spec.default;
+                    const ctrlSpec = controlMap?.effects?.[device.name]?.params?.[key];
+                    const ctrlType = ctrlSpec?.control_type || (spec.type === 'string' ? 'dropdown' : spec.type === 'bool' ? 'toggle' : 'knob');
+                    paramsHtml += createControl(device.id, key, spec, value, ctrlType, ctrlSpec);
+                }
+                // Add hue color strip
+                const targetHue = device.params['target_hue'] || 'all';
+                paramsHtml += renderHslStrip(device.id, targetHue);
+            } else {
+                // Default rendering for all other effects
+                for (const [key, spec] of Object.entries(def.params)) {
+                    const value = device.params[key] ?? spec.default;
+                    const ctrlSpec = controlMap?.effects?.[device.name]?.params?.[key];
+                    const ctrlType = ctrlSpec?.control_type || (spec.type === 'string' ? 'dropdown' : spec.type === 'bool' ? 'toggle' : 'knob');
+                    paramsHtml += createControl(device.id, key, spec, value, ctrlType, ctrlSpec);
+                }
+            }
+        }
+
+        return `
+            <div class="device ${bypassClass}" data-device-id="${device.id}" draggable="true"
+                 oncontextmenu="deviceContextMenu(event, ${device.id})">
+                <div class="device-header">
+                    ${gripHTML()}
+                    <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
+                    <span class="device-name">${esc(device.name)}</span>
+                    <button class="more-btn" onclick="event.stopPropagation(); deviceContextMenu(event, ${device.id})" title="More options">&#8943;</button>
+                </div>
+                <div class="device-params">
+                    ${paramsHtml}
+                </div>
+            </div>`;
+    }).join('');
+
+    // Re-attach control event listeners
+    document.querySelectorAll('.knob').forEach(setupKnobInteraction);
+    document.querySelectorAll('.param-dropdown').forEach(setupDropdownInteraction);
+    document.querySelectorAll('.param-toggle').forEach(setupToggleInteraction);
+
+    // Setup curves canvases
+    document.querySelectorAll('.curves-canvas').forEach(setupCurvesCanvas);
+
+    // Setup device reordering
+    setupDeviceReorder();
+
+    // Re-apply LFO-mapped state to knob containers
+    cleanLfoMappings();
+    for (const mapping of lfoState.mappings) {
+        const knobEl = document.querySelector(`.knob[data-device="${mapping.deviceId}"][data-param="${mapping.paramName}"]`);
+        if (knobEl) {
+            const container = knobEl.closest('.knob-container');
+            if (container) container.classList.add('lfo-mapped');
+        }
+    }
+    renderLfoPanel();
+
+    // Mark overflowing param panels
+    document.querySelectorAll('.device-params').forEach(panel => {
+        if (panel.scrollHeight > panel.clientHeight) {
+            const total = panel.querySelectorAll('.param-control, .dropdown-container, .toggle-container, .curves-editor, .cb-section').length;
+            const visible = Array.from(panel.children).filter(c => {
+                const rect = c.getBoundingClientRect();
+                const parentRect = panel.getBoundingClientRect();
+                return rect.bottom <= parentRect.bottom;
+            }).length;
+            const hidden = total - visible;
+            if (hidden > 0) {
+                panel.classList.add('has-overflow');
+                panel.dataset.overflowHint = `+${hidden} more`;
+            }
+        } else {
+            panel.classList.remove('has-overflow');
+        }
+    });
+};
+
+// --- HSL dropdown change → update color strip ---
+const _origSetupDropdownInteraction = setupDropdownInteraction;
+setupDropdownInteraction = function(selectEl) {
+    _origSetupDropdownInteraction(selectEl);
+    // After the standard handler, also update HSL color strips
+    selectEl.addEventListener('change', () => {
+        const deviceId = parseInt(selectEl.dataset.device);
+        const paramName = selectEl.dataset.param;
+        if (paramName === 'target_hue') {
+            // Re-render just to update the color strip
+            renderChain();
+        }
+    });
+};
 
 // ============ BOOT ============
 init();

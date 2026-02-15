@@ -24,6 +24,7 @@ import numpy as np
 from PIL import Image
 
 from effects import EFFECTS, CATEGORIES, CATEGORY_ORDER, apply_chain, is_video_level
+from effects.color import compute_histogram
 from packages import PACKAGES
 from core.video_io import probe_video, extract_single_frame
 from core.export_models import ExportSettings
@@ -115,6 +116,8 @@ async def list_effects():
                     params[k] = {"type": "rgb", "default": list(v)}
                 else:
                     params[k] = {"type": "xy", "default": list(v), "min": -100, "max": 100}
+            elif isinstance(v, list):
+                params[k] = {"type": "list", "default": v}
             elif isinstance(v, str):
                 params[k] = {"type": "string", "default": v}
         effects.append({
@@ -128,6 +131,15 @@ async def list_effects():
         "categories": CATEGORIES,
         "category_order": CATEGORY_ORDER,
     }
+
+
+@app.post("/api/histogram")
+async def get_histogram():
+    """Compute RGB + luminance histogram of the current frame."""
+    if _state["current_frame"] is None:
+        raise HTTPException(status_code=400, detail="No frame loaded")
+    histogram = compute_histogram(_state["current_frame"])
+    return JSONResponse(content=histogram)
 
 
 @app.get("/api/packages")

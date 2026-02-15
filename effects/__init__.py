@@ -22,6 +22,11 @@ from effects.color import (
     infrared,
     chroma_key,
     luma_key,
+    levels,
+    curves,
+    hsl_adjust,
+    color_balance,
+    compute_histogram,
 )
 from effects.distortion import (
     wave_distort,
@@ -270,6 +275,30 @@ EFFECTS = {
         "category": "color",
         "params": {"temp": 30},
         "description": "Warm/cool color temperature shift",
+    },
+    "levels": {
+        "fn": levels,
+        "category": "color",
+        "params": {"input_black": 0, "input_white": 255, "gamma": 1.0, "output_black": 0, "output_white": 255, "channel": "master"},
+        "description": "Levels — remap black/white points with gamma curve (per-channel or master)",
+    },
+    "curves": {
+        "fn": curves,
+        "category": "color",
+        "params": {"points": [[0, 0], [64, 64], [128, 128], [192, 192], [255, 255]], "channel": "master", "interpolation": "cubic"},
+        "description": "Curves — spline-based tonal adjustment via control points (per-channel or master)",
+    },
+    "hsladjust": {
+        "fn": hsl_adjust,
+        "category": "color",
+        "params": {"target_hue": "all", "hue_shift": 0, "saturation": 0, "lightness": 0},
+        "description": "HSL Adjust — per-hue-range hue/saturation/lightness control (reds, greens, blues, etc.)",
+    },
+    "colorbalance": {
+        "fn": color_balance,
+        "category": "color",
+        "params": {"shadows_r": 0, "shadows_g": 0, "shadows_b": 0, "midtones_r": 0, "midtones_g": 0, "midtones_b": 0, "highlights_r": 0, "highlights_g": 0, "highlights_b": 0, "preserve_luminosity": True},
+        "description": "Color Balance — shift RGB in shadows, midtones, and highlights independently",
     },
 
     # === TEMPORAL ===

@@ -334,3 +334,255 @@ def luma_key(frame: np.ndarray, threshold: float = 0.3, mode: str = "dark",
     mask_3ch = mask[:, :, np.newaxis]
     result = frame.astype(np.float32) * (1.0 - mask_3ch)
     return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def levels(frame: np.ndarray, input_black: float = 0, input_white: float = 255,
+           gamma: float = 1.0, output_black: float = 0, output_white: float = 255,
+           channel: str = "master") -> np.ndarray:
+    """Photoshop-style Levels adjustment.
+
+    Remaps pixel values through input range, gamma curve, and output range.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        input_black: Black point input (0-255). Pixels at or below become output_black.
+        input_white: White point input (0-255). Pixels at or above become output_white.
+        gamma: Midtone gamma (0.1-10.0). <1 = brighter midtones, >1 = darker midtones.
+        output_black: Black point output (0-255).
+        output_white: White point output (0-255).
+        channel: "master" (all channels), "r", "g", or "b".
+
+    Returns:
+        Levels-adjusted frame.
+    """
+    input_black = max(0, min(255, int(input_black)))
+    input_white = max(0, min(255, int(input_white)))
+    gamma = max(0.1, min(10.0, float(gamma)))
+    output_black = max(0, min(255, int(output_black)))
+    output_white = max(0, min(255, int(output_white)))
+
+    # Prevent division by zero
+    if input_white <= input_black:
+        input_white = input_black + 1
+
+    # Build 256-entry LUT for speed
+    lut = np.arange(256, dtype=np.float32)
+    lut = np.clip(lut, input_black, input_white)
+    lut = (lut - input_black) / (input_white - input_black)
+    lut = np.power(lut, 1.0 / gamma)
+    lut = lut * (output_white - output_black) + output_black
+    lut = np.clip(lut, 0, 255).astype(np.uint8)
+
+    if channel == "master":
+        return cv2.LUT(frame, lut)
+    else:
+        ch_map = {"r": 0, "g": 1, "b": 2}
+        ch_idx = ch_map.get(channel, 0)
+        result = frame.copy()
+        result[:, :, ch_idx] = cv2.LUT(result[:, :, ch_idx], lut)
+        return result
+
+
+def curves(frame: np.ndarray, points: list = None, channel: str = "master",
+           interpolation: str = "cubic") -> np.ndarray:
+    """Photoshop-style Curves adjustment.
+
+    Maps input values to output values via a spline curve defined by control points.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        points: List of [x, y] control points (0-255). Default: identity diagonal.
+        channel: "master" (all channels), "r", "g", or "b".
+        interpolation: "cubic" (smooth, monotone) or "linear".
+
+    Returns:
+        Curves-adjusted frame.
+    """
+    if points is None:
+        points = [[0, 0], [64, 64], [128, 128], [192, 192], [255, 255]]
+
+    # Validate and sort points by x
+    pts = sorted([[max(0, min(255, int(p[0]))), max(0, min(255, int(p[1])))] for p in points])
+
+    # Ensure we have endpoints
+    if pts[0][0] != 0:
+        pts.insert(0, [0, pts[0][1]])
+    if pts[-1][0] != 255:
+        pts.append([255, pts[-1][1]])
+
+    xs = np.array([p[0] for p in pts], dtype=np.float64)
+    ys = np.array([p[1] for p in pts], dtype=np.float64)
+
+    # Build 256-entry LUT
+    x_full = np.arange(256, dtype=np.float64)
+
+    if interpolation == "cubic" and len(pts) >= 3:
+        from scipy.interpolate import PchipInterpolator
+        interp = PchipInterpolator(xs, ys)
+        lut = interp(x_full)
+    else:
+        lut = np.interp(x_full, xs, ys)
+
+    lut = np.clip(lut, 0, 255).astype(np.uint8)
+
+    if channel == "master":
+        return cv2.LUT(frame, lut)
+    else:
+        ch_map = {"r": 0, "g": 1, "b": 2}
+        ch_idx = ch_map.get(channel, 0)
+        result = frame.copy()
+        result[:, :, ch_idx] = cv2.LUT(result[:, :, ch_idx], lut)
+        return result
+
+
+def hsl_adjust(frame: np.ndarray, target_hue: str = "all", hue_shift: float = 0,
+               saturation: float = 0, lightness: float = 0) -> np.ndarray:
+    """Per-hue-range HSL adjustment (like Photoshop's Hue/Saturation panel).
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        target_hue: Which hues to affect. "all", "reds", "oranges", "yellows",
+                    "greens", "cyans", "blues", "magentas".
+        hue_shift: Rotate hue (-180 to 180 degrees).
+        saturation: Saturation adjustment (-100 to 100). Multiplicative.
+        lightness: Lightness adjustment (-100 to 100). Additive to V channel.
+
+    Returns:
+        HSL-adjusted frame.
+    """
+    hue_shift = max(-180, min(180, float(hue_shift)))
+    saturation = max(-100, min(100, float(saturation)))
+    lightness = max(-100, min(100, float(lightness)))
+
+    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV).astype(np.float32)
+    # OpenCV HSV: H is 0-179 (half degrees), S is 0-255, V is 0-255
+
+    if target_hue == "all":
+        # Apply to all pixels uniformly
+        hsv[:, :, 0] = (hsv[:, :, 0] + hue_shift / 2.0) % 180
+        sat_factor = 1.0 + saturation / 100.0
+        hsv[:, :, 1] = np.clip(hsv[:, :, 1] * sat_factor, 0, 255)
+        hsv[:, :, 2] = np.clip(hsv[:, :, 2] + lightness * 2.55, 0, 255)
+    else:
+        # Hue ranges in OpenCV 0-179 scale (center, half-width)
+        hue_ranges = {
+            "reds":     (0, 15),
+            "oranges":  (15, 7),
+            "yellows":  (30, 7),
+            "greens":   (60, 15),
+            "cyans":    (90, 15),
+            "blues":    (120, 15),
+            "magentas": (150, 15),
+        }
+        center, half_width = hue_ranges.get(target_hue, (0, 15))
+
+        h = hsv[:, :, 0]
+
+        # Compute angular distance from center (wrapping at 180)
+        dist = np.minimum(np.abs(h - center), 180 - np.abs(h - center))
+
+        # Soft mask: 1.0 within half_width, smooth falloff to 0 over feather zone
+        feather = half_width * 0.5
+        mask = np.clip(1.0 - (dist - half_width) / max(feather, 1.0), 0.0, 1.0)
+
+        # Apply hue shift within mask
+        if hue_shift != 0:
+            shifted_h = (h + hue_shift / 2.0 * mask) % 180
+            hsv[:, :, 0] = shifted_h
+
+        # Apply saturation within mask
+        if saturation != 0:
+            sat_factor = 1.0 + saturation / 100.0
+            adjusted_s = hsv[:, :, 1] * sat_factor
+            hsv[:, :, 1] = np.clip(
+                hsv[:, :, 1] * (1.0 - mask) + adjusted_s * mask, 0, 255
+            )
+
+        # Apply lightness within mask
+        if lightness != 0:
+            adjusted_v = hsv[:, :, 2] + lightness * 2.55
+            hsv[:, :, 2] = np.clip(
+                hsv[:, :, 2] * (1.0 - mask) + adjusted_v * mask, 0, 255
+            )
+
+    return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+
+
+def color_balance(frame: np.ndarray, shadows_r: float = 0, shadows_g: float = 0,
+                  shadows_b: float = 0, midtones_r: float = 0, midtones_g: float = 0,
+                  midtones_b: float = 0, highlights_r: float = 0, highlights_g: float = 0,
+                  highlights_b: float = 0, preserve_luminosity: bool = True) -> np.ndarray:
+    """Photoshop-style Color Balance — shift colors in shadows, midtones, highlights.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+        shadows_r/g/b: RGB offset for shadows (-100 to 100).
+        midtones_r/g/b: RGB offset for midtones (-100 to 100).
+        highlights_r/g/b: RGB offset for highlights (-100 to 100).
+        preserve_luminosity: Restore original luminance after color shift.
+
+    Returns:
+        Color-balanced frame.
+    """
+    shadows_r = max(-100, min(100, float(shadows_r)))
+    shadows_g = max(-100, min(100, float(shadows_g)))
+    shadows_b = max(-100, min(100, float(shadows_b)))
+    midtones_r = max(-100, min(100, float(midtones_r)))
+    midtones_g = max(-100, min(100, float(midtones_g)))
+    midtones_b = max(-100, min(100, float(midtones_b)))
+    highlights_r = max(-100, min(100, float(highlights_r)))
+    highlights_g = max(-100, min(100, float(highlights_g)))
+    highlights_b = max(-100, min(100, float(highlights_b)))
+
+    f = frame.astype(np.float32)
+
+    # Compute luminance for range masks
+    luma = 0.299 * f[:, :, 0] + 0.587 * f[:, :, 1] + 0.114 * f[:, :, 2]
+
+    # Smooth masks using power falloff (no hard boundaries)
+    shadow_mask = np.clip((170.0 - luma) / 170.0, 0, 1) ** 1.5
+    highlight_mask = np.clip((luma - 85.0) / 170.0, 0, 1) ** 1.5
+    midtone_mask = np.clip(1.0 - shadow_mask - highlight_mask, 0, 1)
+
+    if preserve_luminosity:
+        original_luma = luma.copy()
+
+    # Apply RGB offsets weighted by masks
+    for ch_idx, (s, m, h) in enumerate([
+        (shadows_r, midtones_r, highlights_r),
+        (shadows_g, midtones_g, highlights_g),
+        (shadows_b, midtones_b, highlights_b),
+    ]):
+        offset = s * shadow_mask + m * midtone_mask + h * highlight_mask
+        f[:, :, ch_idx] = f[:, :, ch_idx] + offset
+
+    f = np.clip(f, 0, 255)
+
+    if preserve_luminosity:
+        new_luma = 0.299 * f[:, :, 0] + 0.587 * f[:, :, 1] + 0.114 * f[:, :, 2]
+        scale = np.where(new_luma > 0.01, original_luma / new_luma, 1.0)
+        scale_3ch = scale[:, :, np.newaxis]
+        f = np.clip(f * scale_3ch, 0, 255)
+
+    return f.astype(np.uint8)
+
+
+def compute_histogram(frame: np.ndarray) -> dict:
+    """Compute per-channel and luminance histograms.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB array.
+
+    Returns:
+        Dict with "r", "g", "b", "luma" — each a list of 256 integers (bin counts).
+    """
+    r_hist = cv2.calcHist([frame], [0], None, [256], [0, 256]).flatten().astype(int).tolist()
+    g_hist = cv2.calcHist([frame], [1], None, [256], [0, 256]).flatten().astype(int).tolist()
+    b_hist = cv2.calcHist([frame], [2], None, [256], [0, 256]).flatten().astype(int).tolist()
+
+    luma = (0.299 * frame[:, :, 0].astype(np.float32) +
+            0.587 * frame[:, :, 1].astype(np.float32) +
+            0.114 * frame[:, :, 2].astype(np.float32)).astype(np.uint8)
+    luma_hist = cv2.calcHist([luma], [0], None, [256], [0, 256]).flatten().astype(int).tolist()
+
+    return {"r": r_hist, "g": g_hist, "b": b_hist, "luma": luma_hist}

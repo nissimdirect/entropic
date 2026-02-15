@@ -165,7 +165,7 @@
         <div id="timeline-header">
             <span>Timeline</span>
             <div class="timeline-controls">
-                <button id="perform-toggle-btn" onclick="togglePerformPanel()" title="Toggle Perform Mixer" class="perform-toggle-btn">Perform</button>
+                <button id="perform-toggle-btn" onclick="togglePerformPanel()" title="Toggle Perform Mixer (P)" class="perform-toggle-btn">Perform</button>
                 <span class="timeline-controls-sep"></span>
                 <button onclick="timelineEditor.zoomIn()" title="Zoom In (+)">+</button>
                 <button onclick="timelineEditor.zoomOut()" title="Zoom Out (-)">-</button>
@@ -207,6 +207,16 @@
         <div id="chain-header">
             <span>Effect Chain</span>
             <span class="count" id="chain-count">0 devices</span>
+            <span id="histogram-toggle" onclick="toggleHistogramPanel()" style="margin-left:auto;cursor:pointer;font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;" title="Toggle Histogram">Histogram</span>
+        </div>
+        <div id="histogram-panel" class="collapsed">
+            <div id="histogram-header" onclick="toggleHistogramPanel()">
+                <span id="histogram-arrow">&#9660;</span>
+                <span>Histogram</span>
+            </div>
+            <div id="histogram-canvas-wrap">
+                <canvas id="histogram-canvas" width="256" height="100"></canvas>
+            </div>
         </div>
         <div id="chain-content">
             <div id="lfo-panel"></div>
