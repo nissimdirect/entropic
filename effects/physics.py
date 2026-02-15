@@ -51,8 +51,13 @@ def _get_state(key, h, w):
 
 
 def _is_preview(frame_index, total_frames):
-    """True when running in single-frame preview mode."""
-    return total_frames <= 1 and frame_index == 0
+    """True when running in single-frame preview mode.
+
+    Detects both true single-frame (total_frames=1) and image uploads
+    where the server creates a short pseudo-video (total_frames<=10).
+    Physics warmup ensures visible displacement on the first preview.
+    """
+    return frame_index == 0 and total_frames <= 10
 
 
 def _remap_frame(frame, dx, dy, boundary="clamp"):
@@ -299,8 +304,8 @@ def pixel_vortex(
             fx_total += fx_spin + fx_pull
             fy_total += fy_spin + fy_pull
 
-        state["vx"] = state["vx"] * damping + fx_total * 0.02
-        state["vy"] = state["vy"] * damping + fy_total * 0.02
+        state["vx"] = state["vx"] * damping + fx_total * 0.05
+        state["vy"] = state["vy"] * damping + fy_total * 0.05
         state["dx"] += state["vx"]
         state["dy"] += state["vy"]
 
@@ -754,36 +759,43 @@ def pixel_antigravity(
     state = _get_state(key, h, w)
 
     rng = np.random.default_rng(seed)
-    t = frame_index / 30.0
-
-    # Gravity direction oscillation
-    if oscillate > 0:
-        grav_dir = np.sin(t * oscillate * np.pi * 2)  # -1 to 1
-    else:
-        grav_dir = -1.0  # Pure repulsion
 
     # Zone positions
     positions = rng.random((num_zones, 2))
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
     radius_px = zone_radius * max(h, w)
 
-    fx_total = np.zeros((h, w), dtype=np.float32)
-    fy_total = np.zeros((h, w), dtype=np.float32)
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
 
-    for i in range(num_zones):
-        zx = positions[i, 0] * w
-        zy = positions[i, 1] * h
-        dx = x_grid - zx
-        dy = y_grid - zy
-        dist = np.sqrt(dx * dx + dy * dy) + 1.0
-        force = repulsion * grav_dir * np.exp(-dist / radius_px) * 100.0 / (dist + 10.0)
-        fx_total += dx / dist * force
-        fy_total += dy / dist * force
+    for step in range(iterations):
+        t = (frame_index + step) / 30.0
 
-    state["vx"] = state["vx"] * damping + fx_total * 0.005
-    state["vy"] = state["vy"] * damping + fy_total * 0.005
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+        # Gravity direction oscillation
+        if oscillate > 0:
+            grav_dir = np.sin(t * oscillate * np.pi * 2)  # -1 to 1
+            # Ensure non-zero force at t=0 by adding phase offset
+            if abs(grav_dir) < 0.1:
+                grav_dir = -1.0
+        else:
+            grav_dir = -1.0  # Pure repulsion
+
+        fx_total = np.zeros((h, w), dtype=np.float32)
+        fy_total = np.zeros((h, w), dtype=np.float32)
+
+        for i in range(num_zones):
+            zx = positions[i, 0] * w
+            zy = positions[i, 1] * h
+            dx = x_grid - zx
+            dy = y_grid - zy
+            dist = np.sqrt(dx * dx + dy * dy) + 1.0
+            force = repulsion * grav_dir * np.exp(-dist / radius_px) * 100.0 / (dist + 10.0)
+            fx_total += dx / dist * force
+            fy_total += dy / dist * force
+
+        state["vx"] = state["vx"] * damping + fx_total * 0.01
+        state["vy"] = state["vy"] * damping + fy_total * 0.01
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
 
     max_disp = max(h, w) * 0.4
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
@@ -982,8 +994,8 @@ def pixel_timewarp(
         fx = 3.0 * np.sin(x_grid / 30.0 + t * 2 + phase) * np.cos(y_grid / 25.0 + t * 1.5)
         fy = 3.0 * np.cos(x_grid / 25.0 + t * 1.8) * np.sin(y_grid / 30.0 + t * 2.2 + phase)
 
-        state["vx"] = state["vx"] * damping + fx * time_factor * 0.05
-        state["vy"] = state["vy"] * damping + fy * time_factor * 0.05
+        state["vx"] = state["vx"] * damping + fx * time_factor * 0.08
+        state["vy"] = state["vy"] * damping + fy * time_factor * 0.08
 
         for i in range(echo_count - 1, 0, -1):
             state["echoes_dx"][i] = state["echoes_dx"][i - 1].copy()
@@ -1046,40 +1058,44 @@ def pixel_dimensionfold(
     state = _get_state(key, h, w)
 
     rng = np.random.default_rng(seed)
-    t = frame_index / 30.0
 
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
     cx, cy = w / 2, h / 2
 
     fold_offsets = rng.random(num_folds) - 0.5
     fold_base_angles = rng.random(num_folds) * np.pi
-
-    fx_total = np.zeros((h, w), dtype=np.float32)
-    fy_total = np.zeros((h, w), dtype=np.float32)
     fold_width_px = fold_width * max(h, w)
 
-    for i in range(num_folds):
-        angle = fold_base_angles[i] + t * rotation_speed * ((-1) ** i)
-        cos_a = np.cos(angle)
-        sin_a = np.sin(angle)
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
 
-        offset_px = fold_offsets[i] * max(h, w)
-        signed_dist = (x_grid - cx) * cos_a + (y_grid - cy) * sin_a - offset_px
+    for step in range(iterations):
+        t = (frame_index + step) / 30.0
 
-        fold_zone = np.exp(-(signed_dist ** 2) / (fold_width_px ** 2 + 1))
+        fx_total = np.zeros((h, w), dtype=np.float32)
+        fy_total = np.zeros((h, w), dtype=np.float32)
 
-        if mirror_folds:
-            fold_force = -2.0 * signed_dist / (fold_width_px + 1) * fold_depth
-        else:
-            fold_force = fold_depth * np.sign(signed_dist)
+        for i in range(num_folds):
+            angle = fold_base_angles[i] + t * rotation_speed * ((-1) ** i)
+            cos_a = np.cos(angle)
+            sin_a = np.sin(angle)
 
-        fx_total += cos_a * fold_force * fold_zone * 0.3
-        fy_total += sin_a * fold_force * fold_zone * 0.3
+            offset_px = fold_offsets[i] * max(h, w)
+            signed_dist = (x_grid - cx) * cos_a + (y_grid - cy) * sin_a - offset_px
 
-    state["vx"] = state["vx"] * 0.88 + fx_total * 0.05
-    state["vy"] = state["vy"] * 0.88 + fy_total * 0.05
-    state["dx"] += state["vx"]
-    state["dy"] += state["vy"]
+            fold_zone = np.exp(-(signed_dist ** 2) / (fold_width_px ** 2 + 1))
+
+            if mirror_folds:
+                fold_force = -2.0 * signed_dist / (fold_width_px + 1) * fold_depth
+            else:
+                fold_force = fold_depth * np.sign(signed_dist)
+
+            fx_total += cos_a * fold_force * fold_zone * 0.3
+            fy_total += sin_a * fold_force * fold_zone * 0.3
+
+        state["vx"] = state["vx"] * 0.88 + fx_total * 0.05
+        state["vy"] = state["vy"] * 0.88 + fy_total * 0.05
+        state["dx"] += state["vx"]
+        state["dy"] += state["vy"]
 
     max_disp = max(h, w) * 0.4
     state["dx"] = np.clip(state["dx"], -max_disp, max_disp)
@@ -1352,31 +1368,13 @@ def pixel_darkenergy(
 
     if "expansion_factor" not in state:
         state["expansion_factor"] = 1.0
-    state["expansion_factor"] += acceleration
-    current_rate = expansion_rate * state["expansion_factor"]
 
     rng = np.random.default_rng(seed)
-
     y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
-
-    fx_total = np.zeros((h, w), dtype=np.float32)
-    fy_total = np.zeros((h, w), dtype=np.float32)
-
-    # Hubble expansion from multiple centers
     zone_positions = rng.random((hubble_zones, 2))
-    for i in range(hubble_zones):
-        zx = zone_positions[i, 0] * w
-        zy = zone_positions[i, 1] * h
-        dx = x_grid - zx
-        dy = y_grid - zy
-        dist = np.sqrt(dx * dx + dy * dy) + 1.0
-
-        # Hubble's law: velocity proportional to distance
-        expand = current_rate * dist * 0.0001
-        fx_total += dx / dist * expand
-        fy_total += dy / dist * expand
 
     # Cosmic web: edges = dense filaments that resist expansion
+    resistance = None
     if structure > 0:
         gray = np.mean(frame.astype(np.float32), axis=2)
         edges = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3) ** 2 + \
@@ -1384,12 +1382,36 @@ def pixel_darkenergy(
         edges = np.sqrt(edges)
         edges = edges / (edges.max() + 0.01)
         resistance = 1.0 - edges * structure
-        fx_total *= resistance
-        fy_total *= resistance
 
-    state["vx"] = state["vx"] * 0.95 + fx_total
-    state["vy"] = state["vy"] * 0.95 + fy_total
-    state["dx"] += state["vx"]
+    iterations = _PREVIEW_WARMUP_FRAMES if _is_preview(frame_index, total_frames) else 1
+
+    for step in range(iterations):
+        state["expansion_factor"] += acceleration
+        current_rate = expansion_rate * state["expansion_factor"]
+
+        fx_total = np.zeros((h, w), dtype=np.float32)
+        fy_total = np.zeros((h, w), dtype=np.float32)
+
+        # Hubble expansion from multiple centers
+        for i in range(hubble_zones):
+            zx = zone_positions[i, 0] * w
+            zy = zone_positions[i, 1] * h
+            dx = x_grid - zx
+            dy = y_grid - zy
+            dist = np.sqrt(dx * dx + dy * dy) + 1.0
+
+            # Hubble's law: velocity proportional to distance
+            expand = current_rate * dist * 0.0001
+            fx_total += dx / dist * expand
+            fy_total += dy / dist * expand
+
+        if resistance is not None:
+            fx_total *= resistance
+            fy_total *= resistance
+
+        state["vx"] = state["vx"] * 0.95 + fx_total
+        state["vy"] = state["vy"] * 0.95 + fy_total
+        state["dx"] += state["vx"]
     state["dy"] += state["vy"]
 
     max_disp = max(h, w) * 0.6
