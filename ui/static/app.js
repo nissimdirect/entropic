@@ -399,7 +399,7 @@ function setupFileInput() {
     });
 }
 
-const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
 
 async function uploadVideo(file) {
     // Client-side validation
@@ -546,14 +546,10 @@ function setupKeyboard() {
         if (isMod(e) && e.key === 'e') {
             e.preventDefault(); renderVideo(); return;
         }
-        // Cmd+S = Save preset (quick) or save project (timeline)
+        // Cmd+S = Save project (any mode)
         if (isMod(e) && e.key === 's') {
             e.preventDefault();
-            if (appMode === 'timeline') {
-                saveProject();
-            } else {
-                saveCurrentAsPreset();
-            }
+            saveProject();
             return;
         }
         // Cmd+R = Create region from I/O (timeline mode)
@@ -1717,10 +1713,6 @@ function getProjectState() {
 }
 
 async function saveProject() {
-    if (!window.timelineEditor) {
-        showToast('Switch to Timeline mode first', 'info');
-        return;
-    }
     const project = getProjectState();
     showInputModal('Save Project', 'Project name', async (name) => {
         project.name = name;

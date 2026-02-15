@@ -146,7 +146,7 @@ async def list_categories():
     return CATEGORIES
 
 
-MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB limit
+MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024  # 2GB limit
 
 # File types we accept and how we handle them
 FILE_TYPES = {

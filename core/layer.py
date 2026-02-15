@@ -57,7 +57,7 @@ class Layer:
     effects: list = field(default_factory=list)
     opacity: float = 1.0
     z_order: int = 0
-    trigger_mode: str = "toggle"
+    trigger_mode: str = "toggle"  # "toggle" | "gate" | "adsr" | "one_shot" | "always_on"
     adsr_preset: str = "sustain"
     choke_group: int | None = None
     midi_note: int | None = None
@@ -87,6 +87,11 @@ class Layer:
         elif self.trigger_mode in ("gate", "adsr"):
             self._active = True
             self._adsr_envelope.trigger_on()
+        elif self.trigger_mode == "one_shot":
+            # One-shot: always retrigger from attack, like an Ableton sample
+            self._active = True
+            self._adsr_envelope.reset()
+            self._adsr_envelope.trigger_on()
         # always_on: no-op
 
     def trigger_off(self):
@@ -98,6 +103,7 @@ class Layer:
             # ADSR mode: note off starts release, but layer stays "active"
             # until envelope reaches 0
             self._adsr_envelope.trigger_off()
+        # one_shot: no-op on note off — envelope plays through automatically
         # toggle: no-op on note off (toggle only responds to note on)
         # always_on: no-op
 
@@ -121,10 +127,15 @@ class Layer:
             self._current_opacity = self.opacity
             return self._current_opacity
 
+        # One-shot: when envelope reaches sustain phase, immediately start release
+        # This makes it play through A→D→R automatically like a sample trigger
+        if self.trigger_mode == "one_shot" and self._adsr_envelope.phase == "sustain":
+            self._adsr_envelope.trigger_off()
+
         env_level = self._adsr_envelope.advance()
 
-        # For ADSR mode, check if envelope finished release
-        if self.trigger_mode == "adsr" and env_level <= 0 and not self._adsr_envelope.was_triggered:
+        # For ADSR/one_shot mode, check if envelope finished release
+        if self.trigger_mode in ("adsr", "one_shot") and env_level <= 0 and not self._adsr_envelope.was_triggered:
             self._active = False
 
         self._current_opacity = self.opacity * env_level
