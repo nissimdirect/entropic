@@ -84,3 +84,27 @@ class TestTaxonomy:
             if not isinstance(entry.get('params'), dict):
                 bad.append(name)
         assert bad == [], f"Effects with non-dict params: {bad}"
+
+    def test_tools_category_contains_image_editing_effects(self):
+        """Tools category should contain levels, curves, hsladjust, colorbalance."""
+        expected_tools = ["levels", "curves", "hsladjust", "colorbalance"]
+        for name in expected_tools:
+            assert name in EFFECTS, f"Effect '{name}' not found in EFFECTS"
+            assert EFFECTS[name]["category"] == "tools", \
+                f"Effect '{name}' should be in 'tools', got '{EFFECTS[name]['category']}'"
+
+    def test_operators_category_exists(self):
+        """Operators category must exist in CATEGORIES."""
+        assert "operators" in CATEGORIES, "Missing 'operators' category"
+        assert CATEGORIES["operators"] == "OPERATORS"
+
+    def test_operators_category_contains_lfo(self):
+        """LFO should be in the operators category."""
+        assert EFFECTS["lfo"]["category"] == "operators", \
+            f"lfo should be in 'operators', got '{EFFECTS['lfo']['category']}'"
+
+    def test_category_order_is_explicit(self):
+        """CATEGORY_ORDER should be an explicit list, not derived from dict keys."""
+        assert isinstance(CATEGORY_ORDER, list)
+        assert CATEGORY_ORDER[0] == "tools", "Tools should be first in order"
+        assert len(CATEGORY_ORDER) == len(CATEGORIES)

@@ -5,17 +5,17 @@
     "generated": "2026-02-07"
   },
   "categories": {
-    "glitch": {
-      "icon": "#",
-      "label": "Glitch",
+    "tools": {
+      "icon": "T",
+      "label": "Tools",
       "order": 1,
-      "effects": ["pixelsort", "channelshift", "displacement", "bitcrush"]
+      "effects": ["levels", "curves", "hsladjust", "colorbalance"]
     },
-    "distortion": {
-      "icon": "~",
-      "label": "Distortion",
+    "color": {
+      "icon": "@",
+      "label": "Color",
       "order": 2,
-      "effects": ["wave", "mirror", "chromatic"]
+      "effects": ["hueshift", "contrast", "saturation", "exposure", "invert", "temperature"]
     },
     "texture": {
       "icon": ".:.",
@@ -23,11 +23,65 @@
       "order": 3,
       "effects": ["scanlines", "vhs", "noise", "blur", "sharpen", "edges", "posterize"]
     },
-    "color": {
-      "icon": "@",
-      "label": "Color",
+    "glitch": {
+      "icon": "#",
+      "label": "Glitch",
       "order": 4,
-      "effects": ["hueshift", "contrast", "saturation", "exposure", "invert", "temperature"]
+      "effects": ["pixelsort", "channelshift", "displacement", "bitcrush"]
+    },
+    "distortion": {
+      "icon": "~",
+      "label": "Distortion",
+      "order": 5,
+      "effects": ["wave", "mirror", "chromatic"]
+    },
+    "destruction": {
+      "icon": "X",
+      "label": "Destruction",
+      "order": 6,
+      "effects": []
+    },
+    "temporal": {
+      "icon": ">",
+      "label": "Temporal",
+      "order": 7,
+      "effects": []
+    },
+    "physics": {
+      "icon": "*",
+      "label": "Physics",
+      "order": 8,
+      "effects": []
+    },
+    "modulation": {
+      "icon": "~",
+      "label": "Modulation",
+      "order": 9,
+      "effects": []
+    },
+    "operators": {
+      "icon": "O",
+      "label": "Operators",
+      "order": 10,
+      "effects": ["lfo"]
+    },
+    "sidechain": {
+      "icon": "S",
+      "label": "Sidechain",
+      "order": 11,
+      "effects": []
+    },
+    "enhance": {
+      "icon": "+",
+      "label": "Enhance",
+      "order": 12,
+      "effects": []
+    },
+    "whimsy": {
+      "icon": "W",
+      "label": "Whimsy",
+      "order": 13,
+      "effects": []
     }
   },
   "effects": {
@@ -835,7 +889,7 @@
       }
     },
     "levels": {
-      "category": "color",
+      "category": "tools",
       "essential": ["input_black", "input_white", "gamma"],
       "params": {
         "input_black": {
@@ -891,7 +945,7 @@
       }
     },
     "curves": {
-      "category": "color",
+      "category": "tools",
       "essential": ["points", "channel"],
       "params": {
         "points": {
@@ -923,7 +977,7 @@
       }
     },
     "hsladjust": {
-      "category": "color",
+      "category": "tools",
       "essential": ["target_hue", "hue_shift", "saturation"],
       "params": {
         "target_hue": {
@@ -967,7 +1021,7 @@
       }
     },
     "colorbalance": {
-      "category": "color",
+      "category": "tools",
       "essential": ["midtones_r", "midtones_g", "midtones_b"],
       "params": {
         "midtones_r": {
