@@ -363,6 +363,103 @@ The full live performance workflow inside the browser. 4 channel strips, keyboar
 | 3.36 | median | `python3 entropic.py apply uat-test --effect median` | Soft/painterly | [ ] | |
 | 3.37 | falsecolor | `python3 entropic.py apply uat-test --effect falsecolor` | Heat map colors | [ ] | |
 
+### 3H. Destruction Effects (14) — "The Nuclear Arsenal"
+
+> **Important:** These effects are AGGRESSIVE. Output may look severely corrupted — that's intentional.
+> **Time:** ~30 minutes
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 3.38 | datamosh | `python3 entropic.py apply uat-test --effect datamosh` | Progressive pixel detachment (default: melt mode) | [ ] | |
+| 3.39 | datamosh bloom | `python3 entropic.py apply uat-test --effect datamosh --params mode=bloom` | Old image smears, frozen in time | [ ] | |
+| 3.40 | datamosh rip | `python3 entropic.py apply uat-test --effect datamosh --params mode=rip` | Violent pixel tearing, chunks fly | [ ] | |
+| 3.41 | datamosh replace | `python3 entropic.py apply uat-test --effect datamosh --params mode=replace` | Blocky frozen patches (I-frame skip) | [ ] | |
+| 3.42 | datamosh annihilate | `python3 entropic.py apply uat-test --effect datamosh --params mode=annihilate` | Total destruction — all modes combined | [ ] | |
+| 3.43 | datamosh freeze_through | `python3 entropic.py apply uat-test --effect datamosh --params mode=freeze_through` | Old image persists (authentic I-frame removal) | [ ] | |
+| 3.44 | datamosh pframe_extend | `python3 entropic.py apply uat-test --effect datamosh --params mode=pframe_extend` | Pixels stretch along motion path | [ ] | |
+| 3.45 | datamosh donor | `python3 entropic.py apply uat-test --effect datamosh --params mode=donor` | Motion drives pixels from another time | [ ] | |
+| 3.46 | datamosh intensity | `python3 entropic.py apply uat-test --effect datamosh --params intensity=50.0 decay=0.3` | More intense melt with faster decay | [ ] | |
+| 3.47 | datamosh macroblock | `python3 entropic.py apply uat-test --effect datamosh --params macroblock_size=32` | Larger corruption blocks | [ ] | |
+| 3.48 | bytecorrupt | `python3 entropic.py apply uat-test --effect bytecorrupt` | JPEG data bending artifacts | [ ] | |
+| 3.49 | bytecorrupt heavy | `python3 entropic.py apply uat-test --effect bytecorrupt --params amount=0.8` | Severely bent data | [ ] | |
+| 3.50 | blockcorrupt | `python3 entropic.py apply uat-test --effect blockcorrupt` | Macroblock corruption (default mode) | [ ] | |
+| 3.51 | blockcorrupt smear | `python3 entropic.py apply uat-test --effect blockcorrupt --params mode=smear amount=0.6` | Smeared macroblocks | [ ] | |
+| 3.52 | rowshift | `python3 entropic.py apply uat-test --effect rowshift` | Horizontal scanline tearing | [ ] | |
+| 3.53 | rowshift heavy | `python3 entropic.py apply uat-test --effect rowshift --params amount=0.8` | Severe horizontal displacement | [ ] | |
+| 3.54 | jpegdamage | `python3 entropic.py apply uat-test --effect jpegdamage` | Triple JPEG compression + block damage | [ ] | |
+| 3.55 | jpegdamage extreme | `python3 entropic.py apply uat-test --effect jpegdamage --params quality=2 iterations=5` | Almost unrecognizable compression | [ ] | |
+| 3.56 | invertbands | `python3 entropic.py apply uat-test --effect invertbands` | Alternating inverted horizontal bands | [ ] | |
+| 3.57 | invertbands narrow | `python3 entropic.py apply uat-test --effect invertbands --params band_height=10` | Many thin inverted bands | [ ] | |
+| 3.58 | databend | `python3 entropic.py apply uat-test --effect databend` | Audio DSP applied to pixels (default) | [ ] | |
+| 3.59 | databend feedback | `python3 entropic.py apply uat-test --effect databend --params effect=feedback amount=0.7` | Self-feeding pixel corruption | [ ] | |
+| 3.60 | flowdistort | `python3 entropic.py apply uat-test --effect flowdistort` | Optical flow displacement map | [ ] | |
+| 3.61 | flowdistort strong | `python3 entropic.py apply uat-test --effect flowdistort --params strength=3.0` | Heavy flow displacement | [ ] | |
+| 3.62 | filmgrain | `python3 entropic.py apply uat-test --effect filmgrain` | Realistic brightness-responsive grain | [ ] | |
+| 3.63 | filmgrain heavy | `python3 entropic.py apply uat-test --effect filmgrain --params amount=0.8 size=3` | Coarse, heavy grain | [ ] | |
+| 3.64 | glitchrepeat | `python3 entropic.py apply uat-test --effect glitchrepeat` | Buffer overflow slice repeat | [ ] | |
+| 3.65 | glitchrepeat many | `python3 entropic.py apply uat-test --effect glitchrepeat --params slices=20 repeat_count=5` | Many repeated slices | [ ] | |
+| 3.66 | xorglitch | `python3 entropic.py apply uat-test --effect xorglitch` | Bitwise XOR corruption | [ ] | |
+| 3.67 | xorglitch pattern | `python3 entropic.py apply uat-test --effect xorglitch --params value=128` | Different XOR pattern | [ ] | |
+| 3.68 | pixelannihilate | `python3 entropic.py apply uat-test --effect pixelannihilate` | Kill pixels (default: dissolve) | [ ] | |
+| 3.69 | pixelannihilate edge | `python3 entropic.py apply uat-test --effect pixelannihilate --params mode=edge amount=0.7` | Edge-based pixel death | [ ] | |
+| 3.70 | framesmash | `python3 entropic.py apply uat-test --effect framesmash` | One-stop apocalypse (6 techniques) | [ ] | |
+| 3.71 | framesmash max | `python3 entropic.py apply uat-test --effect framesmash --params intensity=1.0` | Full-power apocalypse | [ ] | |
+| 3.72 | channeldestroy | `python3 entropic.py apply uat-test --effect channeldestroy` | Rip channels apart (default mode) | [ ] | |
+| 3.73 | channeldestroy swap | `python3 entropic.py apply uat-test --effect channeldestroy --params mode=swap amount=0.9` | Swapped channel chaos | [ ] | |
+
+### 3I. Additional Texture Effects (4)
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 3.74 | tvstatic | `python3 entropic.py apply uat-test --effect tvstatic` | TV static with horizontal sync drift | [ ] | |
+| 3.75 | tvstatic heavy | `python3 entropic.py apply uat-test --effect tvstatic --params drift=0.8 noise=0.9` | Heavy sync drift and noise | [ ] | |
+| 3.76 | contours | `python3 entropic.py apply uat-test --effect contours` | Topographic contour lines | [ ] | |
+| 3.77 | contours detailed | `python3 entropic.py apply uat-test --effect contours --params levels=20` | Many fine contour lines | [ ] | |
+| 3.78 | asciiart | `python3 entropic.py apply uat-test --effect asciiart` | ASCII character rendering (default mode) | [ ] | |
+| 3.79 | asciiart modes | `python3 entropic.py apply uat-test --effect asciiart --params mode=matrix` | Matrix-rain style ASCII | [ ] | |
+| 3.80 | brailleart | `python3 entropic.py apply uat-test --effect brailleart` | Braille unicode art (4x resolution) | [ ] | |
+| 3.81 | brailleart dither | `python3 entropic.py apply uat-test --effect brailleart --params dither=True` | Floyd-Steinberg dithered braille | [ ] | |
+
+### 3J. Additional Color Effects (3)
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 3.82 | tapesaturation | `python3 entropic.py apply uat-test --effect tapesaturation` | Analog tape saturation curve | [ ] | |
+| 3.83 | tapesaturation drive | `python3 entropic.py apply uat-test --effect tapesaturation --params drive=0.9` | Heavy tape overdrive | [ ] | |
+| 3.84 | cyanotype | `python3 entropic.py apply uat-test --effect cyanotype` | Prussian blue cyanotype print | [ ] | |
+| 3.85 | cyanotype params | `python3 entropic.py apply uat-test --effect cyanotype --params exposure=1.5` | Overexposed cyanotype | [ ] | |
+| 3.86 | infrared | `python3 entropic.py apply uat-test --effect infrared` | Infrared film simulation | [ ] | |
+| 3.87 | infrared params | `python3 entropic.py apply uat-test --effect infrared --params intensity=0.8` | Strong IR effect | [ ] | |
+
+### 3K. Additional Modulation Effects (2)
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 3.88 | wavefold | `python3 entropic.py apply uat-test --effect wavefold` | Audio wavefolding on brightness | [ ] | |
+| 3.89 | wavefold heavy | `python3 entropic.py apply uat-test --effect wavefold --params folds=5 drive=0.9` | Extreme folding distortion | [ ] | |
+| 3.90 | amradio | `python3 entropic.py apply uat-test --effect amradio` | AM radio interference bands | [ ] | |
+| 3.91 | amradio params | `python3 entropic.py apply uat-test --effect amradio --params frequency=2.0 noise=0.5` | Tuned AM interference | [ ] | |
+
+### 3L. Additional Enhance Effects (3)
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 3.92 | histogrameq | `python3 entropic.py apply uat-test --effect histogrameq` | Per-channel histogram equalization | [ ] | |
+| 3.93 | histogrameq params | `python3 entropic.py apply uat-test --effect histogrameq --params clip_limit=3.0` | Stronger histogram stretching | [ ] | |
+| 3.94 | clahe | `python3 entropic.py apply uat-test --effect clahe` | Adaptive local contrast (night vision look) | [ ] | |
+| 3.95 | clahe params | `python3 entropic.py apply uat-test --effect clahe --params clip_limit=4.0 tile_size=16` | Extreme local contrast | [ ] | |
+| 3.96 | parallelcompress | `python3 entropic.py apply uat-test --effect parallelcompress` | NY compression for video | [ ] | |
+| 3.97 | parallelcompress params | `python3 entropic.py apply uat-test --effect parallelcompress --params ratio=0.8 threshold=0.3` | Heavy parallel compression | [ ] | |
+
+### 3M. Additional Distortion Effects (2)
+
+| # | Effect | Command | Expected Output | Result | Notes |
+|---|--------|---------|----------------|--------|-------|
+| 3.98 | pencilsketch | `python3 entropic.py apply uat-test --effect pencilsketch` | Pencil sketch drawing effect | [ ] | |
+| 3.99 | pencilsketch params | `python3 entropic.py apply uat-test --effect pencilsketch --params detail=0.8` | Detailed sketch look | [ ] | |
+| 3.100 | smear | `python3 entropic.py apply uat-test --effect smear` | Cumulative paint-smear streaks | [ ] | |
+| 3.101 | smear heavy | `python3 entropic.py apply uat-test --effect smear --params length=20 opacity=0.9` | Long heavy smear trails | [ ] | |
+
 ---
 
 ## SECTION 4: CUSTOM PARAMETERS
@@ -462,6 +559,27 @@ Pick any recipe ID from history (e.g., 001).
 |---|------|---------|----------|--------|-------|
 | 7.19 | Full matrix | `python3 entropic_packages.py matrix uat-test` | 31 renders, summary table | [ ] | |
 | 7.20 | Matrix results | Check output | "31 passed, 0 failed" (ideally) | [ ] | |
+
+### 7E. Missing Packages (5 packages added post-launch)
+
+| # | Test | Command | Expected | Result | Notes |
+|---|------|---------|----------|--------|-------|
+| 7.21 | Explore total-destruction | `python3 entropic_packages.py explore total-destruction` | 15 recipes with destruction chains | [ ] | |
+| 7.22 | Apply light-datamosh | `python3 entropic_packages.py apply uat-test --package total-destruction --recipe light-datamosh` | Gentle datamosh, renders + opens | [ ] | |
+| 7.23 | Apply nuclear-smash | `python3 entropic_packages.py apply uat-test --package total-destruction --recipe nuclear-smash` | Heavy multi-destruction chain | [ ] | |
+| 7.24 | Explore motion-warp | `python3 entropic_packages.py explore motion-warp` | 5 recipes with motion effects | [ ] | |
+| 7.25 | Apply flow-push | `python3 entropic_packages.py apply uat-test --package motion-warp --recipe flow-push` | Optical flow push, opens | [ ] | |
+| 7.26 | Apply melt-cascade | `python3 entropic_packages.py apply uat-test --package motion-warp --recipe melt-cascade` | Melting cascade effect | [ ] | |
+| 7.27 | Explore NUCLEAR | `python3 entropic_packages.py explore NUCLEAR` | 8 nuclear-level recipes | [ ] | |
+| 7.28 | Apply nuclear-everything | `python3 entropic_packages.py apply uat-test --package NUCLEAR --recipe nuclear-everything` | Maximum destruction combo | [ ] | |
+| 7.29 | Explore datamosh-combos | `python3 entropic_packages.py explore datamosh-combos` | 6 datamosh combo recipes | [ ] | |
+| 7.30 | Apply mosh-then-sort | `python3 entropic_packages.py apply uat-test --package datamosh-combos --recipe mosh-then-sort` | Datamosh + pixelsort combined | [ ] | |
+| 7.31 | Apply mosh-vhs | `python3 entropic_packages.py apply uat-test --package datamosh-combos --recipe mosh-vhs` | Datamosh + VHS combined | [ ] | |
+| 7.32 | Explore ascii-art | `python3 entropic_packages.py explore ascii-art` | 6 ASCII art recipes | [ ] | |
+| 7.33 | Apply terminal-mono | `python3 entropic_packages.py apply uat-test --package ascii-art --recipe terminal-mono` | Monochrome terminal look | [ ] | |
+| 7.34 | Apply braille-hires | `python3 entropic_packages.py apply uat-test --package ascii-art --recipe braille-hires` | High-res braille art | [ ] | |
+| 7.35 | Batch total-destruction | `python3 entropic_packages.py batch uat-test --package total-destruction` | 15 renders, summary table | [ ] | |
+| 7.36 | Updated full matrix | `python3 entropic_packages.py matrix uat-test` | 76 renders (all 12 packages), summary table | [ ] | |
 
 ---
 
@@ -704,6 +822,32 @@ Test that "light" recipes are visibly less intense than "heavy" recipes:
 | 17.4 | sidechaincross | Requires 2 videos — see sidechain docs | One video busts through another | [ ] | |
 | 17.5 | sidechaincrossfeed | Requires 2 videos — see sidechain docs | Channel mixing between videos | [ ] | |
 | 17.6 | sidechaininterference | Requires 2 videos — see sidechain docs | Phase/amplitude interference | [ ] | |
+
+## SECTION 17B: CLIP COMMAND
+
+> **Goal:** The `clip` command trims video to a time range correctly.
+> **Time:** ~5 minutes
+
+| # | Test | Command | Expected | Result | Notes |
+|---|------|---------|----------|--------|-------|
+| 17.7 | Basic clip | `python3 entropic.py clip ~/Desktop/YOUR_VIDEO.mp4 --start 2.0 --duration 5 --output ~/Desktop/clipped.mp4` | Creates 5-second clip starting at 2s | [ ] | |
+| 17.8 | Clip with end | `python3 entropic.py clip ~/Desktop/YOUR_VIDEO.mp4 --start 1.0 --end 4.0 --output ~/Desktop/clipped2.mp4` | Creates 3-second clip (1s to 4s) | [ ] | |
+| 17.9 | Clip plays | Open clipped.mp4 in QuickTime | Correct duration, audio synced | [ ] | |
+| 17.10 | No output flag | `python3 entropic.py clip ~/Desktop/YOUR_VIDEO.mp4 --start 0 --duration 3` | Auto-generates output filename | [ ] | |
+| 17.11 | Start past end | `python3 entropic.py clip ~/Desktop/YOUR_VIDEO.mp4 --start 9999 --duration 5` | Error: start exceeds duration | [ ] | |
+| 17.12 | Missing input | `python3 entropic.py clip nonexistent.mp4 --duration 5` | Error: file not found | [ ] | |
+
+---
+
+## SECTION 17C: DATAMOSH DESKTOP APP
+
+> **Goal:** The `datamosh` command launches the native desktop datamosh application.
+> **Time:** ~3 minutes
+
+| # | Test | Command | Expected | Result | Notes |
+|---|------|---------|----------|--------|-------|
+| 17.13 | Launch command | `python3 entropic.py datamosh` | Desktop datamosh app window opens | [ ] | |
+| 17.14 | App renders | Check app window | UI visible, no blank/white screen | [ ] | |
 
 ---
 
@@ -1429,6 +1573,218 @@ If you're short on time, test in this order:
 | 34.16 | 5-min continuous play | Play + trigger layers for 5 minutes | No crash, no memory leak, consistent ~15fps | [ ] | |
 | 34.17 | Rapid triggers | Rapidly press 1-2-3-4 for 30 seconds | No crash, triggers queue correctly | [ ] | |
 | 34.18 | Server restart recovery | Stop server (Ctrl+C), restart | "Engine disconnected" banner, reconnects on restart | [ ] | |
+
+---
+
+---
+
+## SECTION 35: USER INTEGRATION TESTING (UIT)
+
+> **Goal:** Verify that features work together across modes, sessions, and workflows — not just in isolation.
+> **UIT ≠ UAT.** UAT tests individual features ("does pixelsort work?"). UIT tests real workflows ("can I go from upload to final exported video using timeline + perform mode together?").
+> **Time:** ~60 minutes total
+> **Prereq:** Sections 1 (Smoke) and 18 (Desktop App boot) must PASS first.
+
+---
+
+### 35A. Workflow 1: CLI Project → Effects → Render → Verify
+
+> **Scenario:** Create a project, apply multiple effects, render at multiple qualities, verify output files.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.1 | Create project | `python3 entropic.py new uit-flow1 --source ~/Desktop/YOUR_VIDEO.mp4` | Project created | [ ] | |
+| 35.2 | Apply 3 effects | Apply pixelsort, then vhs, then feedback (3 separate commands) | 3 recipes in history | [ ] | |
+| 35.3 | Verify history | `python3 entropic.py history uit-flow1` | All 3 recipes listed with IDs | [ ] | |
+| 35.4 | Branch a recipe | `python3 entropic.py branch uit-flow1 001 --params threshold=0.1` | Branched recipe shows parent=001 | [ ] | |
+| 35.5 | Render lo | `python3 entropic.py render uit-flow1 001 --quality lo` | 480p MP4 created | [ ] | |
+| 35.6 | Render hi | `python3 entropic.py render uit-flow1 001 --quality hi` | Full-res MOV created | [ ] | |
+| 35.7 | Both outputs play | Open both in QuickTime | Same effect, different quality/resolution | [ ] | |
+| 35.8 | Status tracks usage | `python3 entropic.py status uit-flow1` | Shows MB used, recipe count, render count | [ ] | |
+
+---
+
+### 35B. Workflow 2: Web UI Quick → Timeline → Export
+
+> **Scenario:** Upload in Quick mode, add effects, switch to Timeline, create regions with different effects, export.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.9 | Upload in Quick | Drag video onto canvas | Video loads, first frame visible | [ ] | |
+| 35.10 | Add effect in Quick | Add pixelsort from browser | Preview shows pixelsort on canvas | [ ] | |
+| 35.11 | Switch to Timeline | Click "Timeline" button | Timeline panel appears, pixelsort chain preserved | [ ] | |
+| 35.12 | Create Region A | Set I at frame 0, O at frame 60, Cmd+R | Region [0-60] on Video 1 track | [ ] | |
+| 35.13 | Region A has effect | Click Region A | Chain rack shows pixelsort (inherited from Quick) | [ ] | |
+| 35.14 | Create Region B | Set I at frame 90, O at frame 150, Cmd+R | Second region [90-150] | [ ] | |
+| 35.15 | Add different effect | Click Region B, add datamosh from browser | Region B has datamosh, Region A still has pixelsort | [ ] | |
+| 35.16 | Preview confirms | Move playhead to frame 30 (Region A) | Canvas shows pixelsort | [ ] | |
+| 35.17 | Preview gap | Move playhead to frame 75 (gap between regions) | Canvas shows original (no effects) | [ ] | |
+| 35.18 | Preview Region B | Move playhead to frame 120 | Canvas shows datamosh | [ ] | |
+| 35.19 | Export timeline | Click Export | Export starts with timeline data | [ ] | |
+| 35.20 | Output correct | Play exported video | Pixelsort at 0-60, clean at 60-90, datamosh at 90-150 | [ ] | |
+
+---
+
+### 35C. Workflow 3: Web UI Quick → Perform → Record → Save → Render
+
+> **Scenario:** Set up effects in Quick mode, switch to Perform, record a live performance, save, render to file.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.21 | Upload video | Drag MP4 onto canvas | Video loads | [ ] | |
+| 35.22 | Switch to Perform | Click "Perform" | Mixer panel appears, 4 channel strips | [ ] | |
+| 35.23 | Start playback | Press Space | Preview advances, timer counts | [ ] | |
+| 35.24 | Arm recording | Press R | REC button pulses red, "Recording armed" toast | [ ] | |
+| 35.25 | Trigger layers | During playback: press 2 at ~2s, press 3 at ~4s, press 4 at ~6s | Event counter increments (3+ events) | [ ] | |
+| 35.26 | Stop recording | Press R again | Three toasts: Save / Review / Discard | [ ] | |
+| 35.27 | Review performance | Click Review toast | Playback restarts, channel strips replay your triggers | [ ] | |
+| 35.28 | Triggers replay correctly | Watch review | L2 activates at ~2s, L3 at ~4s, L4 at ~6s | [ ] | |
+| 35.29 | Save performance | Click Save toast | File saved, toast shows path + "Reveal in Finder" | [ ] | |
+| 35.30 | Render performance | Click Render in transport | Progress shown, output file created | [ ] | |
+| 35.31 | Rendered output correct | Open rendered file in QuickTime/VLC | Effects appear at correct timestamps matching your triggers | [ ] | |
+| 35.32 | Audio in output | Check rendered file has audio | Audio from source video present | [ ] | |
+
+---
+
+### 35D. Workflow 4: CLI Performance → Render → Verify
+
+> **Scenario:** Use the CLI pygame performance mode, record a session, render offline, verify output.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.33 | Launch CLI perform | `python3 entropic_perform.py --base ~/Desktop/YOUR_VIDEO.mp4` | Pygame window opens, 4 layers in console | [ ] | |
+| 35.34 | Arm and perform | Press R (arm), then toggle layers 2/3/4 during playback | Console shows ON/OFF events, HUD shows [REC] | [ ] | |
+| 35.35 | Save on exit | Press Shift+Q | Auto-saves perf_TIMESTAMP.json + .layers.json | [ ] | |
+| 35.36 | Files exist | `ls perf_*.json` | Both .json and .layers.json present | [ ] | |
+| 35.37 | Offline render | `python3 entropic_perform.py --render --automation perf_TIMESTAMP.json --audio ~/Desktop/YOUR_VIDEO.mp4 -o uit_render.mp4` | Progress bar → creates uit_render.mp4 | [ ] | |
+| 35.38 | Output plays | Open uit_render.mp4 | Effects at correct times, audio present, full resolution | [ ] | |
+
+---
+
+### 35E. Workflow 5: Multi-Mode Switching Stress Test
+
+> **Scenario:** Rapidly switch between Quick, Timeline, and Perform modes to verify no state corruption.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.39 | Upload video | Drag video in Quick mode | Video loads | [ ] | |
+| 35.40 | Add effects in Quick | Add vhs + channelshift to chain | Both in chain rack | [ ] | |
+| 35.41 | Quick → Timeline | Click Timeline | Timeline appears, effects preserved | [ ] | |
+| 35.42 | Create region | Set I/O, Cmd+R | Region created with effects | [ ] | |
+| 35.43 | Timeline → Perform | Click Perform | Mixer appears, L2 inherits Quick chain | [ ] | |
+| 35.44 | Trigger layers | Press 2, 3 | Layers activate, preview updates | [ ] | |
+| 35.45 | Perform → Quick | Click Quick | Normal layout returns, original chain intact | [ ] | |
+| 35.46 | Quick → Timeline | Click Timeline again | Region still exists with original effects | [ ] | |
+| 35.47 | Timeline → Perform → Timeline | Switch rapidly 3x | No crash, no state loss, regions preserved | [ ] | |
+| 35.48 | All effects still work | Back in Quick, adjust a parameter | Preview updates correctly | [ ] | |
+
+---
+
+### 35F. Workflow 6: Project Persistence (Save → Close → Reload)
+
+> **Scenario:** Save a project with timeline regions, close the browser, reopen, verify everything restores.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.49 | Set up complex state | Upload video, Timeline mode, 3 regions with different effects, spatial mask on Region A | All visible in UI | [ ] | |
+| 35.50 | Save project | Cmd+S → name it "uit-persistence-test" | Toast: "Project saved" | [ ] | |
+| 35.51 | Close browser tab | Close the tab (accept unsaved warning if any) | Tab closed | [ ] | |
+| 35.52 | Reopen browser | Navigate to http://localhost:7860 | Fresh UI loads | [ ] | |
+| 35.53 | Load project | Cmd+O → select "uit-persistence-test" | Project loads | [ ] | |
+| 35.54 | Regions restored | Check timeline | All 3 regions at correct positions | [ ] | |
+| 35.55 | Effects restored | Click each region | Each has its own effect chain intact | [ ] | |
+| 35.56 | Mask restored | Click Region A | Spatial mask overlay visible at correct position | [ ] | |
+| 35.57 | Playhead position | Check playhead | Restored to saved position | [ ] | |
+
+---
+
+### 35G. Workflow 7: Sidechain Cross-Video Integration
+
+> **Scenario:** Use two videos together in a sidechain cross-video workflow.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.58 | Create sidechain project | `python3 entropic.py new uit-sidechain --source ~/Desktop/VIDEO_A.mp4` | Project created | [ ] | |
+| 35.59 | Apply sidechaincross | Apply sidechaincross with VIDEO_B as key signal | One video busts through another | [ ] | |
+| 35.60 | Apply sidechaincrossfeed | Apply sidechaincrossfeed with VIDEO_B | Channel mixing between videos visible | [ ] | |
+| 35.61 | Apply sidechaininterference | Apply sidechaininterference with VIDEO_B | Phase/amplitude interference patterns | [ ] | |
+| 35.62 | Render sidechain | Render any of the above at mid quality | Output shows cross-video effect | [ ] | |
+| 35.63 | Output plays | Open rendered sidechain video | Both video sources contribute to output | [ ] | |
+
+---
+
+### 35H. Workflow 8: Region Selection + Effects Integration
+
+> **Scenario:** Use spatial regions (CLI) with multiple effects and verify masked areas.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.64 | Region preset | `python3 entropic.py apply uat-test --effect pixelsort --region center` | Pixelsort only in center 50% | [ ] | |
+| 35.65 | Custom region | `python3 entropic.py apply uat-test --effect vhs --region "100,50,400,300"` | VHS only in specified rectangle | [ ] | |
+| 35.66 | Percentage region | `python3 entropic.py apply uat-test --effect invert --region "0.1,0.1,0.8,0.8"` | Inverted in 80% center area | [ ] | |
+| 35.67 | Feathered region | `python3 entropic.py apply uat-test --effect datamosh --region center --feather 30` | Datamosh with soft 30px edge blend | [ ] | |
+| 35.68 | Region + render | Render any regional recipe at hi quality | Output shows effect only in masked area | [ ] | |
+
+---
+
+### 35I. Workflow 9: Perform Mode Choke Group Integration
+
+> **Scenario:** Configure choke groups and verify mutual exclusion during live triggering.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.69 | Upload + Perform mode | Upload video, switch to Perform | Mixer visible | [ ] | |
+| 35.70 | Set choke groups | Put L2 and L3 on Choke A, L4 on Choke B | All three show correct choke labels | [ ] | |
+| 35.71 | Trigger L2 | Press 2 | L2 active | [ ] | |
+| 35.72 | Trigger L3 (chokes L2) | Press 3 | L3 active, L2 deactivates (red flash), preview updates | [ ] | |
+| 35.73 | L4 independent | Press 4 | L4 active, L3 still active (different choke group) | [ ] | |
+| 35.74 | Record choke sequence | Arm recording, trigger L2→L3→L4→L2 rapidly | All events captured, choke behavior in recording | [ ] | |
+| 35.75 | Review shows chokes | Review recorded performance | Choke deactivations replayed correctly | [ ] | |
+
+---
+
+### 35J. Workflow 10: Blend Mode Compositing Integration
+
+> **Scenario:** Test that different blend modes on different layers composite correctly together.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.76 | Set blend modes | L2=multiply, L3=screen, L4=difference | All three show correct blend mode | [ ] | |
+| 35.77 | Trigger all 3 | Press 2, 3, 4 | Preview shows all 3 layers composited with correct blend modes | [ ] | |
+| 35.78 | Multiply visible | L2 ON only | Darkened image (multiply darkens) | [ ] | |
+| 35.79 | Screen visible | L3 ON only | Brightened image (screen brightens) | [ ] | |
+| 35.80 | Difference visible | L4 ON only | Inverted/psychedelic colors (difference) | [ ] | |
+| 35.81 | All together | All ON | Complex composited result (not just one mode) | [ ] | |
+| 35.82 | Render composited | Render with all blend modes active | Output matches preview compositing | [ ] | |
+
+---
+
+### 35K. Workflow 11: ADSR Envelope Integration
+
+> **Scenario:** Test ADSR envelopes across trigger modes during recording and render.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.83 | Set ADSR on L2 | Change L2 trigger mode to ADSR, preset "pluck" | ADSR controls visible | [ ] | |
+| 35.84 | Set ADSR on L3 | Change L3 trigger mode to ADSR, preset "pad" | Different envelope shape | [ ] | |
+| 35.85 | Pluck behavior | Press 2 during playback | Quick attack, visible decay, short sustain | [ ] | |
+| 35.86 | Pad behavior | Press 3 during playback | Slow attack, long sustain, gradual fade | [ ] | |
+| 35.87 | Record ADSR performance | Arm recording, trigger L2 and L3 at different times | Events captured with timing | [ ] | |
+| 35.88 | Render preserves envelopes | Render the recorded performance | Output shows gradual fade-ins/outs matching ADSR settings | [ ] | |
+
+---
+
+### 35L. Workflow 12: Error Recovery Integration
+
+> **Scenario:** Test that the system recovers gracefully from errors mid-workflow.
+
+| # | Test | Steps | Expected | Result | Notes |
+|---|------|-------|----------|--------|-------|
+| 35.89 | Server restart mid-use | In Perform mode, stop server (Ctrl+C in terminal), restart | "Engine disconnected" banner → reconnects on restart | [ ] | |
+| 35.90 | State after reconnect | After server restarts | Video reloads, can continue working (may need re-upload) | [ ] | |
+| 35.91 | Bad effect mid-chain | In Quick mode, add 2 good effects + 1 that errors | Error toast for bad effect, other 2 still applied | [ ] | |
+| 35.92 | Cancel render mid-process | Start export, cancel/close during progress | Partial file cleaned up, no corrupt state | [ ] | |
+| 35.93 | Multiple tabs | Open http://localhost:7860 in 2 tabs, use both | Both work (or second shows "session active" warning) | [ ] | |
 
 ---
 
