@@ -290,6 +290,18 @@ function renderBrowser() {
     }
 }
 
+// Collapsed state persists across renders (reset on page reload)
+const _collapsedCategories = new Set();
+
+function toggleCategory(cat) {
+    if (_collapsedCategories.has(cat)) {
+        _collapsedCategories.delete(cat);
+    } else {
+        _collapsedCategories.add(cat);
+    }
+    renderBrowserCategories();
+}
+
 function renderBrowserCategories() {
     const list = document.getElementById('effect-list');
 
@@ -312,7 +324,15 @@ function renderBrowserCategories() {
     for (const cat of sorted) {
         const names = groups[cat];
         if (!names || names.length === 0) continue;
-        html += `<h3>${esc(cat)} <span class="count">${names.length}</span></h3>`;
+        const collapsed = _collapsedCategories.has(cat);
+        const arrow = collapsed ? '&#9654;' : '&#9660;';
+        html += `<div class="cat-folder${collapsed ? ' collapsed' : ''}" data-cat="${esc(cat)}">
+            <div class="cat-header" onclick="toggleCategory('${esc(cat)}')">
+                <span class="cat-arrow">${arrow}</span>
+                <span class="cat-name">${esc(cat)}</span>
+                <span class="count">${names.length}</span>
+            </div>
+            <div class="cat-items">`;
         for (const name of names.sort()) {
             html += `
                 <div class="effect-item" draggable="true" data-effect="${esc(name)}"
@@ -322,6 +342,7 @@ function renderBrowserCategories() {
                     <span class="name">${esc(name)}</span>
                 </div>`;
         }
+        html += `</div></div>`;
     }
     list.innerHTML = html;
 }

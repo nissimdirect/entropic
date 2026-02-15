@@ -502,7 +502,7 @@ EFFECTS = {
     "flowdistort": {
         "fn": flow_distort,
         "category": "destruction",
-        "params": {"strength": 3.0, "direction": "forward"},
+        "params": {"strength": 3.0, "direction": "forward", "seed": 42},
         "description": "Warp frame using optical flow as displacement map",
     },
     "filmgrain": {

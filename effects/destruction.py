@@ -13,12 +13,21 @@ import io
 # 1. DATAMOSH — Optical flow warping (simulates I-frame removal)
 # ============================================================================
 
-# Frame buffer for temporal effects
-_datamosh_prev_frame = None
-_datamosh_flow_accum = None
-_datamosh_donor_buffer = []  # Ring buffer for donor mode
-_datamosh_frozen_frame = None  # Frozen base for freeze_through
-_datamosh_pframe_flow = None  # Captured flow for pframe_extend
+# Seed-keyed state dict for all destruction effects (prevents cross-chain corruption)
+_destruction_state = {}
+
+
+def _get_destruction_state(key: str, default_factory):
+    """Lazy-init state for a destruction effect, keyed by seed."""
+    if key not in _destruction_state:
+        _destruction_state[key] = default_factory()
+    return _destruction_state[key]
+
+
+def _cleanup_destruction_if_done(key: str, frame_index: int, total_frames: int):
+    """Remove state at end of render to prevent memory leaks."""
+    if total_frames > 1 and frame_index >= total_frames - 1:
+        _destruction_state.pop(key, None)
 
 
 def datamosh(
@@ -76,9 +85,7 @@ def datamosh(
     """
     import cv2
 
-    global _datamosh_prev_frame, _datamosh_flow_accum, _datamosh_donor_buffer
-    global _datamosh_frozen_frame, _datamosh_pframe_flow
-
+    state_key = f"datamosh_{seed}"
     h, w = frame.shape[:2]
     intensity = max(0.1, min(100.0, float(intensity)))
     decay = max(0.0, min(0.9999, float(decay)))
@@ -86,22 +93,28 @@ def datamosh(
     macroblock_size = max(8, min(32, int(macroblock_size)))
     donor_offset = max(1, min(120, int(donor_offset)))
 
+    st = _get_destruction_state(state_key, lambda: {
+        "prev_frame": None, "flow_accum": None,
+        "donor_buffer": [], "frozen_frame": None, "pframe_flow": None,
+    })
+
     # Reset on first frame or if prev_frame is uninitialized/wrong size
-    if frame_index == 0 or _datamosh_prev_frame is None or _datamosh_prev_frame.shape != frame.shape:
-        _datamosh_prev_frame = frame.copy()
-        _datamosh_flow_accum = np.zeros((h, w, 2), dtype=np.float32)
-        _datamosh_donor_buffer = [frame.copy()]
-        _datamosh_frozen_frame = frame.copy()
-        _datamosh_pframe_flow = None
+    if frame_index == 0 or st["prev_frame"] is None or st["prev_frame"].shape != frame.shape:
+        st["prev_frame"] = frame.copy()
+        st["flow_accum"] = np.zeros((h, w, 2), dtype=np.float32)
+        st["donor_buffer"] = [frame.copy()]
+        st["frozen_frame"] = frame.copy()
+        st["pframe_flow"] = None
+        _cleanup_destruction_if_done(state_key, frame_index, total_frames)
         return frame.copy()
 
     # Maintain donor buffer (ring buffer of recent frames)
-    _datamosh_donor_buffer.append(frame.copy())
-    if len(_datamosh_donor_buffer) > donor_offset + 5:
-        _datamosh_donor_buffer = _datamosh_donor_buffer[-(donor_offset + 5):]
+    st["donor_buffer"].append(frame.copy())
+    if len(st["donor_buffer"]) > donor_offset + 5:
+        st["donor_buffer"] = st["donor_buffer"][-(donor_offset + 5):]
 
     # Convert to grayscale for flow calculation
-    prev_gray = cv2.cvtColor(_datamosh_prev_frame, cv2.COLOR_RGB2GRAY)
+    prev_gray = cv2.cvtColor(st["prev_frame"], cv2.COLOR_RGB2GRAY)
     curr_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
     # Calculate dense optical flow — more pyramid levels at high intensity
@@ -132,30 +145,30 @@ def datamosh(
 
     # Accumulate flow — this is what makes datamosh compound
     if accumulate:
-        _datamosh_flow_accum = _datamosh_flow_accum * decay + flow * intensity
+        st["flow_accum"] = st["flow_accum"] * decay + flow * intensity
     else:
-        _datamosh_flow_accum = flow * intensity
+        st["flow_accum"] = flow * intensity
 
     # Create remap coordinates
     map_y, map_x = np.mgrid[0:h, 0:w].astype(np.float32)
-    map_x += _datamosh_flow_accum[:, :, 0]
-    map_y += _datamosh_flow_accum[:, :, 1]
+    map_x += st["flow_accum"][:, :, 0]
+    map_y += st["flow_accum"][:, :, 1]
 
     if mode == "melt":
         # REAL datamosh: warp the PREVIOUS frame by current motion
         # Old pixels move with new motion — progressively detaches from reality
         result = cv2.remap(
-            _datamosh_prev_frame, map_x, map_y,
+            st["prev_frame"], map_x, map_y,
             interpolation=cv2.INTER_LINEAR,
             borderMode=cv2.BORDER_WRAP,
         )
         # Compound: prev = warped result, so next frame warps the warp
-        _datamosh_prev_frame = result.copy()
+        st["prev_frame"] = result.copy()
 
     elif mode == "bloom":
         # Smear previous frame outward — nothing from current frame enters
         result = cv2.remap(
-            _datamosh_prev_frame, map_x, map_y,
+            st["prev_frame"], map_x, map_y,
             interpolation=cv2.INTER_LINEAR,
             borderMode=cv2.BORDER_WRAP,
         )
@@ -164,7 +177,7 @@ def datamosh(
             shift = int(intensity * 2)
             result[:, :, 0] = np.roll(result[:, :, 0], shift, axis=1)
             result[:, :, 2] = np.roll(result[:, :, 2], -shift, axis=1)
-        _datamosh_prev_frame = result.copy()
+        st["prev_frame"] = result.copy()
 
     elif mode == "replace":
         # I-frame skip: blocks of previous frame stamped over current
@@ -180,16 +193,16 @@ def datamosh(
                     if rng.random() < 0.3 and intensity > 2.0:
                         src_y = rng.randint(0, max(1, h - bh))
                         src_x = rng.randint(0, max(1, w - bw))
-                        result[by:by+bh, bx:bx+bw] = _datamosh_prev_frame[src_y:src_y+bh, src_x:src_x+bw]
+                        result[by:by+bh, bx:bx+bw] = st["prev_frame"][src_y:src_y+bh, src_x:src_x+bw]
                     else:
-                        result[by:by+bh, bx:bx+bw] = _datamosh_prev_frame[by:by+bh, bx:bx+bw]
-        _datamosh_prev_frame = frame.copy()
+                        result[by:by+bh, bx:bx+bw] = st["prev_frame"][by:by+bh, bx:bx+bw]
+        st["prev_frame"] = frame.copy()
 
     elif mode == "annihilate":
         # EVERYTHING AT ONCE: warp prev + block replace + row tear + channel split
         # 1. Warp previous frame
         warped = cv2.remap(
-            _datamosh_prev_frame, map_x, map_y,
+            st["prev_frame"], map_x, map_y,
             interpolation=cv2.INTER_LINEAR,
             borderMode=cv2.BORDER_WRAP,
         )
@@ -222,7 +235,7 @@ def datamosh(
         result[:, :, 0] = np.roll(result[:, :, 0], ch_shift, axis=1)
         result[:, :, 2] = np.roll(result[:, :, 2], -ch_shift, axis=1)
         result[:, :, 1] = np.roll(result[:, :, 1], ch_shift // 2, axis=0)
-        _datamosh_prev_frame = warped.copy()
+        st["prev_frame"] = warped.copy()
 
     elif mode == "freeze_through":
         # AUTHENTIC I-FRAME REMOVAL: Previous frame stays frozen.
@@ -235,7 +248,7 @@ def datamosh(
         mb = macroblock_size
         thresh = max(0.5, motion_threshold if motion_threshold > 0 else intensity * 0.5)
 
-        result = _datamosh_frozen_frame.copy()
+        result = st["frozen_frame"].copy()
         for by in range(0, h, mb):
             for bx in range(0, w, mb):
                 bh = min(mb, h - by)
@@ -245,9 +258,9 @@ def datamosh(
                     # This block has enough motion — new pixels break through
                     result[by:by+bh, bx:bx+bw] = frame[by:by+bh, bx:bx+bw]
                     # Update the frozen frame for this block too
-                    _datamosh_frozen_frame[by:by+bh, bx:bx+bw] = frame[by:by+bh, bx:bx+bw]
+                    st["frozen_frame"][by:by+bh, bx:bx+bw] = frame[by:by+bh, bx:bx+bw]
 
-        _datamosh_prev_frame = frame.copy()
+        st["prev_frame"] = frame.copy()
 
     elif mode == "pframe_extend":
         # P-FRAME DUPLICATION: Capture motion vectors from one moment,
@@ -256,33 +269,33 @@ def datamosh(
 
         # Capture flow on the first non-reset frame, or when motion is strong
         flow_mag = np.sqrt(flow[:, :, 0]**2 + flow[:, :, 1]**2).mean()
-        if _datamosh_pframe_flow is None or flow_mag > intensity * 2.0:
-            _datamosh_pframe_flow = flow.copy()
+        if st["pframe_flow"] is None or flow_mag > intensity * 2.0:
+            st["pframe_flow"] = flow.copy()
 
         # Amplify the captured flow and apply it cumulatively
-        extend_flow = _datamosh_pframe_flow * intensity * 2.0
+        extend_flow = st["pframe_flow"] * intensity * 2.0
         if accumulate:
-            _datamosh_flow_accum = _datamosh_flow_accum * decay + extend_flow
+            st["flow_accum"] = st["flow_accum"] * decay + extend_flow
         else:
-            _datamosh_flow_accum = extend_flow
+            st["flow_accum"] = extend_flow
 
         ext_map_y, ext_map_x = np.mgrid[0:h, 0:w].astype(np.float32)
-        ext_map_x += _datamosh_flow_accum[:, :, 0]
-        ext_map_y += _datamosh_flow_accum[:, :, 1]
+        ext_map_x += st["flow_accum"][:, :, 0]
+        ext_map_y += st["flow_accum"][:, :, 1]
 
         result = cv2.remap(
-            _datamosh_prev_frame, ext_map_x, ext_map_y,
+            st["prev_frame"], ext_map_x, ext_map_y,
             interpolation=cv2.INTER_LINEAR,
             borderMode=cv2.BORDER_WRAP,
         )
-        _datamosh_prev_frame = result.copy()
+        st["prev_frame"] = result.copy()
 
     elif mode == "donor":
         # DONOR-BASED MOSH: Motion vectors from current frame, but pixel data
         # pulled from a different temporal position (donor_offset frames back).
         # Simulates the After Effects "donor layer" technique.
-        buf_idx = max(0, len(_datamosh_donor_buffer) - 1 - donor_offset)
-        donor_frame = _datamosh_donor_buffer[buf_idx]
+        buf_idx = max(0, len(st["donor_buffer"]) - 1 - donor_offset)
+        donor_frame = st["donor_buffer"][buf_idx]
 
         # Warp the donor frame using current motion
         result = cv2.remap(
@@ -290,7 +303,7 @@ def datamosh(
             interpolation=cv2.INTER_LINEAR,
             borderMode=cv2.BORDER_WRAP,
         )
-        _datamosh_prev_frame = frame.copy()
+        st["prev_frame"] = frame.copy()
 
     else:  # "rip" (flow already amplified above)
         result = cv2.remap(
@@ -306,7 +319,7 @@ def datamosh(
                 sz = rng.randint(1, max(2, int(intensity)))
                 ey, ex = min(y + sz, h), min(x + sz, w)
                 result[y:ey, x:ex] = 0 if rng.random() < 0.5 else 255
-        _datamosh_prev_frame = frame.copy()
+        st["prev_frame"] = frame.copy()
 
     # Apply blend mode (from transcript learnings — multiply, average, swap)
     if blend_mode == "multiply":
@@ -318,7 +331,7 @@ def datamosh(
     elif blend_mode == "swap":
         # Swap: use motion magnitude to decide which pixels come from which source
         flow_mag = np.sqrt(
-            _datamosh_flow_accum[:, :, 0]**2 + _datamosh_flow_accum[:, :, 1]**2
+            st["flow_accum"][:, :, 0]**2 + st["flow_accum"][:, :, 1]**2
         )
         if flow_mag.max() > 0:
             swap_mask = (flow_mag / flow_mag.max()) > 0.5
@@ -332,6 +345,7 @@ def datamosh(
         static_3d = static_mask[:, :, np.newaxis]
         result = np.where(static_3d, frame, result)
 
+    _cleanup_destruction_if_done(state_key, frame_index, total_frames)
     return result
 
 
@@ -697,15 +711,13 @@ def data_bend(
 # 8. FLOW DISTORT — Motion-based warping (optical flow as displacement map)
 # ============================================================================
 
-_flow_prev = None
-
-
 def flow_distort(
     frame: np.ndarray,
     strength: float = 3.0,
     direction: str = "forward",
     frame_index: int = 0,
     total_frames: int = 1,
+    seed: int = 42,
 ) -> np.ndarray:
     """Warp frame using optical flow as displacement map.
 
@@ -716,22 +728,25 @@ def flow_distort(
         frame: (H, W, 3) uint8 RGB array.
         strength: Displacement multiplier (0.5-50.0).
         direction: 'forward' (push) or 'backward' (pull).
+        seed: Random seed for state keying.
 
     Returns:
         Flow-distorted frame.
     """
     import cv2
 
-    global _flow_prev
-
+    state_key = f"flow_distort_{seed}"
     h, w = frame.shape[:2]
     strength = max(0.5, min(50.0, float(strength)))
 
-    if frame_index == 0 or _flow_prev is None or _flow_prev.shape != frame.shape:
-        _flow_prev = frame.copy()
+    st = _get_destruction_state(state_key, lambda: {"prev": None})
+
+    if frame_index == 0 or st["prev"] is None or st["prev"].shape != frame.shape:
+        st["prev"] = frame.copy()
+        _cleanup_destruction_if_done(state_key, frame_index, total_frames)
         return frame.copy()
 
-    prev_gray = cv2.cvtColor(_flow_prev, cv2.COLOR_RGB2GRAY)
+    prev_gray = cv2.cvtColor(st["prev"], cv2.COLOR_RGB2GRAY)
     curr_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
     flow = cv2.calcOpticalFlowFarneback(
@@ -751,7 +766,8 @@ def flow_distort(
         borderMode=cv2.BORDER_WRAP,
     )
 
-    _flow_prev = frame.copy()
+    st["prev"] = frame.copy()
+    _cleanup_destruction_if_done(state_key, frame_index, total_frames)
     return result
 
 

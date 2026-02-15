@@ -410,6 +410,58 @@ h3 .count {
     font-weight: 400;
 }
 
+/* --- Collapsible category folders (Photoshop-style) --- */
+.cat-folder {
+    border-bottom: 1px solid var(--bg-mid);
+}
+.cat-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    cursor: pointer;
+    user-select: none;
+    background: var(--bg-dark);
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+}
+.cat-header:hover {
+    background: var(--bg-mid);
+}
+.cat-arrow {
+    font-size: 8px;
+    color: var(--text-dim);
+    width: 10px;
+    text-align: center;
+    transition: transform 0.15s;
+}
+.cat-name {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    flex: 1;
+}
+.cat-header .count {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-weight: 400;
+    padding: 1px 5px;
+    background: var(--bg-light);
+    border-radius: 3px;
+}
+.cat-items {
+    transition: max-height 0.2s ease;
+    overflow: hidden;
+}
+.cat-folder.collapsed .cat-items {
+    display: none;
+}
+.cat-folder.collapsed .cat-header {
+    border-bottom-color: transparent;
+}
+
 .loading {
     padding: 20px;
     text-align: center;
