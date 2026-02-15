@@ -175,6 +175,9 @@ def feedback(
     key = f"feedback_{seed}"
     state = _get_state(key, lambda: {"prev_frame": None})
 
+    # Detect preview mode (image uploads: fps=1, duration=5 → total_frames=5)
+    is_preview = frame_index == 0 and total_frames <= 5
+
     # Reset at frame 0
     if frame_index == 0:
         state["prev_frame"] = None
@@ -182,10 +185,17 @@ def feedback(
     prev = state["prev_frame"]
 
     if prev is None or prev.shape != frame.shape:
-        # No previous frame — pass through
-        state["prev_frame"] = frame.copy()
-        _cleanup_if_done(key, frame_index, total_frames)
-        return frame.copy()
+        if is_preview:
+            # Preview warmup: shift frame to create synthetic previous
+            h, w = frame.shape[:2]
+            shift = max(2, int(w * 0.02))
+            prev = np.roll(frame, shift, axis=1)
+            state["prev_frame"] = prev
+        else:
+            # No previous frame — pass through
+            state["prev_frame"] = frame.copy()
+            _cleanup_if_done(key, frame_index, total_frames)
+            return frame.copy()
 
     # Blend: current * (1 - decay) + previous * decay
     result = np.clip(
@@ -322,6 +332,9 @@ def delay(
     key = f"delay_{seed}"
     state = _get_state(key, lambda: {"buffer": []})
 
+    # Detect preview mode (image uploads: fps=1, duration=5 → total_frames=5)
+    is_preview = frame_index == 0 and total_frames <= 5
+
     # Reset at frame 0
     if frame_index == 0:
         state["buffer"] = []
@@ -336,10 +349,17 @@ def delay(
     if len(buf) > max_buf:
         buf[:] = buf[-max_buf:]
 
-    # If we don't have enough history yet, pass through
+    # If we don't have enough history yet
     if len(buf) <= delay_frames:
-        _cleanup_if_done(key, frame_index, total_frames)
-        return frame.copy()
+        if is_preview:
+            # Pre-fill buffer with shifted frames for instant preview
+            h, w = frame.shape[:2]
+            shift = max(2, int(w * 0.03))
+            while len(buf) <= delay_frames:
+                buf.insert(0, np.roll(frame, shift * len(buf), axis=1))
+        else:
+            _cleanup_if_done(key, frame_index, total_frames)
+            return frame.copy()
 
     # Get the delayed frame
     delayed = buf[-(delay_frames + 1)]
