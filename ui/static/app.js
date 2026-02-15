@@ -1238,6 +1238,17 @@ function setupKeyboard() {
 
         // --- Modifier shortcuts (work even in text inputs for some) ---
 
+        // Cmd+/- = Zoom timeline (prevent browser zoom)
+        if ((e.key === '+' || e.key === '=' || e.key === '-' || e.key === '0') && isMod(e)) {
+            e.preventDefault();
+            if (window.timelineEditor) {
+                if (e.key === '-') timelineEditor.zoomOut();
+                else if (e.key === '0') timelineEditor.fitToWindow();
+                else timelineEditor.zoomIn();
+            }
+            return;
+        }
+
         // Cmd+Z = Undo
         if (isMod(e) && e.key === 'z' && !e.shiftKey) {
             e.preventDefault(); undo(); return;
@@ -1300,6 +1311,13 @@ function setupKeyboard() {
 
         // --- Non-modifier shortcuts: skip if typing in text input or modal open ---
         if (isTextInput() || isModalOpen()) return;
+
+        // Tab = Toggle browser sidebar
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            toggleBrowser();
+            return;
+        }
 
         // Space = Play/pause (mode-dependent)
         if (e.code === 'Space' && videoLoaded) {
@@ -6507,5 +6525,150 @@ setupDropdownInteraction = function(selectEl) {
     });
 };
 
+// ============ THEME TOGGLE ============
+function toggleTheme() {
+    const html = document.documentElement;
+    const next = html.dataset.theme === 'light' ? 'dark' : 'light';
+    html.dataset.theme = next;
+    localStorage.setItem('entropic-theme', next);
+    const label = document.querySelector('.switch-label');
+    if (label) label.innerHTML = next === 'light' ? '&#9788;' : '&#9790;';
+}
+
+// ============ MENU BAR ============
+function openMenu(menuId) {
+    const menu = document.getElementById(menuId);
+    const wasOpen = menu && menu.classList.contains('open');
+    closeAllMenus();
+    if (!wasOpen && menu) menu.classList.add('open');
+}
+function closeAllMenus() {
+    document.querySelectorAll('.menu-dropdown').forEach(m => m.classList.remove('open'));
+}
+function menuAction(action) {
+    closeAllMenus();
+    switch (action) {
+        case 'import': document.getElementById('file-input').click(); break;
+        case 'export': renderVideo(); break;
+        case 'save-preset': saveCurrentAsPreset(); break;
+        case 'undo': undo(); break;
+        case 'redo': redo(); break;
+        case 'randomize': randomizeChain(); break;
+        case 'toggle-histogram':
+            const hp = document.getElementById('histogram-panel');
+            if (hp) {
+                hp.style.display = hp.style.display === 'none' ? '' : 'none';
+                if (hp.style.display !== 'none') {
+                    hp.classList.remove('collapsed');
+                    fetchHistogram();
+                }
+            }
+            break;
+        case 'toggle-sidebar':
+            const br = document.getElementById('browser');
+            if (br) br.style.display = br.style.display === 'none' ? '' : 'none';
+            break;
+        case 'refresh': previewChain(); break;
+        case 'shortcuts': openShortcutRef(); break;
+    }
+}
+document.addEventListener('click', e => {
+    if (!e.target.closest('.menu-item')) closeAllMenus();
+});
+
+// ============ BROWSER COLLAPSE ============
+function toggleBrowser() {
+    const browser = document.getElementById('browser');
+    const btn = document.getElementById('browser-collapse-btn');
+    if (!browser) return;
+    const collapsed = browser.classList.toggle('browser-collapsed');
+    if (btn) btn.textContent = collapsed ? '▶' : '◀';
+    // Adjust grid: remove browser column when collapsed
+    const app = document.getElementById('app');
+    if (app) {
+        app.style.gridTemplateColumns = collapsed ? '0px 1fr' : '';
+    }
+}
+
+// ============ DRAG DIVIDERS ============
+(function initDragDividers() {
+    let active = null;
+    let startY = 0, startX = 0;
+    let startTimelineH = 0, startChainH = 0, startBrowserW = 0;
+
+    document.querySelectorAll('.drag-divider').forEach(div => {
+        div.addEventListener('mousedown', e => {
+            e.preventDefault();
+            active = div;
+            div.classList.add('dragging');
+            document.body.classList.add('dragging-divider');
+            startY = e.clientY;
+            startX = e.clientX;
+            // Read actual element sizes (more robust than parsing grid template)
+            const tl = document.getElementById('timeline-area');
+            const ch = document.getElementById('chain-area');
+            const br = document.getElementById('browser');
+            startTimelineH = tl ? tl.offsetHeight : 140;
+            startChainH = ch ? ch.offsetHeight : 250;
+            startBrowserW = br ? br.offsetWidth : 220;
+        });
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!active) return;
+        e.preventDefault();
+        const app = document.getElementById('app');
+        const resizeType = active.dataset.resize;
+
+        if (resizeType === 'browser') {
+            const dx = e.clientX - startX;
+            const newWidth = Math.max(120, Math.min(500, startBrowserW + dx));
+            app.style.gridTemplateColumns = `${newWidth}px 1fr`;
+        } else if (resizeType === 'canvas-timeline') {
+            // Drag between canvas and timeline: grow timeline = shrink canvas
+            const dy = e.clientY - startY;
+            const newTimeline = Math.max(60, Math.min(400, startTimelineH - dy));
+            app.style.setProperty('--timeline-h', newTimeline + 'px');
+            app.style.gridTemplateRows = `44px 24px 1fr 4px ${newTimeline}px 4px ${startChainH}px`;
+        } else if (resizeType === 'timeline-chain') {
+            // Drag between timeline and chain: grow chain = shrink timeline
+            const dy = e.clientY - startY;
+            const newChain = Math.max(80, Math.min(500, startChainH - dy));
+            const newTimeline = Math.max(60, startTimelineH + dy);
+            app.style.gridTemplateRows = `44px 24px 1fr 4px ${newTimeline}px 4px ${newChain}px`;
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (active) {
+            active.classList.remove('dragging');
+            document.body.classList.remove('dragging-divider');
+            active = null;
+        }
+    });
+})();
+
+// ============ PANEL COLLAPSE ============
+function togglePanel(panelId) {
+    const panel = document.getElementById(panelId);
+    if (panel) panel.classList.toggle('panel-collapsed');
+}
+
+// ============ HISTORY DROPDOWN ============
+function toggleHistoryDropdown() {
+    const dd = document.getElementById('history-dropdown');
+    if (!dd) return;
+    const isVisible = dd.style.display !== 'none';
+    dd.style.display = isVisible ? 'none' : 'flex';
+    if (!isVisible) {
+        // Populate with current history
+        const list = document.getElementById('history-dropdown-list');
+        const srcList = document.getElementById('history-list');
+        if (list && srcList) list.innerHTML = srcList.innerHTML;
+    }
+}
+
 // ============ BOOT ============
+// Theme: restore from localStorage
+document.documentElement.dataset.theme = localStorage.getItem('entropic-theme') || 'dark';
 init();

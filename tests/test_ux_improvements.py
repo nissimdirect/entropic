@@ -247,11 +247,11 @@ class TestUIElements:
         with open(html_path) as f:
             self.html = f.read()
 
-    def test_kbd_elements_in_buttons(self):
-        """Transport buttons contain <kbd> shortcut hints."""
-        assert "<kbd>" in self.html
-        # Undo button has kbd
-        assert "Undo <kbd>" in self.html
+    def test_shortcut_hints_in_menus(self):
+        """Menu items contain shortcut hints."""
+        assert "menu-shortcut" in self.html
+        # Undo menu item has shortcut hint
+        assert "Undo" in self.html
 
     def test_help_overlay_exists(self):
         """Help panel modal exists in HTML."""

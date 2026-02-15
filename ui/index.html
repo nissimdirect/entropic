@@ -80,25 +80,50 @@
             <input type="file" id="file-input" accept="video/*,image/*,.gif,.pdf,.zip,.txt,.csv,.json,.xml,.html,.doc,.docx,.wav,.mp3,.aiff,.flac,.psd,.ai,.svg">
             <span id="file-name">No file loaded</span>
         </div>
-        <!-- Global mix slider removed — per-effect dry/wet and per-layer opacity handle this -->
-        <div class="mode-toggle">
-            <!-- Quick mode flagged off (FEATURE_QUICK_MODE=false). Button preserved, hidden. -->
-            <button class="mode-btn" data-mode="quick" onclick="setMode('quick')" style="display:none">Quick</button>
-            <button class="mode-btn active" data-mode="timeline" onclick="setMode('timeline')">Timeline</button>
-            <!-- Perform mode folded into Timeline toggle (perform-toggle-btn). Button preserved, hidden. -->
-            <button class="mode-btn" data-mode="perform" onclick="setMode('perform')" style="display:none">Perform</button>
+        <button onclick="renderVideo()" title="Export video (Cmd+E)" class="topbar-btn">Export</button>
+        <!-- Modes killed — unified timeline is the only view -->
+        <div class="transport-center">
+            <button onclick="undo()" title="Undo (Cmd+Z)" class="icon-btn">&#8630;</button>
+            <button onclick="redo()" title="Redo (Cmd+Shift+Z)" class="icon-btn">&#8631;</button>
+            <button onclick="randomizeChain()" title="Randomize effects" class="icon-btn">&#127922;</button>
+            <button onclick="previewChain()" title="Refresh preview" class="icon-btn">&#8635;</button>
+            <button id="history-btn" onclick="toggleHistoryDropdown()" title="History" class="icon-btn">History &#9662;</button>
         </div>
-        <div class="transport">
-            <button onclick="randomizeChain()" title="Random effects">Randomize</button>
-            <button onclick="undo()" title="Undo (Cmd+Z)">Undo <kbd>&#8984;Z</kbd></button>
-            <button onclick="redo()" title="Redo (Cmd+Shift+Z)">Redo <kbd>&#8984;&#8679;Z</kbd></button>
-            <button onclick="previewChain()" class="primary">Refresh Preview</button>
-            <button onclick="renderVideo()" title="Export video (Cmd+E)">Export <kbd>&#8984;E</kbd></button>
+    </div>
+
+    <!-- MENU BAR -->
+    <div id="menubar">
+        <div class="menu-item" onclick="openMenu('file-menu')">File
+            <div class="menu-dropdown" id="file-menu">
+                <button onclick="menuAction('import')">Import File...</button>
+                <button onclick="menuAction('export')">Export...</button>
+                <hr>
+                <button onclick="menuAction('save-preset')">Save Preset</button>
+            </div>
+        </div>
+        <div class="menu-item" onclick="openMenu('edit-menu')">Edit
+            <div class="menu-dropdown" id="edit-menu">
+                <button onclick="menuAction('undo')">Undo <span class="menu-shortcut">&#8984;Z</span></button>
+                <button onclick="menuAction('redo')">Redo <span class="menu-shortcut">&#8984;&#8679;Z</span></button>
+                <hr>
+                <button onclick="menuAction('randomize')">Randomize Chain</button>
+                <button onclick="menuAction('refresh')">Refresh Preview</button>
+            </div>
+        </div>
+        <div class="menu-item" onclick="openMenu('view-menu')">View
+            <div class="menu-dropdown" id="view-menu">
+                <button onclick="menuAction('toggle-histogram')">Toggle Histogram</button>
+                <button onclick="menuAction('toggle-sidebar')">Toggle Sidebar</button>
+                <hr>
+                <button onclick="menuAction('shortcuts')">Keyboard Shortcuts</button>
+            </div>
         </div>
     </div>
 
     <!-- LEFT SIDEBAR: Effect Browser + Presets -->
     <div id="browser">
+        <button id="browser-collapse-btn" onclick="toggleBrowser()" title="Collapse browser (Tab)">&#9664;</button>
+        <div class="drag-divider drag-divider-v" id="divider-browser" data-resize="browser"></div>
         <div id="browser-tabs">
             <button class="browser-tab active" data-btab="effects" onclick="switchBrowserTab('effects')">Effects</button>
             <button class="browser-tab" data-btab="presets" onclick="switchBrowserTab('presets')">Presets</button>
@@ -161,8 +186,8 @@
         </div>
     </div>
 
-    <!-- RIGHT SIDEBAR: Layers + History (Photoshop-style) -->
-    <div id="right-panel">
+    <!-- RIGHT SIDEBAR: hidden (Devices tab redundant with timeline layers) -->
+    <div id="right-panel" style="display:none">
         <div id="panel-tabs">
             <button class="panel-tab active" data-tab="layers">Devices</button>
             <button class="panel-tab" data-tab="history">History</button>
@@ -179,9 +204,13 @@
         </div>
     </div>
 
+    <!-- DRAG DIVIDER: canvas / timeline height -->
+    <div class="drag-divider drag-divider-h" id="divider-canvas-timeline" data-resize="canvas-timeline"></div>
+
     <!-- TIMELINE: between canvas and chain -->
     <div id="timeline-area">
         <div id="timeline-header">
+            <span class="collapse-toggle" onclick="togglePanel('timeline-area')">&#9660;</span>
             <span>Timeline</span>
             <div class="timeline-controls">
                 <button id="perform-toggle-btn" onclick="togglePerformPanel()" title="Toggle Mixer (P)" class="perform-toggle-btn">Mixer</button>
@@ -223,21 +252,25 @@
         <div id="mixer"><!-- Rendered by JS: renderMixer() --></div>
     </div>
 
-    <!-- INFO VIEW: Ableton-style hover info (bottom-left) -->
-    <div id="info-view">
+    <!-- INFO VIEW: feature-flagged off (too cluttered, needs more work) -->
+    <div id="info-view" style="display:none">
         <div class="info-view-label">Info</div>
         <div id="info-view-content">Hover over any control, effect, or panel element to see details here.</div>
     </div>
 
+    <!-- DRAG DIVIDER: timeline / chain height -->
+    <div class="drag-divider drag-divider-h" id="divider-timeline-chain" data-resize="timeline-chain"></div>
+
     <!-- BOTTOM: Effect Chain Rack -->
     <div id="chain-area">
         <div id="chain-header">
+            <span class="collapse-toggle" onclick="togglePanel('chain-area')">&#9660;</span>
             <span>Effect Chain</span>
             <span class="count" id="chain-count">0 devices</span>
             <span id="chain-complexity" title="Click to clear frame cache" onclick="clearFrameCache();updateChainComplexity(_countDevices(chain));showToast('Frame cache cleared','info',null,1500)" style="cursor:pointer"></span>
-            <span id="histogram-toggle" onclick="toggleHistogramPanel()" style="margin-left:auto;cursor:pointer;font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;" title="Toggle Histogram">Histogram</span>
+            <!-- histogram toggle moved to View menu -->
         </div>
-        <div id="histogram-panel" class="collapsed">
+        <div id="histogram-panel" class="collapsed" style="display:none">
             <div id="histogram-header" onclick="toggleHistogramPanel()">
                 <span id="histogram-arrow">&#9660;</span>
                 <span>Histogram</span>
@@ -250,6 +283,21 @@
             <div id="lfo-panel"></div>
             <div id="chain-rack"></div>
         </div>
+    </div>
+
+    <!-- Theme flip switch (fixed position, bottom-right) -->
+    <div id="theme-switch" onclick="toggleTheme()" title="Toggle light/dark theme">
+        <div class="switch-track"><div class="switch-thumb"></div></div>
+        <span class="switch-label">&#9790;</span>
+    </div>
+
+    <!-- History Dropdown (anchored near topbar) -->
+    <div id="history-dropdown" style="display:none">
+        <div id="history-dropdown-header">
+            <span>History</span>
+            <button onclick="toggleHistoryDropdown()" class="modal-close">&times;</button>
+        </div>
+        <div id="history-dropdown-list"></div>
     </div>
 </div>
 

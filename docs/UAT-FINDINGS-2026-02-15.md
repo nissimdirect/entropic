@@ -874,3 +874,46 @@ These items were in the user's feedback but MISSED in the first capture:
 4. **Record vs Overdub** (SEC-52) — essential for iterative performance
 5. **MIDI controller** (SEC-55) — hardware integration
 6. **Macros** (SEC-56) — power user feature
+
+---
+
+## UAT ROUND 2: UX ARCHITECTURE (Same Session, Later)
+
+> **Context:** User refreshed browser after Round 1 fixes were applied. Found fundamental architecture issues.
+
+### ARCHITECTURE ISSUES (CRITICAL)
+
+| # | Issue | Severity | User Quote |
+|---|-------|----------|------------|
+| A1 | **Separate Perform mode is a UX nightmare** | CRITICAL | "This separate mixer view is a UX nightmare. It compounds so terribly; it's a completely different interface." |
+| A2 | **Perform mode removes timeline** | CRITICAL | "If a performance is supposed to be time-based, why do I have no timeline?" |
+| A3 | **Multiple histograms for no reason** | HIGH | "There are multiple histograms for no reason." |
+| A4 | **Can't resize panels** | HIGH | "I can drag the side of the effects thingy, and it gets bigger, but it disappears behind the preview area." |
+| A5 | **Timeline takes up entire space** | HIGH | "When I first refreshed it, the timeline took up the entire space." |
+| A6 | **Chain area cuts off content** | HIGH | "The windowing of the effect chain row is such that it cuts off stuff from the bottom." |
+| A7 | **Devices tab redundant** | MEDIUM | "I don't think that the devices are relevant; it's redundant." |
+| A8 | **Info panel too cluttered** | MEDIUM | "The info panel might be out of scope. Too much work." |
+| A9 | **Theme toggle in wrong place** | LOW | "The toggle light/dark theme is placed in a terrible place." |
+| A10 | **No way to add tracks** | HIGH | "I should be able to create new tracks. There should be a plus button." |
+| A11 | **Mixer pre-loads random effects** | HIGH | "Why do I have four random effects pre-loaded and a master bus that just pulled up out of nowhere?" |
+| A12 | **Loop as button, not timeline selection** | MEDIUM | "Loop should not be a button; it should be a selection on the timeline." |
+| A13 | **Preview downsamples too aggressively** | MEDIUM | "It downsampled it, which I don't love." |
+| A14 | **Undo/Redo buttons too large** | LOW | "Undo and redo can be just the icons; smaller." |
+| A15 | **Export in wrong position** | LOW | "Export should go to the left, next to load file." |
+
+### DECISIONS MADE
+
+| Decision | Detail | Reference |
+|----------|--------|-----------|
+| Kill Quick/Timeline/Perform modes | ONE unified timeline view | ARCHITECTURE-DEEP-DIVE.md §7.2 |
+| Perform = per-track device (Drum Rack) | Not a separate view | ARCHITECTURE-DEEP-DIVE.md §7.8 |
+| Mixer = per-track controls in timeline | Opacity/Solo/Mute/Blend in track header (left side) | ARCHITECTURE-DEEP-DIVE.md §7.6 |
+| Transport in top bar center | Always visible, Ableton-style icons | ARCHITECTURE-DEEP-DIVE.md §7.7 |
+| Drag dividers for panel resizing | Standard IDE/DAW pattern | ARCHITECTURE-DEEP-DIVE.md §7.5 |
+| History = dropdown button | Not a sidebar column | ARCHITECTURE-DEEP-DIVE.md §7.11 |
+| Keyboard MIDI: transport still works | Only letter/number keys become MIDI | ARCHITECTURE-DEEP-DIVE.md §7.9 |
+| Histogram hidden by default | View menu toggle, overlay on preview | ARCHITECTURE-DEEP-DIVE.md §7.13 |
+| Render = Freeze/Flatten per-track | Right-click context menu, not toolbar button | ARCHITECTURE-DEEP-DIVE.md §7.14 |
+| Browser collapsible via button | Tab key or button | ARCHITECTURE-DEEP-DIVE.md §7.12 |
+| Max 8 tracks | Right-click or "+" to add | ARCHITECTURE-DEEP-DIVE.md §7.6 |
+| MIDI routing in Preferences | Enable/disable per MIDI device | ARCHITECTURE-DEEP-DIVE.md §7.9 |

@@ -14,6 +14,7 @@
 4. [Pixel Physics Consolidation](#4-pixel-physics-consolidation)
 5. [Photoshop-Level Color Tools](#5-photoshop-level-color-tools)
 6. [Parameter Sensitivity / Metering System](#6-parameter-sensitivity--metering-system)
+7. [**Unified Timeline Architecture (UI Redesign)**](#7-unified-timeline-architecture-ui-redesign)
 
 ---
 
@@ -1641,4 +1642,283 @@ Phase 7 can run independently after Phase 1.
 
 ---
 
-*CTO Analysis by Claude | 2026-02-15 | Grounded in Entropic source code review*
+## 7. Unified Timeline Architecture (UI Redesign)
+
+> **Date:** 2026-02-15 (UAT Round 2)
+> **Severity:** CRITICAL — Fundamental architecture change
+> **User quotes:**
+> - "This separate mixer view is a UX nightmare. It compounds so terribly; it's a completely different interface."
+> - "If a performance is supposed to be time-based, why do I have no timeline?"
+> - "This UX is awful. Have you actually read up on Ableton's Flow?"
+> - "The MIDI effects are like the triggers, the samplers. The operators are like our LFOs, and the audio effects are like our video effects. It's the same thing."
+
+### 7.1 Problem Statement
+
+Entropic has 3 separate modes (Quick/Timeline/Perform) that each present a different UI. Perform mode removes the timeline entirely and shows a Mixer with pre-loaded effects. This violates Don Norman's conceptual model principle — the user must rebuild their mental model every time they switch modes.
+
+### 7.2 Core Decision: Kill Separate Modes, Unify into Timeline
+
+**Before (Broken):**
+- Quick mode: Apply effects to single image (no timeline, no layers)
+- Timeline mode: Arrange effects over time (no perform controls)
+- Perform mode: Trigger effects live (no timeline, separate mixer)
+
+**After (Unified):**
+- ONE view: Timeline is always visible
+- Perform = a device module on a track (like Ableton's Drum Rack)
+- Mixer controls = per-track in timeline (not a separate panel)
+- Transport = always in top bar
+
+### 7.3 Mental Model: Ableton Mapping
+
+| Ableton Concept | Entropic Equivalent | Lives WHERE |
+|----------------|---------------------|-------------|
+| Audio Track | Video Track (1-8 max) | Timeline row |
+| Audio Effects (Reverb, Delay) | Video Effects (Pixelsort, VHS) | Per-track chain (bottom panel) |
+| MIDI Effects (Arpeggiator) | Triggers / Samplers | Per-track device |
+| Operators (LFO, Envelope) | LFO, Envelope, Sidechain | Per-track device |
+| Instrument (Drum Rack) | Perform module | Per-track device |
+| Mixer faders | Per-track opacity/solo/mute/blend | Track header (LEFT side) |
+| Transport (Play/Rec) | Transport | Top bar, center (always visible) |
+| Loop brace | Loop region | Timeline ruler selection |
+| Computer MIDI Keyboard | Keyboard toggle | Top bar toggle button |
+| MIDI Learn | Parameter mapping | Future (click knob → move controller) |
+
+### 7.4 Layout Specification
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ TOPBAR                                                       │
+│ [Logo] [Load File] [Export]                                  │
+│         ◄ ▶/▮▮ ● ◎ ⊡ ↻Loop │ 0:00:00 / 0:30:00           │
+│                          [🎹 Keyboard] [Undo↶] [Redo↷]      │
+├──────┬──────────────────────────────────────────────────────┤
+│ MENU │ File │ Edit │ View                                    │
+├──────┴──────────────────────────────────────────────────────┤
+│ BROWSER │ PREVIEW CANVAS                                     │
+│ (collap-│                                                    │
+│  sible) │     ┌──────────────────────┐                      │
+│         │     │  Video Preview       │                      │
+│ Effects │     │                      │                      │
+│ Presets │     └──────────────────────┘                      │
+│         │                                                    │
+│─────────┼─── drag divider ──────────────────────────────────│
+│         │ TIMELINE                                           │
+│         │ ┌─ Track 1 ─────────────────────────────────────┐ │
+│         │ │[▼ 100% S M │Normal▾] ▓▓▓░░░▓▓▓░░░░░░░░░░░░░│ │
+│         │ ├─ Track 2 ─────────────────────────────────────┤ │
+│         │ │[▼  80% S M │Multiply▾] ░░▓▓▓▓▓░░░░▓▓░░░░░░░│ │
+│         │ ├─ + Add Track ─────────────────────────────────┤ │
+│         │ └───────────────────────────────────────────────┘ │
+│─────────┼─── drag divider ──────────────────────────────────│
+│         │ EFFECT CHAIN (selected track)                      │
+│         │ [Pixelsort] → [Scanlines] → [LFO] → [VHS] [+]   │
+└─────────┴───────────────────────────────────────────────────┘
+  [☽ theme switch]                                bottom-right
+```
+
+### 7.5 Panel Behavior
+
+| Panel | Default | Resizable | Collapsible | Method |
+|-------|---------|-----------|-------------|--------|
+| Browser (left) | 220px width | Yes (drag divider) | Yes (button) | Collapse to 0px |
+| Preview | 1fr (fills remaining) | Yes (drag dividers) | No | Always visible |
+| Timeline | 140px height | Yes (drag divider) | Yes (▼ toggle) | Collapse to header only |
+| Effect Chain | 200px height | Yes (drag divider) | Yes (▼ toggle) | Collapse to header only |
+| Menu bar | 24px | No | No | Always visible |
+| Top bar | 44px | No | No | Always visible |
+
+**Drag dividers:** Thin (4px) bars between panels. Grab and drag to resize. Sizes saved to localStorage. Standard pattern from VSCode/Ableton/Photoshop.
+
+### 7.6 Track Strip Specification
+
+Each track in the timeline has a LEFT header with controls:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ▼ Track 1          [100%] [S] [M] [Normal ▾]            │
+│   └ [Pixelsort, VHS, LFO]  ▓▓▓░░▓▓▓░░░░░░░░░░░░░░░░░  │
+├──────────────────────────────────────────────────────────┤
+│ ▼ Track 2          [ 80%] [S] [M] [Multiply ▾]          │
+│   └ [Scanlines, Curves]    ░░░▓▓▓▓▓▓░░░▓▓░░░░░░░░░░░░  │
+├──────────────────────────────────────────────────────────┤
+│ + Add Track                                              │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Controls per track (left header):**
+- ▼ Collapse/expand toggle
+- Track name (editable, double-click)
+- Opacity slider (0-100%, compact inline)
+- [S] Solo button (yellow when active)
+- [M] Mute button (red when active)
+- Blend mode dropdown (Normal, Multiply, Screen, Add, Overlay, Darken, Lighten, etc.)
+- Mini chain indicator (effect names or icons, showing what's on this track)
+
+**Right-click context menu on track:**
+- Add Track Above / Below
+- Duplicate Track
+- Delete Track
+- Freeze Track (render to cached frames — like Ableton Freeze)
+- Flatten Track (commit frozen frames — like Ableton Flatten)
+- Move Up / Move Down
+
+**Right-click on timeline background:**
+- Add Track
+- Paste
+
+**Max tracks:** 8
+
+### 7.7 Transport Bar Specification
+
+**Location:** Top bar, center. Always visible.
+
+```
+[◄ Prev] [▶ Play / ▮▮ Pause] [● Rec] [◎ Overdub] [⊡ Capture] [↻ Loop]
+                    0:00:00 / 0:30:00    F:0/900
+```
+
+**Icons (Ableton-style):**
+| Control | Icon | Active State | Shortcut |
+|---------|------|-------------|----------|
+| Play/Pause | ▶ / ▮▮ (toggles) | Green when playing | Space |
+| Record | ● (solid red circle) | Red pulse when recording | R (when NOT in MIDI mode) |
+| Overdub | ◎ (hollow red circle) | Red outline pulse | Shift+R |
+| Capture | ⊡ (reticle square) | Blinks briefly on capture | Cmd+Shift+C |
+| Loop | ↻ | Orange when loop active | L |
+| Prev frame | ◄ | — | ← arrow |
+
+**Loop:** When Loop is active, an orange bracket appears on the timeline ruler. User drags edges to set loop region. Playback loops within this region.
+
+### 7.8 Perform Module (Per-Track Device)
+
+A "Perform" device is a device type that goes ON a track's effect chain, just like any effect or operator. Think of it like Ableton's Drum Rack.
+
+**What it contains:**
+- Trigger slots (up to 8 per perform device)
+- Each slot can be mapped to: toggle a track, trigger an effect, change a parameter
+- ADSR envelope per slot (how the trigger fades in/out)
+- Trigger modes: toggle, one-shot, hold, retrigger
+
+**How it appears in chain:**
+```
+[Pixelsort] → [Perform 🎹] → [VHS]
+```
+
+Clicking the Perform device expands its UI in the chain panel, showing the trigger grid.
+
+### 7.9 Keyboard / MIDI Input
+
+**Keyboard toggle:** Button in top bar (🎹 icon). When ON:
+- Letter/number keys send MIDI notes (A=A3, S=A#3, etc. — Ableton layout)
+- Transport shortcuts STILL work (Space, Cmd+Z, Cmd+E, etc.)
+- Hotkeys that conflict with MIDI notes are DISABLED (A for automation, S for solo, etc.)
+- Visual indicator: 🎹 button glows orange when active
+
+**MIDI routing (Preferences dialog):**
+- List all detected MIDI input devices
+- Enable/disable per device
+- MIDI channel filtering (1-16, or All)
+- Future: MIDI Learn for parameter mapping (click knob → move controller)
+
+### 7.10 Toolbar Reorganization
+
+**Top bar layout (left to right):**
+```
+[Logo] [Load File] [Export] | [◄] [▶/▮▮] [●] [◎] [⊡] [↻] 0:00/0:30 | [🎹] [↶ Undo] [↷ Redo] [Randomize 🎲] [Refresh ↻] [History ▾]
+```
+
+**Menu bar (below top bar):**
+| Menu | Items |
+|------|-------|
+| File | Import File..., Export..., Save Preset, Load Preset |
+| Edit | Undo, Redo, Randomize Chain, Clear Chain, Preferences... |
+| View | Toggle Browser, Toggle Histogram, Keyboard Shortcuts, Help |
+
+**Removed from top bar:**
+- Mode toggle (Quick/Timeline/Perform) — KILLED
+- "Refresh Preview" text → replaced with ↻ icon
+- "Export" text button → moved next to "Load File"
+
+**Undo/Redo:** Small icon buttons (↶ ↷), no text labels.
+
+### 7.11 History
+
+**NOT a sidebar column.** History is a dropdown button in the top bar.
+
+Click "History ▾" → dropdown panel appears (240px wide, max 400px tall, scrollable). Shows undo history entries. Click an entry to jump to that state.
+
+### 7.12 Browser (Effects/Presets)
+
+**Collapsible** via button in browser header. When collapsed, browser width = 0 and preview fills the space. Toggle with Tab key or button.
+
+### 7.13 Histogram
+
+Hidden by default. Available via View > Toggle Histogram. When visible, appears as a small overlay on the preview area (not in the chain). Shows RGB + Luma distribution for the current frame.
+
+### 7.14 Render vs Export
+
+| Term | What it does | How to access |
+|------|-------------|---------------|
+| Freeze | Cache rendered frames for a track (speeds up playback) | Right-click track → Freeze |
+| Flatten | Commit frozen frames permanently (reduces to one baked clip) | Right-click track → Flatten |
+| Export | Output final video file (MP4, MOV, GIF, PNG seq, WebM) | File → Export or Cmd+E |
+
+**No separate "Render" button in the toolbar.** Freeze/Flatten are per-track operations via context menu.
+
+### 7.15 Preview Canvas
+
+- Preview should match source resolution when possible (no forced downsampling)
+- User can zoom preview with scroll wheel or View menu (Fit, 50%, 100%, 200%)
+- Preview quality toggle in View menu: Draft (fast, lower res) / Full (slower, source res)
+
+### 7.16 What Gets Removed
+
+| Component | Status | Reason |
+|-----------|--------|--------|
+| Quick mode | KILLED | Timeline with 1 track = Quick mode |
+| Perform mode | KILLED | Perform module is a per-track device |
+| Separate Mixer panel | KILLED | Per-track opacity/solo/mute/blend in track header |
+| Perform transport bar | KILLED | Transport always in top bar |
+| Right sidebar (Devices/History) | KILLED | History = dropdown, Devices = track strips |
+| Info panel | DEFERRED | Feature-flagged off (too cluttered, needs more work) |
+| Mode toggle buttons | KILLED | No modes |
+
+### 7.17 Implementation Phases
+
+```
+Phase A: Layout Shell (HTML/CSS)
+  - New grid: topbar + menubar + (browser | preview) + timeline + chain
+  - Drag dividers between panels
+  - Transport bar in top bar center
+  - Browser collapse button
+  - Remove mode toggle, right panel, info panel, perform panel
+
+Phase B: Track System
+  - Track strips in timeline (1-8)
+  - Per-track header: opacity, solo, mute, blend
+  - Right-click context menu (Add/Delete/Freeze/Flatten)
+  - "+" button at bottom of track list
+  - Selected track → populates chain panel
+
+Phase C: Transport Integration
+  - Play/Pause toggle, Rec, Overdub, Capture icons
+  - Loop brace on timeline ruler
+  - Frame counter + time display
+  - Keyboard MIDI toggle
+
+Phase D: Perform Module
+  - New device type: "Perform" (goes in chain like any device)
+  - Trigger grid UI in chain panel
+  - MIDI note routing to trigger slots
+  - ADSR per trigger slot
+
+Phase E: MIDI Routing
+  - Preferences dialog for MIDI devices
+  - MIDI Learn for parameter mapping
+  - Computer keyboard → MIDI note mapping
+```
+
+---
+
+*CTO Analysis by Claude | 2026-02-15 | Grounded in Entropic source code review + UAT Round 2 user feedback*
