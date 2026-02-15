@@ -425,6 +425,7 @@ let chain = [];           // Current effect chain: [{name, params, bypassed, id}
 let videoLoaded = false;
 let currentFrame = 0;
 let totalFrames = 100;
+let videoFps = 30;
 let deviceIdCounter = 0;
 let previewDebounce = null;
 // Playback frame pre-cache
@@ -1122,6 +1123,7 @@ async function uploadVideo(file) {
 
         videoLoaded = true;
         totalFrames = data.info.total_frames || 100;
+        videoFps = data.info.fps || 30;
         currentFrame = 0;
         _clearPersistedHistory();
 
@@ -3550,6 +3552,14 @@ function openExportDialog() {
     document.getElementById('export-mix').value = mixLevel * 100;
     document.getElementById('export-mix-val').textContent = Math.round(mixLevel * 100) + '%';
     onExportFormatChange();
+    // Pre-populate range fields from video state
+    const fps = videoFps || 30;
+    const totalSec = (totalFrames / fps).toFixed(1);
+    const curSec = (currentFrame / fps).toFixed(1);
+    const outEl = document.getElementById('export-out');
+    if (outEl && !outEl.value) outEl.value = totalSec;
+    const inEl = document.getElementById('export-in');
+    if (inEl) inEl.value = curSec;
 }
 
 function closeExportDialog() {
@@ -3567,6 +3577,12 @@ function onExportFormatChange() {
 function onExportResChange() {
     const val = document.getElementById('export-resolution').value;
     document.getElementById('custom-dims-row').style.display = val === 'custom' ? 'flex' : 'none';
+}
+
+function onExportRangeChange() {
+    const mode = document.getElementById('export-range').value;
+    document.getElementById('export-duration-row').style.display = mode === 'playhead' ? 'flex' : 'none';
+    document.getElementById('export-range-row').style.display = mode === 'custom' ? 'flex' : 'none';
 }
 
 async function startExport() {
@@ -3624,6 +3640,26 @@ async function startExport() {
     // Include LFO config if active
     const lfoConfig = buildLfoConfig();
     if (lfoConfig) settings.lfo_config = lfoConfig;
+
+    // Trim / range selection
+    const rangeMode = document.getElementById('export-range').value;
+    if (rangeMode === 'playhead') {
+        const fps = videoFps || 30;
+        const durationSec = parseFloat(document.getElementById('export-duration').value) || 30;
+        settings.trim = {
+            mode: 'time',
+            start_time: currentFrame / fps,
+            end_time: (currentFrame / fps) + durationSec,
+        };
+    } else if (rangeMode === 'custom') {
+        const inTime = parseFloat(document.getElementById('export-in').value) || 0;
+        const outTime = parseFloat(document.getElementById('export-out').value);
+        settings.trim = {
+            mode: 'time',
+            start_time: inTime,
+            end_time: isNaN(outTime) ? null : outTime,
+        };
+    }
 
     // In timeline mode, include regions data
     if (appMode === 'timeline' && window.timelineEditor) {

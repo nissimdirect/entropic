@@ -277,10 +277,20 @@ class TestUIElements:
         """Export mix slider has effect intensity label."""
         assert "Effect Intensity" in self.html
 
-    def test_mix_slider_explanation(self):
-        """Global mix slider has explanation text."""
-        assert "Original" in self.html
-        assert "Effect" in self.html
+    def test_mix_slider_removed(self):
+        """Global mix slider was removed — per-effect dry/wet handles this."""
+        assert "mix-control" not in self.html
+
+    def test_export_range_selector(self):
+        """Export dialog has range selector (full/playhead/custom)."""
+        assert 'id="export-range"' in self.html
+        assert "Full Video" in self.html
+        assert "From Playhead" in self.html
+        assert "Custom Range" in self.html
+
+    def test_export_duration_field(self):
+        """Export dialog has duration field for playhead export."""
+        assert 'id="export-duration"' in self.html
 
     def test_group_shortcuts_in_reference(self):
         """Shortcut reference includes group shortcuts."""

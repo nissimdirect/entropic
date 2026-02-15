@@ -1289,10 +1289,17 @@ async def export_video(export: ExportSettings):
         # Apply trim if specified
         start_idx = 0
         end_idx = len(frame_files)
-        if export.frame_start is not None:
-            start_idx = max(0, min(export.frame_start, len(frame_files) - 1))
-        if export.frame_end is not None:
-            end_idx = max(start_idx + 1, min(export.frame_end + 1, len(frame_files)))
+        if export.trim.mode.value == "frames":
+            start_idx = max(0, min(export.trim.start_frame, len(frame_files) - 1))
+            if export.trim.end_frame is not None:
+                end_idx = max(start_idx + 1, min(export.trim.end_frame + 1, len(frame_files)))
+        elif export.trim.mode.value == "time":
+            fps = info.get("fps", 30)
+            start_idx = max(0, int(export.trim.start_time * fps))
+            if export.trim.end_time is not None:
+                end_idx = max(start_idx + 1, int(export.trim.end_time * fps) + 1)
+            start_idx = min(start_idx, len(frame_files) - 1)
+            end_idx = min(end_idx, len(frame_files))
         frame_files = frame_files[start_idx:end_idx]
 
         _render_progress["active"] = True

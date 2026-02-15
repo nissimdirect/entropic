@@ -356,6 +356,27 @@
                 </select>
             </div>
             <div class="export-row">
+                <label>Range</label>
+                <select id="export-range" onchange="onExportRangeChange()">
+                    <option value="full">Full Video</option>
+                    <option value="playhead">From Playhead</option>
+                    <option value="custom">Custom Range</option>
+                </select>
+            </div>
+            <div class="export-row" id="export-duration-row" style="display:none">
+                <label>Duration (sec)</label>
+                <input type="number" id="export-duration" min="1" max="600" value="30" step="1">
+                <span class="hint">seconds from playhead</span>
+            </div>
+            <div class="export-row" id="export-range-row" style="display:none">
+                <label>In / Out (sec)</label>
+                <div class="dim-inputs">
+                    <input type="number" id="export-in" placeholder="Start" min="0" step="0.1" value="0">
+                    <span>to</span>
+                    <input type="number" id="export-out" placeholder="End" min="0" step="0.1">
+                </div>
+            </div>
+            <div class="export-row">
                 <label>Scaling Algorithm</label>
                 <select id="export-algo">
                     <option value="lanczos" selected>Lanczos (best quality)</option>
