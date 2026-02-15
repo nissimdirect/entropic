@@ -430,7 +430,8 @@ def pixel_elastic(
         stiffness: Spring stiffness (0.05-0.8). Higher = snappier return.
         mass: Pixel mass (0.5-3.0). Heavier = slower, more momentum.
         force_type: What pushes pixels ("turbulence", "brightness",
-                    "edges", "radial", "vortex", "wave", "shatter", "pulse").
+                    "edges", "radial", "vortex", "wave", "shatter", "pulse",
+                    "gravity", "magnetic", "wind", "explosion").
         force_strength: How hard the push (1-20).
         damping: Energy loss per frame (0.8-0.99).
         concentrate_x: Force center X (0-1). Only used when concentrate_radius > 0.
@@ -532,6 +533,46 @@ def pixel_elastic(
             ring = np.sin(dist * wave_freq - t * 6) * force_strength
             fx = dx / dist * ring * 0.4
             fy = dy / dist * ring * 0.4
+
+        elif force_type == "gravity":
+            # Constant downward pull — pixels sag like they have weight
+            gravity_rng = np.random.default_rng(seed + step)
+            fx = gravity_rng.normal(0, 0.1, (h, w)).astype(np.float32) * force_strength
+            fy = np.full((h, w), force_strength * 0.5, dtype=np.float32)
+
+        elif force_type == "magnetic":
+            # Attraction toward center point with inverse-square falloff
+            y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+            cx_px = max(0.0, min(1.0, float(concentrate_x))) * w
+            cy_px = max(0.0, min(1.0, float(concentrate_y))) * h
+            dx = cx_px - x_grid
+            dy = cy_px - y_grid
+            dist_sq = dx * dx + dy * dy + 1.0
+            inv_sq = force_strength / dist_sq
+            mag = np.sqrt(dx * dx + dy * dy) + 1.0
+            fx = dx / mag * inv_sq * 50.0
+            fy = dy / mag * inv_sq * 50.0
+
+        elif force_type == "wind":
+            # Horizontal directional force with turbulence variation
+            y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+            turb = np.sin(y_grid / 20.0 + t * 2 + phase_y) * np.cos(x_grid / 40.0 + t + phase_x)
+            fx = np.full((h, w), force_strength, dtype=np.float32) + turb * force_strength * 0.3
+            fy = turb * force_strength * 0.15
+
+        elif force_type == "explosion":
+            # Outward radial burst from center, strength decays with frame_index
+            y_grid, x_grid = np.mgrid[0:h, 0:w].astype(np.float32)
+            cx_px = max(0.0, min(1.0, float(concentrate_x))) * w
+            cy_px = max(0.0, min(1.0, float(concentrate_y))) * h
+            dx = x_grid - cx_px
+            dy = y_grid - cy_px
+            dist = np.sqrt(dx * dx + dy * dy) + 1.0
+            progress = frame_index / max(total_frames, 1)
+            decay = max(0.01, 1.0 - progress)
+            burst = force_strength * decay
+            fx = dx / dist * burst
+            fy = dy / dist * burst
 
         else:
             fx = np.zeros((h, w), dtype=np.float32)
@@ -1981,6 +2022,9 @@ def pixel_xerox(
     halftone_size: int = 4,
     edge_fuzz: float = 1.5,
     toner_skip: float = 0.05,
+    registration_offset: float = 0.5,
+    toner_density: float = 1.0,
+    paper_feed: float = 0.3,
     style: str = "copy",
     seed: int = 42,
     frame_index: int = 0,
@@ -2006,6 +2050,9 @@ def pixel_xerox(
         halftone_size: Dot screen size for halftone pattern (2-8).
         edge_fuzz: Edge blur per generation (0-4).
         toner_skip: Probability of white toner gaps per generation (0-0.2).
+        registration_offset: Per-generation color channel misalignment (0-3).
+        toner_density: Overall toner amount (0.3-1.5). Low=faded, high=crushed.
+        paper_feed: Vertical shift per generation (0-2). Paper feed misalignment.
         style: Copier character — 'copy', 'faded', 'harsh', 'zine'.
     """
     h, w = frame.shape[:2]
@@ -2034,12 +2081,18 @@ def pixel_xerox(
 
     result = frame.astype(np.float32)
 
+    # Clamp new params to useful ranges
+    registration_offset = max(0.0, min(3.0, float(registration_offset)))
+    toner_density = max(0.3, min(1.5, float(toner_density)))
+    paper_feed = max(0.0, min(2.0, float(paper_feed)))
+
     for gen in range(current_gens):
         gen_rng = np.random.default_rng(seed + gen * 7)
 
-        # Contrast crush: push toward black/white
+        # Contrast crush: push toward black/white, scaled by toner_density
         mean = np.mean(result)
-        result = (result - mean) * contrast_gain + mean
+        effective_gain = contrast_gain * toner_density
+        result = (result - mean) * effective_gain + mean
 
         # Noise accumulation (copy machine sensor noise)
         noise = gen_rng.normal(0, noise_amount * 255, result.shape).astype(np.float32)
@@ -2049,6 +2102,21 @@ def pixel_xerox(
         if edge_fuzz > 0 and gen % 2 == 0:
             ksize = max(3, int(edge_fuzz) * 2 + 1)
             result = cv2.GaussianBlur(result, (ksize, ksize), edge_fuzz * 0.5)
+
+        # Color registration misalignment (imperfect color alignment per copy)
+        if registration_offset > 0:
+            for c in range(min(3, result.shape[2]) if result.ndim == 3 else 0):
+                shift_x = int(gen_rng.normal(0, registration_offset))
+                shift_y = int(gen_rng.normal(0, registration_offset * 0.5))
+                if shift_x != 0 or shift_y != 0:
+                    result[:, :, c] = np.roll(result[:, :, c], shift_x, axis=1)
+                    result[:, :, c] = np.roll(result[:, :, c], shift_y, axis=0)
+
+        # Paper feed misalignment (vertical shift per generation)
+        if paper_feed > 0:
+            shift_y = int(gen_rng.normal(0, paper_feed))
+            if shift_y != 0:
+                result = np.roll(result, shift_y, axis=0)
 
         # Toner skip: random white rectangles
         if toner_skip > 0:

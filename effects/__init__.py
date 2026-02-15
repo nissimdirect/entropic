@@ -784,8 +784,10 @@ EFFECTS = {
     "pixelxerox": {
         "fn": pixel_xerox,
         "category": "destruction",
-        "params": {"generations": 8, "contrast_gain": 1.15, "noise_amount": 0.06, "halftone_size": 4, "edge_fuzz": 1.5, "toner_skip": 0.05, "style": "copy", "seed": 42, "boundary": "clamp"},
-        "description": "Xerox — generational copy loss (styles: copy/faded/harsh/zine)",
+        "params": {"generations": 8, "contrast_gain": 1.15, "noise_amount": 0.06, "halftone_size": 4, "edge_fuzz": 1.5, "toner_skip": 0.05, "registration_offset": 0.5, "toner_density": 1.0, "paper_feed": 0.3, "style": "copy", "seed": 42, "boundary": "clamp"},
+        "param_ranges": {"registration_offset": {"min": 0.0, "max": 3.0}, "toner_density": {"min": 0.3, "max": 1.5}, "paper_feed": {"min": 0.0, "max": 2.0}},
+        "param_descriptions": {"registration_offset": "Color channel misalignment per copy (0=perfect, 3=wild)", "toner_density": "Toner amount (low=faded ghostly, high=dark crushed)", "paper_feed": "Vertical shift per copy generation (paper feed error)"},
+        "description": "Xerox — generational copy loss (styles: copy/faded/harsh/zine) + registration/toner/paper-feed",
         "alias_of": "pixeldecay",
     },
     "pixelfax": {

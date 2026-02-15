@@ -151,6 +151,157 @@ class TestPixelElasticFixes:
         assert diff > 0.5, f"Pulse should visibly displace, got diff={diff:.2f}"
 
 
+class TestPixelElasticNewForces:
+    """Test 4 new elastic force types: gravity, magnetic, wind, explosion."""
+
+    def test_gravity_force_type(self):
+        """Gravity force should work without crashing."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "gravity", "seed": 101}}]
+        result = apply_chain(frame.copy(), chain, frame_index=0, total_frames=10)
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_gravity_produces_displacement(self):
+        """Gravity should produce visible downward displacement over frames."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "gravity", "force_strength": 10.0, "seed": 102}}]
+        for i in range(6):
+            result = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+        diff = np.mean(np.abs(result.astype(float) - frame.astype(float)))
+        assert diff > 0.5, f"Gravity should visibly displace, got diff={diff:.2f}"
+
+    def test_magnetic_force_type(self):
+        """Magnetic force should work without crashing."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "magnetic", "seed": 103}}]
+        result = apply_chain(frame.copy(), chain, frame_index=0, total_frames=10)
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_magnetic_produces_displacement(self):
+        """Magnetic force should pull pixels toward center."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "magnetic", "force_strength": 10.0, "seed": 104}}]
+        for i in range(6):
+            result = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+        diff = np.mean(np.abs(result.astype(float) - frame.astype(float)))
+        assert diff > 0.5, f"Magnetic should visibly displace, got diff={diff:.2f}"
+
+    def test_wind_force_type(self):
+        """Wind force should work without crashing."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "wind", "seed": 105}}]
+        result = apply_chain(frame.copy(), chain, frame_index=0, total_frames=10)
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_wind_produces_displacement(self):
+        """Wind should produce visible horizontal displacement over frames."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "wind", "force_strength": 10.0, "seed": 106}}]
+        for i in range(6):
+            result = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+        diff = np.mean(np.abs(result.astype(float) - frame.astype(float)))
+        assert diff > 0.5, f"Wind should visibly displace, got diff={diff:.2f}"
+
+    def test_explosion_force_type(self):
+        """Explosion force should work without crashing."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "explosion", "seed": 107}}]
+        result = apply_chain(frame.copy(), chain, frame_index=0, total_frames=10)
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_explosion_produces_displacement(self):
+        """Explosion should produce visible outward displacement."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelelastic", "params": {"force_type": "explosion", "force_strength": 10.0, "seed": 108}}]
+        for i in range(6):
+            result = apply_chain(frame.copy(), chain, frame_index=i, total_frames=30)
+        diff = np.mean(np.abs(result.astype(float) - frame.astype(float)))
+        assert diff > 0.5, f"Explosion should visibly displace, got diff={diff:.2f}"
+
+    def test_explosion_decays_over_time(self):
+        """Explosion force should be stronger early and weaker late."""
+        frame = make_test_frame()
+        # Early frames (strong burst)
+        chain_early = [{"name": "pixelelastic", "params": {"force_type": "explosion", "force_strength": 15.0, "seed": 109}}]
+        for i in range(3):
+            result_early = apply_chain(frame.copy(), chain_early, frame_index=i, total_frames=30)
+        diff_early = np.mean(np.abs(result_early.astype(float) - frame.astype(float)))
+        # Late frames (decayed)
+        chain_late = [{"name": "pixelelastic", "params": {"force_type": "explosion", "force_strength": 15.0, "seed": 110}}]
+        for i in range(25, 30):
+            result_late = apply_chain(frame.copy(), chain_late, frame_index=i, total_frames=30)
+        diff_late = np.mean(np.abs(result_late.astype(float) - frame.astype(float)))
+        # Early should have more displacement than late
+        assert diff_early >= diff_late * 0.3, f"Explosion should decay: early={diff_early:.1f} late={diff_late:.1f}"
+
+
+class TestPixelXeroxNewParams:
+    """Test 3 new xerox params: registration_offset, toner_density, paper_feed."""
+
+    def test_registration_offset_changes_output(self):
+        """Non-zero registration_offset should produce different output than zero."""
+        frame = make_test_frame()
+        chain_zero = [{"name": "pixelxerox", "params": {"registration_offset": 0.0, "seed": 200}}]
+        chain_high = [{"name": "pixelxerox", "params": {"registration_offset": 2.5, "seed": 200}}]
+        result_zero = apply_chain(frame.copy(), chain_zero, frame_index=5, total_frames=10)
+        result_high = apply_chain(frame.copy(), chain_high, frame_index=5, total_frames=10)
+        diff = np.mean(np.abs(result_zero.astype(float) - result_high.astype(float)))
+        assert diff > 0.5, f"Registration offset should change output, got diff={diff:.2f}"
+
+    def test_toner_density_low_fades(self):
+        """Low toner_density should produce a more faded (brighter) image."""
+        frame = make_test_frame()
+        chain_low = [{"name": "pixelxerox", "params": {"toner_density": 0.4, "seed": 201}}]
+        chain_high = [{"name": "pixelxerox", "params": {"toner_density": 1.4, "seed": 201}}]
+        result_low = apply_chain(frame.copy(), chain_low, frame_index=5, total_frames=10)
+        result_high = apply_chain(frame.copy(), chain_high, frame_index=5, total_frames=10)
+        diff = np.mean(np.abs(result_low.astype(float) - result_high.astype(float)))
+        assert diff > 1.0, f"Toner density should change contrast, got diff={diff:.2f}"
+
+    def test_paper_feed_shifts_vertically(self):
+        """Non-zero paper_feed should produce different output than zero."""
+        frame = make_test_frame()
+        chain_zero = [{"name": "pixelxerox", "params": {"paper_feed": 0.0, "seed": 202}}]
+        chain_high = [{"name": "pixelxerox", "params": {"paper_feed": 1.5, "seed": 202}}]
+        result_zero = apply_chain(frame.copy(), chain_zero, frame_index=5, total_frames=10)
+        result_high = apply_chain(frame.copy(), chain_high, frame_index=5, total_frames=10)
+        diff = np.mean(np.abs(result_zero.astype(float) - result_high.astype(float)))
+        assert diff > 0.5, f"Paper feed should shift output, got diff={diff:.2f}"
+
+    def test_xerox_new_params_no_crash(self):
+        """Xerox with all new params at various values should not crash."""
+        frame = make_test_frame()
+        chain = [{"name": "pixelxerox", "params": {
+            "registration_offset": 2.0,
+            "toner_density": 0.5,
+            "paper_feed": 1.0,
+            "seed": 203,
+        }}]
+        for i in range(5):
+            result = apply_chain(frame.copy(), chain, frame_index=i, total_frames=10)
+        assert result.shape == frame.shape
+        assert result.dtype == np.uint8
+
+    def test_xerox_styles_with_new_params(self):
+        """All xerox styles should work with new params without crashing."""
+        frame = make_test_frame()
+        for style in ["copy", "faded", "harsh", "zine"]:
+            chain = [{"name": "pixelxerox", "params": {
+                "style": style,
+                "registration_offset": 1.0,
+                "toner_density": 0.8,
+                "paper_feed": 0.5,
+                "seed": 204,
+            }}]
+            result = apply_chain(frame.copy(), chain, frame_index=3, total_frames=10)
+            assert result.shape == frame.shape, f"Style '{style}' failed shape check"
+            assert result.dtype == np.uint8, f"Style '{style}' failed dtype check"
+
+
 class TestPixelMagneticFixes:
     """Test magnetic effect fixes: poles, rotation, damping, seed, no overflow."""
 
