@@ -1,7 +1,7 @@
 # Entropic Alpha v2 — User Acceptance Testing Plan
 
-> **Date:** 2026-02-09 (updated 2026-02-14)
-> **Version:** v0.7.0-dev (115 effects, desktop app, timeline editor, spatial masks, **CLI performance mode**, **Web UI Perform Mode**, **Color Suite**, **LFO Map Operator**)
+> **Date:** 2026-02-09 (updated 2026-02-15)
+> **Version:** v0.7.0-dev (115 effects, desktop app, timeline editor, spatial masks, **CLI performance mode**, **Web UI Perform Mode**, **Color Suite**, **LFO Map Operator**, **Parameter Accordion**, **Timeline Automation Lanes**, **Freeze/Flatten**, **Operator Mapping Expansion**)
 > **Tester:** nissimdirect
 > **Prepared by:** CTO, Red Team, Mad Scientist, Lenny, Don Norman
 > **Updated:** Sections 22-27 for CLI Performance Mode. **Sections 28-34 for Web UI Perform Mode (v0.6.0).**
@@ -1998,11 +1998,99 @@ If you're short on time, test in this order:
 | 40.3 | Effect chain | Add blur → pixelsort → scanlines | All 3 visible in chain, preview shows combined | |
 | 40.4 | Export MP4 | Export 3-sec clip with effects | MP4 file created, plays in QuickTime | |
 | 40.5 | Perform mode | Switch to Perform mode, press 1-4 | Layers toggle, mixer responds | |
-| 40.6 | Test suite | `python3 -m pytest tests/ -q` | 811+ passed, 0 failed | |
+| 40.6 | Test suite | `python3 -m pytest tests/ -q` | 859+ passed, 0 failed | |
 
 ---
 
-## UPDATED SCORING SUMMARY (Cycle 2)
+## SECTION 41: PARAMETER ACCORDION (New — Sprint)
+
+> Essential/Advanced param grouping. 40 effects have `essential` arrays in control-map.json.
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 41.1 | Accordion visible | Add pixelsort → look at param panel | Only essential params shown, "+ N more" button visible | |
+| 41.2 | Expand advanced | Click "+ N more" button | Advanced params reveal with smooth animation | |
+| 41.3 | Collapse advanced | Click toggle again (shows "- less") | Advanced params hide, toggle returns to "+ N more" | |
+| 41.4 | Advanced params work | Expand advanced, drag a knob | Preview updates — advanced params are functional | |
+| 41.5 | No accordion when all essential | Add sharpen (1 param) | No toggle button shown — all params are essential | |
+| 41.6 | Multi-param effect | Add smear or kaleidoscope | Essential params visible, 2+ advanced params behind toggle | |
+| 41.7 | Accordion persists | Toggle advanced open → add another effect → return | Accordion state preserved across chain re-renders | |
+| 41.8 | Unmapped effect | Add an effect NOT in control-map.json | All params shown normally (no accordion, no crash) | |
+
+---
+
+## SECTION 42: TIMELINE AUTOMATION LANES (New — Sprint)
+
+> Ableton-quality breakpoint automation on timeline regions.
+
+**Setup:** Switch to Timeline mode. Create a region (drag video). Add at least one effect to the region's chain.
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 42.1 | Create lane from device | Right-click effect device → "Automate: intensity" | Automation lane appears below track in timeline | |
+| 42.2 | Create lane from knob | Right-click a param knob → "Create Automation Lane" | Lane created, knob shows colored dot indicator | |
+| 42.3 | Add breakpoint (click line) | Click on the interpolated line in a lane | New breakpoint appears at click position | |
+| 42.4 | Add breakpoint (double-click) | Double-click empty area in lane body | Breakpoint created at click frame/value | |
+| 42.5 | Drag breakpoint | Click-drag a breakpoint dot | Point moves: X = frame, Y = 0-1 value. Constrained to lane bounds | |
+| 42.6 | Fine drag (Shift) | Shift+drag a breakpoint vertically | Y moves at 4x precision (finer adjustment) | |
+| 42.7 | Delete breakpoint | Right-click a breakpoint dot | Point removed, line re-interpolates | |
+| 42.8 | Toggle visibility | Press 'A' key | All automation lanes show/hide | |
+| 42.9 | Multiple lanes | Create 2 lanes on different params | Both render with different colors below the track | |
+| 42.10 | Lane header | Look at lane left edge | Shows param name + color bar | |
+| 42.11 | Preview responds | Add 3+ breakpoints, scrub playhead | Preview image changes as playhead passes breakpoints | |
+| 42.12 | Bezier curves | Alt+drag a line segment between two points | Curve handle appears, line becomes smooth bezier | |
+| 42.13 | Marquee selection | Click+drag in lane background (not on a point) | Dashed rectangle appears, enclosed breakpoints get selected | |
+| 42.14 | Multi-point drag | Select 3+ points via marquee → drag one | All selected points move together | |
+| 42.15 | Insert shape: Sine | Right-click lane → Insert Shape → Sine | Sine wave breakpoints appear across visible range | |
+| 42.16 | Insert shape: Ramp | Right-click lane → Insert Shape → Ramp Up | Linear ascending breakpoints appear | |
+| 42.17 | Copy breakpoints | Select breakpoints → Cmd+C | Toast or visual confirmation of copy | |
+| 42.18 | Paste breakpoints | Move playhead → Cmd+V | Breakpoints paste at new playhead position | |
+| 42.19 | Cross-lane paste | Copy from lane A → select lane B → Cmd+V | Points paste into different parameter's lane (normalized 0-1) | |
+| 42.20 | Draw mode toggle | Press 'B' key | Draw mode indicator appears (or cursor changes) | |
+| 42.21 | Draw mode stroke | In draw mode, click-drag across lane | Grid-quantized step automation created (one point per grid division) | |
+| 42.22 | Simplify | Right-click lane → "Simplify" | Point count reduces while preserving curve shape (RDP algorithm) | |
+| 42.23 | Delete selected | Select points → press Delete/Backspace | Selected breakpoints removed | |
+| 42.24 | Serialize/load | Save timeline project → reload | Automation lanes and breakpoints persist after reload | |
+
+---
+
+## SECTION 43: FREEZE & FLATTEN (New — Sprint)
+
+> Render-in-place for timeline regions. Pre-render effects for instant playback.
+
+**Setup:** Timeline mode with a region that has 2+ effects applied.
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 43.1 | Freeze region | Right-click region → "Freeze" | Snowflake icon appears on region. Effects chain grays out (read-only) | |
+| 43.2 | Frozen preview | Scrub playhead over frozen region | Preview loads instantly (pre-rendered frames) | |
+| 43.3 | Frozen params locked | Try to drag a knob while frozen | Knob doesn't respond / params are visually read-only | |
+| 43.4 | Unfreeze | Right-click frozen region → "Unfreeze" | Snowflake disappears. Effects chain becomes editable again | |
+| 43.5 | Unfreeze restores params | After unfreeze, drag a knob | Knob works, live preview resumes | |
+| 43.6 | Flatten | Freeze first → right-click → "Flatten" | Confirmation dialog appears: "This will permanently bake effects..." | |
+| 43.7 | Flatten confirm | Click "OK" on flatten dialog | Effects removed from chain. Region label shows "[flattened]". Video now contains baked effects. | |
+| 43.8 | Flatten is destructive | After flatten, check effect chain | Chain is empty — effects are baked into the video permanently | |
+
+---
+
+## SECTION 44: OPERATOR MAPPING EXPANSION (New — Sprint)
+
+> Extended modulation mapping: knob context menus, automation lane indicators.
+
+| # | Test | Steps | Expected | PASS/FAIL |
+|---|------|-------|----------|-----------|
+| 44.1 | Knob right-click menu | Right-click any param knob | Context menu: "Create Automation Lane", "Map to LFO" | |
+| 44.2 | Create lane from knob | Right-click knob → "Create Automation Lane" | Lane appears in timeline. Knob gets colored dot badge | |
+| 44.3 | Auto-mapped indicator | After creating automation lane, look at the knob | Colored dot (matches lane color) on top-right of knob | |
+| 44.4 | Show automation lane | Right-click an auto-mapped knob → "Show Automation Lane" | Timeline scrolls to / highlights the automation lane | |
+| 44.5 | Delete lane from knob | Right-click auto-mapped knob → "Delete Automation Lane" | Lane removed. Colored dot disappears from knob | |
+| 44.6 | LFO + Automation combined | Map knob to LFO AND create automation lane | Knob shows both tilde (~) and color glow | |
+| 44.7 | Map to LFO from knob | Right-click knob → "Map to LFO" | Same behavior as the Map button — knob gets LFO-mapped | |
+| 44.8 | Unmap LFO from knob | Right-click LFO-mapped knob → "Unmap from LFO" | LFO mapping removed, knob becomes draggable again | |
+
+---
+
+## UPDATED SCORING SUMMARY (Cycle 3)
 
 | Section | Tests | Pass | Fail | Skip |
 |---------|-------|------|------|------|
@@ -2011,10 +2099,18 @@ If you're short on time, test in this order:
 | 38. LFO Map Operator | 13 | | | |
 | 39. UI Improvements | 6 | | | |
 | 40. Regression Suite | 6 | | | |
-| **Cycle 2 Total** | **61** | | | |
-| **Grand Total (Cycle 1 + 2)** | **533** | | | |
+| 41. Parameter Accordion | 8 | | | |
+| 42. Timeline Automation Lanes | 24 | | | |
+| 43. Freeze & Flatten | 8 | | | |
+| 44. Operator Mapping Expansion | 8 | | | |
+| **Cycle 3 Total** | **109** | | | |
+| **Grand Total (Cycle 1 + 2 + 3)** | **581** | | | |
 
-**Cycle 2 ship criteria:**
+**Cycle 3 ship criteria:**
 - Sections 36-37: 100% pass (bug fixes + new effects must work)
 - Section 38: 90%+ pass (LFO is new, some polish OK)
 - Section 39-40: 100% pass (UI + regression = must pass)
+- Section 41: 100% pass (accordion is simple, must work)
+- Section 42: 85%+ pass (automation lanes are complex, edge cases expected)
+- Section 43: 100% pass (freeze/flatten is critical workflow)
+- Section 44: 90%+ pass (mapping expansion, polish OK)

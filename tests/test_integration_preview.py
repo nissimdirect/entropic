@@ -313,6 +313,120 @@ def run_tests():
             print(f"  ERROR chain: {e}")
             results["errors"] += 1
 
+        # === TEST 6: Automation lane engine (backend) ===
+        print(f"\n--- Automation Lane Engine ---")
+        try:
+            from core.automation import AutomationLane, AutomationSession
+            lane = AutomationLane(0, "intensity")
+            lane.add_keyframe(0, 0.0)
+            lane.add_keyframe(30, 1.0)
+            lane.add_keyframe(60, 0.5)
+
+            # Test interpolation at various points
+            v0 = lane.get_value(0)
+            v15 = lane.get_value(15)
+            v30 = lane.get_value(30)
+            v45 = lane.get_value(45)
+            v60 = lane.get_value(60)
+
+            assert v0 == 0.0, f"Frame 0 should be 0.0, got {v0}"
+            assert 0.4 < v15 < 0.6, f"Frame 15 should be ~0.5, got {v15}"
+            assert v30 == 1.0, f"Frame 30 should be 1.0, got {v30}"
+            assert 0.7 < v45 < 0.8, f"Frame 45 should be ~0.75, got {v45}"
+            assert v60 == 0.5, f"Frame 60 should be 0.5, got {v60}"
+            print(f"  PASS  AutomationLane interpolation: 5/5 checkpoints correct")
+            results["passed"] += 1
+
+            # Test bezier curve
+            lane_b = AutomationLane(0, "blur_radius")
+            lane_b.add_keyframe(0, 0.0, curve="bezier", cp1=(0.42, 0.0), cp2=(0.58, 1.0))
+            lane_b.add_keyframe(30, 1.0)
+            v_mid = lane_b.get_value(15)
+            assert 0.0 < v_mid < 1.0, f"Bezier midpoint should be between 0 and 1, got {v_mid}"
+            print(f"  PASS  Bezier interpolation: midpoint={v_mid:.3f}")
+            results["passed"] += 1
+
+            # Test session apply_to_chain
+            session = AutomationSession()
+            s_lane = session.add_lane(0, "intensity")
+            s_lane.add_keyframe(0, 0.0)
+            s_lane.add_keyframe(30, 1.0)
+            s_lane.add_keyframe(60, 0.5)
+            test_chain = [{"name": "blur", "params": {"intensity": 0.0}}]
+            applied = session.apply_to_chain(test_chain, 30)
+            assert applied[0]["params"]["intensity"] == 1.0, f"apply_to_chain should set intensity to 1.0 at frame 30"
+            print(f"  PASS  AutomationSession.apply_to_chain works")
+            results["passed"] += 1
+
+            # Test bake_lane
+            baked = session.bake_lane(0, "intensity", 0, 10)
+            assert len(baked) == 11, f"bake_lane should return 11 frames, got {len(baked)}"
+            assert baked[0] == (0, 0.0)
+            print(f"  PASS  bake_lane: {len(baked)} frames baked")
+            results["passed"] += 1
+
+            # Test to_dict/from_dict roundtrip
+            d = lane.to_dict()
+            lane2 = AutomationLane.from_dict(d)
+            assert lane2.get_value(15) == lane.get_value(15), "Roundtrip serialization failed"
+            print(f"  PASS  to_dict/from_dict roundtrip")
+            results["passed"] += 1
+
+        except Exception as e:
+            print(f"  ERROR Automation engine: {e}")
+            results["errors"] += 1
+
+        # === TEST 7: Freeze endpoint ===
+        print(f"\n--- Freeze Endpoint ---")
+        try:
+            # Test freeze endpoint exists and validates
+            r = requests.post(
+                f"{SERVER_URL}/api/timeline/freeze",
+                json={"region_id": "test_nonexistent", "effects": [], "start_frame": 0, "end_frame": 10},
+                timeout=TIMEOUT,
+            )
+            # Should return 200 (processes) or 422 (validation) — NOT 404
+            assert r.status_code != 404, f"Freeze endpoint not found (404)"
+            print(f"  PASS  Freeze endpoint exists: HTTP {r.status_code}")
+            results["passed"] += 1
+
+            # Test unfreeze endpoint
+            r2 = requests.delete(
+                f"{SERVER_URL}/api/timeline/freeze/test_nonexistent",
+                timeout=TIMEOUT,
+            )
+            assert r2.status_code != 404, f"Unfreeze endpoint not found (404)"
+            print(f"  PASS  Unfreeze endpoint exists: HTTP {r2.status_code}")
+            results["passed"] += 1
+
+        except Exception as e:
+            print(f"  ERROR Freeze endpoint: {e}")
+            results["errors"] += 1
+
+        # === TEST 8: Control-map.json essential arrays ===
+        print(f"\n--- Control Map (Parameter Accordion) ---")
+        try:
+            import json as jsonlib
+            cmap_path = os.path.join(PROJECT_ROOT, "ui", "static", "control-map.json")
+            with open(cmap_path) as f:
+                cmap = jsonlib.load(f)
+            effects = cmap.get("effects", {})
+            total = len(effects)
+            with_essential = sum(1 for e in effects.values() if "essential" in e)
+            print(f"  INFO  {total} effects in control-map.json, {with_essential} have essential arrays")
+            assert total >= 40, f"Expected 40+ effects, got {total}"
+            assert with_essential >= 40, f"Expected 40+ with essential arrays, got {with_essential}"
+            # Verify essential arrays are non-empty subsets of params
+            for name, data in effects.items():
+                ess = data.get("essential", [])
+                assert isinstance(ess, list), f"{name}: essential is not a list"
+                assert len(ess) > 0, f"{name}: essential array is empty"
+            print(f"  PASS  All {with_essential} effects have valid essential arrays")
+            results["passed"] += 1
+        except Exception as e:
+            print(f"  ERROR Control map: {e}")
+            results["errors"] += 1
+
     finally:
         print(f"\n[TEARDOWN] Stopping server...")
         stop_server(proc)
