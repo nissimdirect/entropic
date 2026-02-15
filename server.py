@@ -23,7 +23,7 @@ from pydantic import BaseModel
 import numpy as np
 from PIL import Image
 
-from effects import EFFECTS, CATEGORIES, apply_chain
+from effects import EFFECTS, CATEGORIES, apply_chain, is_video_level
 from packages import PACKAGES
 from core.video_io import probe_video, extract_single_frame
 from core.export_models import ExportSettings
@@ -72,6 +72,7 @@ class RenderRequest(BaseModel):
     quality: str = "mid"  # lo, mid, hi
     mix: float = 1.0
     automation: dict | None = None  # Optional automation session data
+    lfo_config: dict | None = None  # Optional LFO modulation for export
 
 
 @app.get("/")
@@ -363,6 +364,21 @@ async def upload_video(file: UploadFile = File(...)):
 MAX_CHAIN_LENGTH = 20  # Prevent CPU exhaustion from oversized chains
 
 
+def _filter_video_level_effects(effects: list[dict]) -> tuple[list[dict], list[str]]:
+    """Remove video-level effects from chain and return (filtered_effects, skipped_names).
+
+    Video-level effects like realdatamosh operate on full videos and can't preview as single frames.
+    """
+    filtered = []
+    skipped = []
+    for effect in effects:
+        if is_video_level(effect["name"]):
+            skipped.append(effect["name"])
+        else:
+            filtered.append(effect)
+    return filtered, skipped
+
+
 @app.post("/api/preview")
 async def preview_effect(chain: EffectChain):
     """Apply effect chain to a single frame and return preview."""
@@ -382,20 +398,32 @@ async def preview_effect(chain: EffectChain):
             new_h, new_w = int(h * scale), int(w * scale)
             frame = np.array(Image.fromarray(frame).resize((new_w, new_h)))
 
+        warning = None
         if chain.effects:
-            original = frame.copy() if chain.mix < 1.0 else None
-            frame = apply_chain(frame, chain.effects,
-                                frame_index=chain.frame_number,
-                                total_frames=_state["video_info"].get("total_frames", 1),
-                                watermark=False)
-            # Wet/dry mix
-            if original is not None:
-                mix = max(0.0, min(1.0, chain.mix))
-                frame = np.clip(
-                    original.astype(float) * (1 - mix) + frame.astype(float) * mix,
-                    0, 255
-                ).astype(np.uint8)
-        return {"preview": _frame_to_data_url(frame)}
+            # Filter out video-level effects that can't preview as single frames
+            filtered_effects, skipped = _filter_video_level_effects(chain.effects)
+
+            if skipped:
+                warning = f"Skipped video-level effects (require full render): {', '.join(skipped)}"
+
+            if filtered_effects:
+                original = frame.copy() if chain.mix < 1.0 else None
+                frame = apply_chain(frame, filtered_effects,
+                                    frame_index=chain.frame_number,
+                                    total_frames=_state["video_info"].get("total_frames", 1),
+                                    watermark=False)
+                # Wet/dry mix
+                if original is not None:
+                    mix = max(0.0, min(1.0, chain.mix))
+                    frame = np.clip(
+                        original.astype(float) * (1 - mix) + frame.astype(float) * mix,
+                        0, 255
+                    ).astype(np.uint8)
+
+        result = {"preview": _frame_to_data_url(frame)}
+        if warning:
+            result["warning"] = warning
+        return result
     except Exception as e:
         import logging
         logging.exception("Preview failed")
@@ -428,6 +456,7 @@ async def preview_timeline(req: TimelinePreviewRequest):
 
         original = frame.copy()
         processed = frame.copy()
+        all_skipped = []
 
         # Apply each region that contains this frame
         for region in req.regions:
@@ -440,6 +469,13 @@ async def preview_timeline(req: TimelinePreviewRequest):
                 if not effects:
                     continue
 
+                # Filter out video-level effects
+                filtered_effects, skipped = _filter_video_level_effects(effects)
+                all_skipped.extend(skipped)
+
+                if not filtered_effects:
+                    continue
+
                 mask = region.get("mask")
                 if mask and isinstance(mask, dict):
                     # Spatial mask: apply effects only to the masked rectangle
@@ -450,14 +486,14 @@ async def preview_timeline(req: TimelinePreviewRequest):
                     if mw > 0 and mh > 0:
                         # Extract sub-region, apply effects, composite back
                         sub_frame = processed[my:my+mh, mx:mx+mw].copy()
-                        sub_frame = apply_chain(sub_frame, effects,
+                        sub_frame = apply_chain(sub_frame, filtered_effects,
                                                 frame_index=req.frame_number,
                                                 total_frames=_state["video_info"].get("total_frames", 1),
                                                 watermark=False)
                         processed[my:my+mh, mx:mx+mw] = sub_frame
                 else:
                     # Full frame
-                    processed = apply_chain(processed, effects,
+                    processed = apply_chain(processed, filtered_effects,
                                             frame_index=req.frame_number,
                                             total_frames=_state["video_info"].get("total_frames", 1),
                                             watermark=False)
@@ -470,7 +506,11 @@ async def preview_timeline(req: TimelinePreviewRequest):
                 0, 255
             ).astype(np.uint8)
 
-        return {"preview": _frame_to_data_url(processed)}
+        result = {"preview": _frame_to_data_url(processed)}
+        if all_skipped:
+            unique_skipped = list(dict.fromkeys(all_skipped))  # Remove duplicates, preserve order
+            result["warning"] = f"Skipped video-level effects (require full render): {', '.join(unique_skipped)}"
+        return result
     except Exception as e:
         import logging
         logging.exception("Timeline preview failed")
@@ -494,6 +534,7 @@ class TimelineExportRequest(BaseModel):
     gif_colors: int = 256
     webm_crf: int = 30
     effects: list[dict] = []  # Kept for compat but timeline uses region effects
+    lfo_config: dict | None = None  # Optional LFO modulation for export
 
 
 @app.post("/api/export/timeline")
@@ -503,10 +544,14 @@ async def export_timeline(req: TimelineExportRequest):
         raise HTTPException(status_code=400, detail="No video loaded")
 
     from core.video_io import extract_frames, load_frame, save_frame
+    from core.modulation import LfoModulator
     import time as _time
 
     info = _state["video_info"]
     source_w, source_h = info["width"], info["height"]
+
+    # Load LFO modulation if provided
+    lfo_mod = LfoModulator(req.lfo_config) if req.lfo_config else None
 
     # Determine target dimensions
     target_w, target_h = source_w, source_h
@@ -556,6 +601,9 @@ async def export_timeline(req: TimelineExportRequest):
                     effects = region.get("effects", [])
                     if not effects:
                         continue
+                    # Apply LFO modulation per frame
+                    if lfo_mod:
+                        effects = lfo_mod.apply_to_chain(effects, i, info["fps"])
 
                     mask = region.get("mask")
                     if mask and isinstance(mask, dict):
@@ -850,6 +898,7 @@ async def render_video(req: RenderRequest):
 
     from core.video_io import extract_frames, reassemble_video, load_frame, save_frame
     from core.automation import AutomationSession
+    from core.modulation import LfoModulator
     import tempfile as tf
 
     info = _state["video_info"]
@@ -859,6 +908,9 @@ async def render_video(req: RenderRequest):
     auto_session = None
     if req.automation:
         auto_session = AutomationSession.from_dict(req.automation)
+
+    # Load LFO modulation if provided
+    lfo_mod = LfoModulator(req.lfo_config) if req.lfo_config else None
 
     with tf.TemporaryDirectory() as tmpdir:
         frames_dir = Path(tmpdir) / "frames"
@@ -878,6 +930,9 @@ async def render_video(req: RenderRequest):
             if req.effects:
                 # Apply automation overrides
                 effects = auto_session.apply_to_chain(req.effects, i) if auto_session else req.effects
+                # Apply LFO modulation per frame
+                if lfo_mod:
+                    effects = lfo_mod.apply_to_chain(effects, i, info["fps"])
                 original = frame.copy() if req.mix < 1.0 else None
                 frame = apply_chain(frame, effects,
                                     frame_index=i,
@@ -948,6 +1003,7 @@ async def export_video(export: ExportSettings):
     """Advanced export with full settings."""
     from core.export_models import ExportFormat
     from core.video_io import extract_frames, load_frame, save_frame
+    from core.modulation import LfoModulator
 
     if _state["video_path"] is None:
         raise HTTPException(status_code=400, detail="No video loaded")
@@ -956,6 +1012,9 @@ async def export_video(export: ExportSettings):
     source_w, source_h = info["width"], info["height"]
     target_w, target_h = export.get_target_dimensions(source_w, source_h)
     output_fps = export.get_output_fps(info["fps"])
+
+    # Load LFO modulation if provided
+    lfo_mod = LfoModulator(export.lfo_config) if export.lfo_config else None
 
     import tempfile as tf
 
@@ -986,8 +1045,12 @@ async def export_video(export: ExportSettings):
 
             # Apply effects with mix
             if export.effects:
+                effects = export.effects
+                # Apply LFO modulation per frame
+                if lfo_mod:
+                    effects = lfo_mod.apply_to_chain(effects, i, info["fps"])
                 original = frame.copy() if export.mix < 1.0 else None
-                frame = apply_chain(frame, export.effects,
+                frame = apply_chain(frame, effects,
                                     frame_index=i,
                                     total_frames=len(frame_files),
                                     watermark=True)

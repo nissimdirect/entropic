@@ -688,6 +688,12 @@ class ExportSettings(BaseModel):
     # -- Audio --
     audio: AudioSettings = Field(default_factory=AudioSettings)
 
+    # -- LFO Modulation --
+    lfo_config: dict | None = Field(
+        default=None,
+        description="LFO modulation config for parameter animation during export.",
+    )
+
     # -- Output filename --
     filename: str | None = Field(
         default=None,

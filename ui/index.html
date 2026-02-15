@@ -80,8 +80,8 @@
             <input type="file" id="file-input" accept="video/*,image/*,.gif,.pdf,.zip,.txt,.csv,.json,.xml,.html,.wav,.mp3,.aiff,.flac,.psd,.ai,.svg">
             <span id="file-name">No file loaded</span>
         </div>
-        <div class="mix-control">
-            <label>Mix</label>
+        <div class="mix-control" title="Dry/Wet: 0% = original, 100% = full effect">
+            <label>Dry/Wet</label>
             <input type="range" id="mix-slider" min="0" max="100" value="100" oninput="onMixChange(this.value)">
             <span id="mix-value">100%</span>
         </div>
@@ -207,7 +207,10 @@
             <span>Effect Chain</span>
             <span class="count" id="chain-count">0 devices</span>
         </div>
-        <div id="chain-rack"></div>
+        <div id="chain-content">
+            <div id="lfo-panel"></div>
+            <div id="chain-rack"></div>
+        </div>
     </div>
 </div>
 

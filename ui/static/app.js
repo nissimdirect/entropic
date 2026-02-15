@@ -153,6 +153,21 @@ let maskStartX = 0;
 let maskStartY = 0;
 let maskRect = null;             // {x, y, w, h} in canvas pixels during draw
 
+// ============ LFO MODULATION STATE ============
+
+let lfoState = {
+    rate: 1.0,          // Hz
+    depth: 0.5,         // 0-1
+    phase_offset: 0,    // 0-1
+    waveform: 'sine',
+    mappings: [],       // [{deviceId, paramName, baseValue, min, max}]
+    mapping_mode: false,
+    seed: 42,
+};
+let lfoAnimFrame = null;
+let lfoPhase = 0;
+let lfoLastTime = 0;
+
 // ============ PERFORM MODE STATE ============
 
 let perfLayers = [];              // Layer configs from server [{layer_id, name, effects, trigger_mode, ...}]
@@ -972,6 +987,17 @@ function renderChain() {
     // Setup device reordering
     setupDeviceReorder();
 
+    // Re-apply LFO-mapped state to knob containers
+    cleanLfoMappings();
+    for (const mapping of lfoState.mappings) {
+        const knobEl = document.querySelector(`.knob[data-device="${mapping.deviceId}"][data-param="${mapping.paramName}"]`);
+        if (knobEl) {
+            const container = knobEl.closest('.knob-container');
+            if (container) container.classList.add('lfo-mapped');
+        }
+    }
+    renderLfoPanel();
+
     // Mark overflowing param panels
     document.querySelectorAll('.device-params').forEach(panel => {
         if (panel.scrollHeight > panel.clientHeight) {
@@ -1153,8 +1179,9 @@ function createDropdown(deviceId, paramName, spec, value, label, ctrlSpec) {
         // Fallback: just show current value
         optionsHtml = `<option value="${value}" selected>${value}</option>`;
     }
+    const tooltip = `${label}: ${value} (${options.length} options)`;
     return `
-        <div class="param-control dropdown-container">
+        <div class="param-control dropdown-container" title="${tooltip}">
             <label>${label}</label>
             <select class="param-dropdown" data-device="${deviceId}" data-param="${paramName}">
                 ${optionsHtml}
@@ -1164,8 +1191,9 @@ function createDropdown(deviceId, paramName, spec, value, label, ctrlSpec) {
 
 function createToggle(deviceId, paramName, spec, value, label) {
     const checked = value ? 'checked' : '';
+    const tooltip = `${label}: ${value ? 'ON' : 'OFF'} (click to toggle)`;
     return `
-        <div class="param-control toggle-container">
+        <div class="param-control toggle-container" title="${tooltip}">
             <label>${label}</label>
             <button class="param-toggle ${value ? 'on' : ''}" data-device="${deviceId}" data-param="${paramName}"
                     data-value="${value ? '1' : '0'}">
@@ -1229,8 +1257,10 @@ function createKnob(deviceId, paramName, spec, value, label) {
         ? (Number.isInteger(value) ? value : value.toFixed(2))
         : value;
 
+    const tooltip = `${label}: ${displayVal} (range: ${spec.min}–${spec.max})`;
+
     return `
-        <div class="knob-container">
+        <div class="knob-container" title="${tooltip}">
             <label>${label}</label>
             <div class="knob" data-device="${deviceId}" data-param="${paramName}"
                  data-min="${spec.min}" data-max="${spec.max}" data-type="${spec.type}"
@@ -1318,6 +1348,12 @@ function setupKnobInteraction(knobEl) {
     };
 
     const onDown = (e) => {
+        // Block dragging if LFO-mapped
+        const container = knobEl.closest('.knob-container');
+        if (container && container.classList.contains('lfo-mapped')) {
+            e.preventDefault();
+            return;
+        }
         e.preventDefault();
         startY = e.clientY || e.touches?.[0]?.clientY;
         startValue = parseFloat(knobEl.dataset.value);
@@ -1370,6 +1406,404 @@ function updateKnobVisual(knobEl, value, min, max, type) {
     if (arcFill) arcFill.setAttribute('stroke-dasharray', `${dashLen} ${arcLen}`);
     if (valueSpan) {
         valueSpan.textContent = type === 'int' ? Math.round(value) : value.toFixed(2);
+    }
+}
+
+// ============ LFO MODULATION ============
+
+const LFO_WAVEFORMS = ['sine','saw','square','triangle','ramp_up','ramp_down','noise','random','bin'];
+
+function lfoWaveform(phase, waveform) {
+    const p = ((phase % 1) + 1) % 1; // wrap to 0-1
+    switch (waveform) {
+        case 'sine':     return 0.5 + 0.5 * Math.sin(2 * Math.PI * p);
+        case 'saw':      return p;
+        case 'square':   return p < 0.5 ? 1.0 : 0.0;
+        case 'triangle': return p < 0.5 ? 2 * p : 2 * (1 - p);
+        case 'ramp_up':  return p;
+        case 'ramp_down':return 1.0 - p;
+        case 'noise': {
+            // Pseudo-noise: use a simple hash of quantized phase
+            const bucket = Math.floor(p * 64);
+            let h = ((lfoState.seed * 2654435761 + bucket * 40503) >>> 0) / 0xFFFFFFFF;
+            return Math.max(0, Math.min(1, h));
+        }
+        case 'random': {
+            const bucket = Math.floor(p * 4);
+            let h = ((lfoState.seed * 2654435761 + bucket * 40503) >>> 0) / 0xFFFFFFFF;
+            return Math.max(0, Math.min(1, h));
+        }
+        case 'bin':      return Math.sin(2 * Math.PI * p) > 0 ? 1.0 : 0.0;
+        default:         return 0.5;
+    }
+}
+
+function startLfoAnimation() {
+    if (lfoAnimFrame) return;
+    lfoLastTime = performance.now();
+    lfoPhase = 0;
+
+    function tick(now) {
+        const dt = (now - lfoLastTime) / 1000;
+        lfoLastTime = now;
+
+        if (lfoState.rate > 0) {
+            lfoPhase = (lfoPhase + dt * lfoState.rate) % 1.0;
+        }
+
+        const phase = (lfoPhase + lfoState.phase_offset) % 1.0;
+        const lfoVal = lfoWaveform(phase, lfoState.waveform);
+        const bipolar = (lfoVal - 0.5) * 2.0;
+
+        for (const mapping of lfoState.mappings) {
+            const device = chain.find(d => d.id === mapping.deviceId);
+            if (!device) continue;
+
+            const paramRange = mapping.max - mapping.min;
+            const modulated = mapping.baseValue + bipolar * lfoState.depth * paramRange * 0.5;
+            const clamped = Math.max(mapping.min, Math.min(mapping.max, modulated));
+            device.params[mapping.paramName] = clamped;
+
+            // Update knob visual
+            const knobEl = document.querySelector(`.knob[data-device="${mapping.deviceId}"][data-param="${mapping.paramName}"]`);
+            if (knobEl) {
+                knobEl.dataset.value = clamped;
+                updateKnobVisual(knobEl, clamped, mapping.min, mapping.max, knobEl.dataset.type);
+            }
+        }
+
+        // Update waveform mini-display
+        drawLfoWaveformDisplay();
+
+        schedulePreview();
+        lfoAnimFrame = requestAnimationFrame(tick);
+    }
+    lfoAnimFrame = requestAnimationFrame(tick);
+}
+
+function stopLfoAnimation() {
+    if (lfoAnimFrame) {
+        cancelAnimationFrame(lfoAnimFrame);
+        lfoAnimFrame = null;
+    }
+}
+
+function renderLfoPanel() {
+    const panel = document.getElementById('lfo-panel');
+    if (!panel) return;
+
+    // Always show the LFO panel (it's part of the chain area)
+    panel.classList.add('visible');
+
+    const mappingPills = lfoState.mappings.map((m, i) => {
+        const device = chain.find(d => d.id === m.deviceId);
+        const label = device ? `${device.name}:${m.paramName}` : m.paramName;
+        return `<span class="lfo-mapping-pill" onclick="unmapParam(${m.deviceId}, '${esc(m.paramName)}')">
+            ${esc(label)} <span class="pill-x">&times;</span>
+        </span>`;
+    }).join('');
+
+    const waveformOptions = LFO_WAVEFORMS.map(wf =>
+        `<option value="${wf}" ${wf === lfoState.waveform ? 'selected' : ''}>${wf}</option>`
+    ).join('');
+
+    panel.innerHTML = `
+        <div class="lfo-header">
+            <span>LFO</span>
+            <button class="lfo-map-btn" onclick="toggleMapMode()">Map</button>
+            <button class="lfo-clear-btn" onclick="clearAllMappings()">Clear</button>
+        </div>
+        <div class="lfo-body">
+            <div class="knob-container" style="width:52px">
+                <label>Rate</label>
+                <div class="knob lfo-knob" data-lfo-param="rate" data-value="${lfoState.rate}" data-min="0" data-max="10" data-type="float"
+                     style="width:36px;height:36px;">
+                    <div class="indicator"></div>
+                    <svg viewBox="0 0 44 44" style="width:44px;height:44px;top:-4px;left:-4px;">
+                        <circle class="arc-track" cx="22" cy="22" r="18" transform="rotate(135 22 22)"
+                                stroke-dasharray="${44*Math.PI*0.75} ${44*Math.PI}" />
+                        <circle class="arc-fill" cx="22" cy="22" r="18" transform="rotate(135 22 22)"
+                                stroke-dasharray="0 ${44*Math.PI}" />
+                    </svg>
+                </div>
+                <span class="knob-value">${lfoState.rate.toFixed(1)}</span>
+            </div>
+            <div class="knob-container" style="width:52px">
+                <label>Depth</label>
+                <div class="knob lfo-knob" data-lfo-param="depth" data-value="${lfoState.depth}" data-min="0" data-max="1" data-type="float"
+                     style="width:36px;height:36px;">
+                    <div class="indicator"></div>
+                    <svg viewBox="0 0 44 44" style="width:44px;height:44px;top:-4px;left:-4px;">
+                        <circle class="arc-track" cx="22" cy="22" r="18" transform="rotate(135 22 22)"
+                                stroke-dasharray="${44*Math.PI*0.75} ${44*Math.PI}" />
+                        <circle class="arc-fill" cx="22" cy="22" r="18" transform="rotate(135 22 22)"
+                                stroke-dasharray="0 ${44*Math.PI}" />
+                    </svg>
+                </div>
+                <span class="knob-value">${lfoState.depth.toFixed(2)}</span>
+            </div>
+            <div class="knob-container" style="width:52px">
+                <label>Phase</label>
+                <div class="knob lfo-knob" data-lfo-param="phase_offset" data-value="${lfoState.phase_offset}" data-min="0" data-max="1" data-type="float"
+                     style="width:36px;height:36px;">
+                    <div class="indicator"></div>
+                    <svg viewBox="0 0 44 44" style="width:44px;height:44px;top:-4px;left:-4px;">
+                        <circle class="arc-track" cx="22" cy="22" r="18" transform="rotate(135 22 22)"
+                                stroke-dasharray="${44*Math.PI*0.75} ${44*Math.PI}" />
+                        <circle class="arc-fill" cx="22" cy="22" r="18" transform="rotate(135 22 22)"
+                                stroke-dasharray="0 ${44*Math.PI}" />
+                    </svg>
+                </div>
+                <span class="knob-value">${lfoState.phase_offset.toFixed(2)}</span>
+            </div>
+            <select class="lfo-waveform-select" onchange="onLfoWaveformChange(this.value)">
+                ${waveformOptions}
+            </select>
+            <canvas class="lfo-waveform-display" width="200" height="30"></canvas>
+        </div>
+        <div class="lfo-mappings">${mappingPills}</div>
+    `;
+
+    // Setup LFO knob interactions
+    panel.querySelectorAll('.lfo-knob').forEach(setupLfoKnobInteraction);
+
+    // Update LFO knob visuals to match current state
+    panel.querySelectorAll('.lfo-knob').forEach(knobEl => {
+        const param = knobEl.dataset.lfoParam;
+        const val = lfoState[param];
+        const min = parseFloat(knobEl.dataset.min);
+        const max = parseFloat(knobEl.dataset.max);
+        updateKnobVisual(knobEl, val, min, max, 'float');
+    });
+
+    drawLfoWaveformDisplay();
+}
+
+function setupLfoKnobInteraction(knobEl) {
+    let startY, startValue;
+
+    const onMove = (e) => {
+        const dy = startY - (e.clientY || e.touches?.[0]?.clientY || startY);
+        const sensitivity = e.shiftKey ? 0.001 : 0.005;
+        const min = parseFloat(knobEl.dataset.min);
+        const max = parseFloat(knobEl.dataset.max);
+        const range = max - min;
+        let newValue = startValue + dy * sensitivity * range;
+        newValue = Math.max(min, Math.min(max, newValue));
+        knobEl.dataset.value = newValue;
+        updateKnobVisual(knobEl, newValue, min, max, 'float');
+        const param = knobEl.dataset.lfoParam;
+        lfoState[param] = newValue;
+        const valueSpan = knobEl.parentElement.querySelector('.knob-value');
+        if (valueSpan) valueSpan.textContent = newValue.toFixed(param === 'rate' ? 1 : 2);
+    };
+
+    const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onUp);
+    };
+
+    const onDown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        startY = e.clientY || e.touches?.[0]?.clientY;
+        startValue = parseFloat(knobEl.dataset.value);
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('touchmove', onMove);
+        document.addEventListener('touchend', onUp);
+    };
+
+    knobEl.addEventListener('mousedown', onDown);
+    knobEl.addEventListener('touchstart', onDown);
+}
+
+function drawLfoWaveformDisplay() {
+    const canvas = document.querySelector('.lfo-waveform-display');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Draw waveform shape
+    ctx.strokeStyle = '#7b61ff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let x = 0; x < w; x++) {
+        const phase = (x / w + lfoState.phase_offset) % 1.0;
+        const val = lfoWaveform(phase, lfoState.waveform);
+        const y = h - val * h * lfoState.depth - (h * (1 - lfoState.depth) * 0.5);
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Draw current phase indicator (vertical line)
+    if (lfoAnimFrame) {
+        const px = ((lfoPhase + lfoState.phase_offset) % 1.0) * w;
+        ctx.strokeStyle = '#ff3d3d';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, h);
+        ctx.stroke();
+    }
+}
+
+function onLfoWaveformChange(wf) {
+    lfoState.waveform = wf;
+    drawLfoWaveformDisplay();
+}
+
+function toggleMapMode() {
+    if (lfoState.mapping_mode) {
+        exitMapMode();
+    } else {
+        enterMapMode();
+    }
+}
+
+function enterMapMode() {
+    lfoState.mapping_mode = true;
+    document.body.classList.add('lfo-map-mode');
+
+    // Add click listeners to all knobs in the chain
+    document.querySelectorAll('#chain-rack .knob-container').forEach(container => {
+        const knob = container.querySelector('.knob');
+        if (!knob) return;
+        // Skip already-mapped, bool, or string params
+        const type = knob.dataset.type;
+        if (type === 'string' || type === 'bool') return;
+        if (container.classList.contains('lfo-mapped')) return;
+        knob._lfoMapHandler = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mapParamToLfo(knob);
+        };
+        knob.addEventListener('click', knob._lfoMapHandler, { capture: true });
+    });
+}
+
+function exitMapMode() {
+    lfoState.mapping_mode = false;
+    document.body.classList.remove('lfo-map-mode');
+
+    // Remove map click listeners
+    document.querySelectorAll('#chain-rack .knob').forEach(knob => {
+        if (knob._lfoMapHandler) {
+            knob.removeEventListener('click', knob._lfoMapHandler, { capture: true });
+            delete knob._lfoMapHandler;
+        }
+    });
+}
+
+function mapParamToLfo(knobEl) {
+    const deviceId = parseInt(knobEl.dataset.device);
+    const paramName = knobEl.dataset.param;
+    const min = parseFloat(knobEl.dataset.min);
+    const max = parseFloat(knobEl.dataset.max);
+    const baseValue = parseFloat(knobEl.dataset.value);
+
+    // Check if already mapped
+    const existing = lfoState.mappings.find(m => m.deviceId === deviceId && m.paramName === paramName);
+    if (existing) {
+        exitMapMode();
+        return;
+    }
+
+    lfoState.mappings.push({ deviceId, paramName, baseValue, min, max });
+
+    // Mark knob as mapped
+    const container = knobEl.closest('.knob-container');
+    if (container) container.classList.add('lfo-mapped');
+
+    exitMapMode();
+
+    // Start animation if first mapping
+    if (lfoState.mappings.length === 1) {
+        startLfoAnimation();
+    }
+
+    renderLfoPanel();
+}
+
+function unmapParam(deviceId, paramName) {
+    const idx = lfoState.mappings.findIndex(m => m.deviceId === deviceId && m.paramName === paramName);
+    if (idx === -1) return;
+
+    const mapping = lfoState.mappings[idx];
+
+    // Restore base value
+    const device = chain.find(d => d.id === deviceId);
+    if (device) {
+        device.params[paramName] = mapping.baseValue;
+    }
+
+    lfoState.mappings.splice(idx, 1);
+
+    // Remove lfo-mapped class
+    const knobEl = document.querySelector(`.knob[data-device="${deviceId}"][data-param="${paramName}"]`);
+    if (knobEl) {
+        const container = knobEl.closest('.knob-container');
+        if (container) container.classList.remove('lfo-mapped');
+        updateKnobVisual(knobEl, mapping.baseValue, mapping.min, mapping.max, knobEl.dataset.type);
+    }
+
+    // Stop animation if no mappings left
+    if (lfoState.mappings.length === 0) {
+        stopLfoAnimation();
+    }
+
+    renderLfoPanel();
+    schedulePreview();
+}
+
+function clearAllMappings() {
+    // Restore all base values
+    for (const mapping of [...lfoState.mappings]) {
+        unmapParam(mapping.deviceId, mapping.paramName);
+    }
+}
+
+function buildLfoConfig() {
+    if (lfoState.mappings.length === 0) return null;
+
+    const mappings = lfoState.mappings.map(m => {
+        // Convert deviceId to effect_idx (position in non-bypassed chain)
+        const activeChain = chain.filter(d => !d.bypassed);
+        const idx = activeChain.findIndex(d => d.id === m.deviceId);
+        if (idx === -1) return null;
+        return {
+            effect_idx: idx,
+            param: m.paramName,
+            base_value: m.baseValue,
+            min: m.min,
+            max: m.max,
+        };
+    }).filter(Boolean);
+
+    if (mappings.length === 0) return null;
+
+    return {
+        rate: lfoState.rate,
+        depth: lfoState.depth,
+        phase_offset: lfoState.phase_offset,
+        waveform: lfoState.waveform,
+        seed: lfoState.seed,
+        mappings,
+    };
+}
+
+// Clean orphaned LFO mappings when chain changes
+function cleanLfoMappings() {
+    const deviceIds = new Set(chain.map(d => d.id));
+    const removed = lfoState.mappings.filter(m => !deviceIds.has(m.deviceId));
+    if (removed.length > 0) {
+        lfoState.mappings = lfoState.mappings.filter(m => deviceIds.has(m.deviceId));
+        if (lfoState.mappings.length === 0) stopLfoAnimation();
     }
 }
 
@@ -1469,6 +1903,10 @@ async function previewChain() {
         const data = await res.json();
         showPreview(data.preview);
         updateMaskOverlay();
+        // Show warning if video-level effects were skipped
+        if (data.warning) {
+            showErrorToast(data.warning);
+        }
         // Sync perform mode UI with server envelope states
         if (data.layer_states && (appMode === 'perform' || performToggleActive)) {
             perfSyncWithServer(data.layer_states);
@@ -1754,6 +2192,10 @@ async function startExport() {
     } else if (fmt === 'webm') {
         settings.webm_crf = parseInt(document.getElementById('export-crf').value);
     }
+
+    // Include LFO config if active
+    const lfoConfig = buildLfoConfig();
+    if (lfoConfig) settings.lfo_config = lfoConfig;
 
     // In timeline mode, include regions data
     if (appMode === 'timeline' && window.timelineEditor) {
@@ -2263,7 +2705,7 @@ function renderPresets() {
         for (const p of items) {
             const tags = (p.tags || []).map(t => `<span class="preset-tag">${esc(t)}</span>`).join('');
             html += `
-                <div class="preset-item" onclick="loadPreset(${JSON.stringify(JSON.stringify(p.effects))})" title="${esc(p.description || '')}">
+                <div class="preset-item" onclick="loadPreset(${JSON.stringify(JSON.stringify(p.effects))}, ${p.lfo ? JSON.stringify(JSON.stringify(p.lfo)) : 'null'})" title="${esc(p.description || '')}">
                     <div class="preset-name">${esc(p.name)}</div>
                     <div class="preset-desc">${esc(p.description || '')}</div>
                     ${tags ? `<div class="preset-tags">${tags}</div>` : ''}
@@ -2273,7 +2715,10 @@ function renderPresets() {
     list.innerHTML = html;
 }
 
-function loadPreset(effectsJson) {
+function loadPreset(effectsJson, lfoJson) {
+    // Clear LFO state
+    clearAllMappings();
+
     const effects = JSON.parse(effectsJson);
     chain = [];
     for (const eff of effects) {
@@ -2290,6 +2735,34 @@ function loadPreset(effectsJson) {
             bypassed: false,
         });
     }
+
+    // Restore LFO state if present
+    if (lfoJson) {
+        const lfo = JSON.parse(lfoJson);
+        lfoState.rate = lfo.rate ?? 1.0;
+        lfoState.depth = lfo.depth ?? 0.5;
+        lfoState.phase_offset = lfo.phase_offset ?? 0;
+        lfoState.waveform = lfo.waveform ?? 'sine';
+        lfoState.seed = lfo.seed ?? 42;
+        // Re-map using new device IDs (mappings reference deviceId by chain position)
+        if (lfo.mappings && Array.isArray(lfo.mappings)) {
+            for (const m of lfo.mappings) {
+                // Find the device by matching name position in chain
+                const device = chain[m.deviceId] || chain.find((d, i) => i === m.deviceId);
+                if (device) {
+                    lfoState.mappings.push({
+                        deviceId: device.id,
+                        paramName: m.paramName,
+                        baseValue: m.baseValue,
+                        min: m.min,
+                        max: m.max,
+                    });
+                }
+            }
+            if (lfoState.mappings.length > 0) startLfoAnimation();
+        }
+    }
+
     pushHistory('Load Preset');
     renderChain();
     renderLayers();
@@ -2313,7 +2786,12 @@ async function _doSavePreset(name, desc) {
         const res = await fetch(`${API}/api/presets`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, effects, description: desc, tags: [] }),
+            body: JSON.stringify({ name, effects, description: desc, tags: [],
+                lfo: lfoState.mappings.length > 0 ? {
+                    rate: lfoState.rate, depth: lfoState.depth,
+                    phase_offset: lfoState.phase_offset, waveform: lfoState.waveform,
+                    seed: lfoState.seed, mappings: lfoState.mappings,
+                } : undefined }),
         });
         const data = await res.json();
         if (data.status === 'ok') {
