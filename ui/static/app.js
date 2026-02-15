@@ -1163,6 +1163,9 @@ function createKnob(deviceId, paramName, spec, value, label) {
     } else if (spec.type === 'xy') {
         normalized = (value[0] - spec.min) / (spec.max - spec.min);
         value = value[0]; // Show x value
+    } else if (spec.min > 0 && spec.max / spec.min >= 10 && spec.type === 'float') {
+        // Log scaling for wide-range float params
+        normalized = (Math.log(Math.max(spec.min, value)) - Math.log(spec.min)) / (Math.log(spec.max) - Math.log(spec.min));
     } else {
         normalized = (value - spec.min) / (spec.max - spec.min);
     }
@@ -1208,7 +1211,19 @@ function setupKnobInteraction(knobEl) {
         const range = max - min;
         const type = knobEl.dataset.type;
 
-        let newValue = startValue + dy * sensitivity * range;
+        // Use log scaling when parameter has wide range with positive bounds
+        // This spreads the "sweet spot" across more of the knob travel
+        const useLog = min > 0 && max / min >= 10 && type === 'float';
+        let newValue;
+        if (useLog) {
+            const logMin = Math.log(min);
+            const logMax = Math.log(max);
+            const logStart = Math.log(Math.max(min, startValue));
+            const logVal = logStart + dy * sensitivity * (logMax - logMin);
+            newValue = Math.exp(Math.max(logMin, Math.min(logMax, logVal)));
+        } else {
+            newValue = startValue + dy * sensitivity * range;
+        }
         newValue = Math.max(min, Math.min(max, newValue));
 
         if (type === 'int') newValue = Math.round(newValue);
@@ -1288,7 +1303,10 @@ function setupKnobInteraction(knobEl) {
 }
 
 function updateKnobVisual(knobEl, value, min, max, type) {
-    const normalized = (value - min) / (max - min);
+    const useLog = min > 0 && max / min >= 10 && type === 'float';
+    const normalized = useLog
+        ? (Math.log(Math.max(min, value)) - Math.log(min)) / (Math.log(max) - Math.log(min))
+        : (value - min) / (max - min);
     const angle = -135 + normalized * 270;
     const arcLen = 48 * Math.PI;
     const dashLen = normalized * arcLen * 0.75;
