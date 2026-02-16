@@ -443,8 +443,24 @@ function addGroup() {
         children: [],
     };
 
-    // If effects are selected, wrap them into the group
-    if (selectedLayerId !== null) {
+    // Multi-select: wrap all selected items into group
+    if (selectedIds.size > 1) {
+        // Find the range of selected items in chain order
+        const indices = [];
+        chain.forEach((d, i) => {
+            if (selectedIds.has(d.id)) indices.push(i);
+        });
+        indices.sort((a, b) => a - b);
+        const insertAt = indices[0];
+        // Extract selected items from chain (reverse order to preserve indices)
+        for (let i = indices.length - 1; i >= 0; i--) {
+            const [item] = chain.splice(indices[i], 1);
+            group.children.unshift(item);
+        }
+        chain.splice(insertAt, 0, group);
+        selectedIds.clear();
+    } else if (selectedLayerId !== null) {
+        // Single select: wrap just the selected item
         const idx = chain.findIndex(d => d.id === selectedLayerId);
         if (idx >= 0) {
             const selected = chain.splice(idx, 1)[0];
@@ -458,6 +474,7 @@ function addGroup() {
     }
 
     selectedLayerId = group.id;
+    selectedIds.clear();
     pushHistory('Create Group');
     syncChainToRegion();
     renderChain();
@@ -583,60 +600,82 @@ const frameCacheInFlight = new Set(); // frame numbers currently being fetched
 const FRAME_CACHE_LOOKAHEAD = 8;    // how many frames to pre-fetch ahead
 const FRAME_CACHE_MAX = 30;         // max cached frames before eviction
 let selectedLayerId = null;
+let selectedIds = new Set();     // Multi-select: Set of device IDs for shift-click range selection
 let mixLevel = 1.0;              // Wet/dry mix: 0.0 = original, 1.0 = full effect
 let appMode = 'timeline';        // 'quick' | 'timeline' | 'perform'
 
-// ============ MULTI-TRACK SYSTEM ============
-let tracks = [];
+// ============ MULTI-TRACK SYSTEM (Unified — Timeline is source of truth) ============
 let selectedTrackIdx = 0;
-let trackIdCounter = 1000;
 const MAX_TRACKS = 8;
 const DEFAULT_BLEND_MODES = ['normal','multiply','screen','add','overlay','darken','lighten'];
 const TRACK_COLORS = ['#ff6b6b','#4ecdc4','#45b7d1','#96ceb4','#ffeaa7','#dda0dd','#98d8c8','#f7dc6f'];
 
+// `tracks` is now a live view of timelineEditor.tracks (single source of truth)
+Object.defineProperty(window, 'tracks', {
+    get() {
+        return window.timelineEditor ? timelineEditor.tracks : [];
+    },
+    set(val) {
+        // Legacy assignment — push into timeline if available
+        if (window.timelineEditor && Array.isArray(val)) {
+            timelineEditor.tracks = val;
+        }
+    },
+});
+
 function createTrack(name) {
-    const track = {
-        id: trackIdCounter++,
-        name: name || `Track ${tracks.length + 1}`,
-        effects: [],
-        opacity: 1.0,
-        solo: false,
-        mute: false,
-        blendMode: 'normal',
-        color: TRACK_COLORS[tracks.length % TRACK_COLORS.length],
-        collapsed: false,
-        frozen: false
-    };
+    // Creates a track via the timeline editor
+    if (!window.timelineEditor) return null;
+    const trackName = name || `Track ${timelineEditor.tracks.length + 1}`;
+    const track = timelineEditor.addTrack(trackName, 'video');
+    track.color = track.color || TRACK_COLORS[(timelineEditor.tracks.length - 1) % TRACK_COLORS.length];
     return track;
 }
 
 // Migrate legacy chain to track-based system
 function migrateChainToTracks() {
-    if (tracks.length === 0 && chain.length > 0) {
-        const track1 = createTrack('Track 1');
-        track1.effects = chain;
-        tracks.push(track1);
+    if (!window.timelineEditor) return;
+    const tracks = timelineEditor.tracks;
+    if (tracks.length === 0) {
+        createTrack('Track 1');
         selectedTrackIdx = 0;
     }
 }
 
-// Get current track's effect chain
+// Get the selected region's effects, or selected track's first region
+function _getSelectedRegion() {
+    if (!window.timelineEditor) return null;
+    // If a region is selected, use it
+    if (timelineEditor.selectedRegionId !== null) {
+        return timelineEditor.findRegion(timelineEditor.selectedRegionId);
+    }
+    // Otherwise auto-select/create a full-span region on the selected track
+    const tracks = timelineEditor.tracks;
+    if (tracks.length === 0) return null;
+    const track = tracks[selectedTrackIdx] || tracks[0];
+    if (track.regions.length === 0) {
+        // Auto-create a full-span region
+        const region = timelineEditor.addRegion(track.id, 0, Math.max(0, timelineEditor.totalFrames - 1));
+        timelineEditor.selectedRegionId = region.id;
+        return region;
+    }
+    // Select the first region of the track
+    timelineEditor.selectedRegionId = track.regions[0].id;
+    return track.regions[0];
+}
+
+// Get current track's effect chain (from selected region)
 function getCurrentChain() {
     migrateChainToTracks();
-    if (tracks.length === 0) {
-        const track1 = createTrack('Track 1');
-        tracks.push(track1);
-        selectedTrackIdx = 0;
-    }
-    return tracks[selectedTrackIdx].effects;
+    const region = _getSelectedRegion();
+    return region ? region.effects : [];
 }
 
-// Set current track's effect chain
+// Set current track's effect chain (into selected region)
 function setCurrentChain(newChain) {
     migrateChainToTracks();
-    if (tracks.length > 0) {
-        tracks[selectedTrackIdx].effects = newChain;
-    }
+    const region = _getSelectedRegion();
+    if (region) region.effects = newChain;
 }
 
 // Backwards compatibility wrapper for chain access
@@ -658,6 +697,7 @@ let maskRect = null;             // {x, y, w, h} in canvas pixels during draw
 // ============ LFO MODULATION STATE ============
 
 let lfoState = {
+    enabled: true,      // on/off toggle
     rate: 1.0,          // Hz
     depth: 0.5,         // 0-1
     phase_offset: 0,    // 0-1
@@ -884,11 +924,10 @@ function _autoSave() {
             chain: chain.map(d => ({ name: d.name, params: { ...d.params }, bypassed: d.bypassed, mix: d.mix })),
             tracks: tracks.map(t => ({
                 name: t.name,
-                effects: t.effects.map(e => ({ name: e.name, params: { ...e.params }, bypassed: e.bypassed, mix: e.mix })),
                 opacity: t.opacity,
                 blendMode: t.blendMode,
-                mute: t.mute,
-                solo: t.solo,
+                muted: t.muted,
+                soloed: t.soloed,
             })),
             appMode,
             mixLevel,
@@ -947,20 +986,32 @@ function _restoreAutoSave() {
             deviceIdCounter = chain.length;
         }
         if (saved.tracks && saved.tracks.length > 0) {
-            tracks = saved.tracks.map((t, i) => ({
-                ...createTrack(t.name),
-                effects: (t.effects || []).map((e, j) => ({
-                    id: j,
-                    name: e.name,
-                    params: e.params || {},
-                    bypassed: e.bypassed || false,
-                    mix: e.mix ?? 1.0,
-                })),
-                opacity: t.opacity ?? 1.0,
-                blendMode: t.blendMode || 'normal',
-                mute: t.mute || false,
-                solo: t.solo || false,
-            }));
+            // Restore tracks via timeline editor (unified)
+            if (window.timelineEditor) {
+                // Clear existing and rebuild
+                timelineEditor.tracks = [];
+                timelineEditor.nextTrackId = 0;
+                for (let i = 0; i < saved.tracks.length; i++) {
+                    const t = saved.tracks[i];
+                    const track = timelineEditor.addTrack(t.name, 'video');
+                    track.opacity = t.opacity ?? 1.0;
+                    track.blendMode = t.blendMode || 'normal';
+                    track.muted = t.muted || t.mute || false;
+                    track.soloed = t.soloed || t.solo || false;
+                    track.color = TRACK_COLORS[i % TRACK_COLORS.length];
+                    // Restore effects into a full-span region
+                    if (t.effects && t.effects.length > 0) {
+                        const region = timelineEditor.addRegion(track.id, 0, Math.max(0, timelineEditor.totalFrames - 1));
+                        region.effects = t.effects.map((e, j) => ({
+                            id: j,
+                            name: e.name,
+                            params: e.params || {},
+                            bypassed: e.bypassed || false,
+                            mix: e.mix ?? 1.0,
+                        }));
+                    }
+                }
+            }
             selectedTrackIdx = 0;
         }
         if (saved.mixLevel !== undefined) mixLevel = saved.mixLevel;
@@ -1043,19 +1094,19 @@ async function init() {
     renderChain();
     renderLayers();
     renderHistory();
-    // Ensure Track 1 exists on startup
-    if (tracks.length === 0) {
-        tracks.push(createTrack('Track 1'));
-        selectedTrackIdx = 0;
+    // Timeline editor must be initialized before track operations
+    // (moved up to enable unified track system)
+    window.timelineEditor = new TimelineEditor('timeline-canvas');
+    // Set color on the default Track 1
+    if (timelineEditor.tracks.length > 0 && !timelineEditor.tracks[0].color) {
+        timelineEditor.tracks[0].color = TRACK_COLORS[0];
     }
+    selectedTrackIdx = 0;
     renderTrackList();  // Initialize track strip UI
     startHeartbeat();
     showOnboarding();
     _checkAutoSaveRestore();
     _startAutoSave();
-
-    // Initialize timeline editor
-    window.timelineEditor = new TimelineEditor('timeline-canvas');
 
     // Start in timeline mode (default — Quick mode flagged off)
     setMode('timeline');
@@ -1122,6 +1173,7 @@ function renderBrowserFavorites() {
         const desc = def?.description || '';
         html += `<div class="effect-item" draggable="true" data-effect="${esc(name)}"
                      ondragstart="onBrowserDragStart(event, '${esc(name)}')"
+                     ondblclick="addToChainAtTop('${esc(name)}')"
                      data-tooltip="${esc(desc)}">
                     ${gripHTML()}
                     <span class="name">${esc(name)}</span>
@@ -1155,6 +1207,7 @@ function _effectItemHTML(name, desc) {
     const isFav = _favorites.has(name);
     return `<div class="effect-item" draggable="true" data-effect="${esc(name)}"
                  ondragstart="onBrowserDragStart(event, '${esc(name)}')"
+                 ondblclick="addToChainAtTop('${esc(name)}')"
                  onmouseenter="showInfoView('${esc(name)}','${esc(desc.replace(/'/g, "\\'"))}');showEffectHoverPreview('${esc(name)}',event)"
                  onmouseleave="hideEffectHoverPreview()"
                  oncontextmenu="event.preventDefault();showEffectContextMenu(event,'${esc(name)}')"
@@ -1568,8 +1621,9 @@ function setupKeyboard() {
                 closeExportDialog(); e.preventDefault(); return;
             }
             // Deselect effect
-            if (selectedLayerId !== null) {
+            if (selectedLayerId !== null || selectedIds.size > 0) {
                 selectedLayerId = null;
+                selectedIds.clear();
                 renderLayers();
             }
             return;
@@ -1792,6 +1846,11 @@ function setupKeyboard() {
         // P = Toggle Perform panel (in timeline mode)
         if (e.key === 'p' && appMode === 'timeline') {
             e.preventDefault(); togglePerformPanel(); return;
+        }
+
+        // Cmd+L = Set loop from selected region
+        if (isMod(e) && e.key === 'l') {
+            e.preventDefault(); setLoopFromSelectedRegion(); return;
         }
 
         // L = Toggle Loop
@@ -2206,6 +2265,55 @@ function addToChain(effectName, overrideParams) {
     chain.push(device);
     selectedLayerId = device.id;
     pushHistory(`Add ${effectName}`);
+    syncChainToRegion();
+    renderChain();
+    renderLayers();
+    schedulePreview();
+    _warnIfHeavyChain();
+}
+
+function addToChainAtTop(effectName, overrideParams) {
+    const def = effectDefs.find(e => e.name === effectName);
+    if (!def) return;
+
+    const device = {
+        id: deviceIdCounter++,
+        name: effectName,
+        params: {},
+        bypassed: false,
+        mix: 1.0,
+    };
+
+    for (const [k, v] of Object.entries(def.params)) {
+        if (overrideParams && k in overrideParams) {
+            device.params[k] = overrideParams[k];
+        } else if (v.type === 'xy') {
+            device.params[k] = [...v.default];
+        } else {
+            device.params[k] = v.default;
+        }
+    }
+
+    if (effectName === 'curves' && !device.params.points) {
+        device.params.points = [[0, 0], [64, 64], [128, 128], [192, 192], [255, 255]];
+    }
+
+    if (effectName === 'perform') {
+        device.slots = Array.from({length: 8}, (_, i) => ({
+            key: String(i + 1),
+            label: `Slot ${i + 1}`,
+            action: 'none',
+            target: null,
+            adsr: { a: 0.01, d: 0.1, s: 1.0, r: 0.1 },
+            mode: 'toggle',
+            active: false
+        }));
+    }
+
+    // Insert at beginning of chain (topmost position)
+    chain.unshift(device);
+    selectedLayerId = device.id;
+    pushHistory(`Add ${effectName} (top)`);
     syncChainToRegion();
     renderChain();
     renderLayers();
@@ -2636,6 +2744,7 @@ function _renderDeviceHTML(device) {
         return `
             <div class="device-group ${bypassClass}" data-device-id="${device.id}" draggable="true">
                 <div class="group-header" onclick="toggleGroupCollapse(${device.id})">
+                    ${gripHTML()}
                     <span class="group-collapse-arrow ${arrowClass}">&#9660;</span>
                     <button class="device-power ${powerClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                     <span class="group-name" ondblclick="event.stopPropagation(); renameGroup(${device.id})">${esc(device.name)}</span>
@@ -2695,12 +2804,14 @@ function _renderDeviceHTML(device) {
     const mixPct = Math.round((device.mix ?? 1.0) * 100);
     const presetDropdown = _buildPresetDropdown(device);
 
+    const chainSelClass = selectedIds.has(device.id) || selectedLayerId === device.id ? 'chain-selected' : '';
+
     return `
-        <div class="device ${bypassClass}" data-device-id="${device.id}" draggable="true"
+        <div class="device ${bypassClass} ${chainSelClass}" data-device-id="${device.id}" draggable="true"
              oncontextmenu="deviceContextMenu(event, ${device.id})">
             <div class="device-header">
                 ${gripHTML()}
-                <button class="device-power ${powerClass}" onclick="toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
+                <button class="device-power ${powerClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
                 <span class="device-name">${esc(device.name)}</span>
                 ${presetDropdown}
                 <span class="device-mix" title="Dry/Wet Mix: ${mixPct}% — 0% = dry (original), 100% = wet (full effect)">
@@ -2738,6 +2849,9 @@ function renderChain() {
 
     // Setup device reordering
     setupDeviceReorder();
+
+    // Setup device selection (click/shift-click/cmd-click in chain rack)
+    setupDeviceSelection();
 
     // Re-apply LFO-mapped state to knob containers
     cleanLfoMappings();
@@ -2810,14 +2924,15 @@ function renderLayers() {
 
     list.innerHTML = reversed.map((device, i) => {
         const layerNum = chain.length - i;
-        const selectedClass = device.id === selectedLayerId ? 'selected' : '';
+        const isSelected = device.id === selectedLayerId || selectedIds.has(device.id);
+        const selectedClass = isSelected ? 'selected' : '';
         const bypassedClass = device.bypassed ? 'bypassed-layer' : '';
         const powerClass = device.bypassed ? 'off' : 'on';
 
         return `
             <div class="layer-item ${selectedClass} ${bypassedClass}"
                  data-layer-id="${device.id}"
-                 onclick="selectLayer(${device.id})"
+                 onclick="selectLayer(${device.id}, event)"
                  oncontextmenu="layerContextMenu(event, ${device.id})"
                  draggable="true">
                 <button class="layer-power ${powerClass}" onclick="event.stopPropagation(); toggleBypass(${device.id})" title="${device.bypassed ? 'Turn On' : 'Turn Off'}">${device.bypassed ? 'OFF' : 'ON'}</button>
@@ -2836,9 +2951,77 @@ function renderLayers() {
     setupLayerReorder();
 }
 
-function selectLayer(deviceId) {
-    selectedLayerId = deviceId;
+function selectLayer(deviceId, event) {
+    if (event && event.shiftKey && selectedLayerId !== null) {
+        // Shift-click: range select between selectedLayerId and deviceId
+        const startIdx = chain.findIndex(d => d.id === selectedLayerId);
+        const endIdx = chain.findIndex(d => d.id === deviceId);
+        if (startIdx >= 0 && endIdx >= 0) {
+            const lo = Math.min(startIdx, endIdx);
+            const hi = Math.max(startIdx, endIdx);
+            selectedIds.clear();
+            for (let i = lo; i <= hi; i++) {
+                selectedIds.add(chain[i].id);
+            }
+        }
+    } else if (event && (event.metaKey || event.ctrlKey)) {
+        // Cmd/Ctrl-click: toggle individual selection
+        if (selectedIds.has(deviceId)) {
+            selectedIds.delete(deviceId);
+        } else {
+            selectedIds.add(deviceId);
+        }
+        if (selectedIds.size > 0) {
+            selectedLayerId = deviceId;
+        }
+    } else {
+        // Normal click: single select, clear multi-select
+        selectedIds.clear();
+        selectedLayerId = deviceId;
+    }
     renderLayers();
+    updateChainSelection();
+}
+
+function updateChainSelection() {
+    // Update visual selection state on chain devices without full re-render
+    document.querySelectorAll('.device[data-device-id], .device-group[data-device-id]').forEach(el => {
+        const id = parseInt(el.dataset.deviceId);
+        if (selectedIds.has(id) || selectedLayerId === id) {
+            el.classList.add('chain-selected');
+        } else {
+            el.classList.remove('chain-selected');
+        }
+    });
+}
+
+function selectChainDevice(deviceId, event) {
+    // Skip if click was on a button, input, select, or other interactive element
+    const tag = event.target.tagName.toLowerCase();
+    if (['button', 'input', 'select', 'option'].includes(tag)) return;
+    if (event.target.closest('button, input, select, .knob, .mix-slider')) return;
+
+    selectLayer(deviceId, event);
+}
+
+// Device selection: single delegated listener on chain-rack (set up once in init)
+let _deviceSelectionReady = false;
+function setupDeviceSelection() {
+    if (_deviceSelectionReady) return; // Only attach once
+    const rack = document.getElementById('chain-rack');
+    if (!rack) return;
+    _deviceSelectionReady = true;
+
+    rack.addEventListener('click', (e) => {
+        // Event delegation: find which device was clicked
+        const deviceEl = e.target.closest('.device[data-device-id], .device-group[data-device-id]');
+        if (!deviceEl) return;
+        // Skip interactive child elements
+        if (e.target.closest('button, input, select, .knob, .mix-slider, .knob-value')) return;
+        const deviceId = parseInt(deviceEl.dataset.deviceId);
+        if (isNaN(deviceId)) return;
+        selectLayer(deviceId, e);
+    });
 }
 
 function setupLayerReorder() {
@@ -2905,8 +3088,8 @@ function renderTrackList() {
                         <span class="track-name" data-track-idx="${idx}">${esc(track.name)}</span>
                     </div>
                     <div class="track-controls">
-                        <button class="track-solo ${track.solo ? 'active' : ''}" onclick="event.stopPropagation(); toggleTrackSolo(${idx})">S</button>
-                        <button class="track-mute ${track.mute ? 'active' : ''}" onclick="event.stopPropagation(); toggleTrackMute(${idx})">M</button>
+                        <button class="track-solo ${track.soloed ? 'active' : ''}" onclick="event.stopPropagation(); toggleTrackSolo(${idx})">S</button>
+                        <button class="track-mute ${track.muted ? 'active' : ''}" onclick="event.stopPropagation(); toggleTrackMute(${idx})">M</button>
                         <input type="range" class="track-opacity-slider" min="0" max="100" value="${Math.round(track.opacity * 100)}"
                                onclick="event.stopPropagation()"
                                oninput="updateTrackOpacity(${idx}, this.value)">
@@ -2921,6 +3104,7 @@ function renderTrackList() {
                 ${!track.collapsed && effectCount > 0 ? `
                 <div class="track-content">
                     <div class="track-effects">${effectSummary}</div>
+                    ${selected ? `<div class="track-auto-row">${buildAutomationDropdown(idx)}<button class="track-draw-btn ${window.timelineEditor?.drawMode ? 'active' : ''}" onclick="event.stopPropagation(); toggleDrawModeBtn()" title="Draw Automation (B)">&#9998;</button></div>` : ''}
                 </div>
                 ` : ''}
             </div>
@@ -2933,12 +3117,166 @@ function renderTrackList() {
     container.innerHTML = html;
 }
 
+function buildAutomationDropdown(trackIdx) {
+    if (!window.timelineEditor) return '';
+    const track = tracks[trackIdx];
+    if (!track) return '';
+
+    // Collect all distinct effects (devices) across regions on this track
+    const devices = [];
+    const seen = new Set();
+    for (const region of track.regions) {
+        for (let ei = 0; ei < region.effects.length; ei++) {
+            const effect = region.effects[ei];
+            const key = `${region.id}:${ei}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            // Check if this device has any numeric params
+            if (effect.params && Object.values(effect.params).some(v => typeof v === 'number' && !isNaN(v))) {
+                devices.push({ regionId: region.id, effectIndex: ei, name: effect.name, key });
+            }
+        }
+    }
+
+    if (devices.length === 0) return '';
+
+    // Build existing lanes lookup
+    const existingLanes = new Set();
+    for (const lane of timelineEditor.automationLanes) {
+        const region = timelineEditor.findRegion(lane.regionId);
+        if (region && track.regions.some(r => r.id === region.id)) {
+            existingLanes.add(`${lane.regionId}:${lane.effectIndex}:${lane.paramName}`);
+        }
+    }
+
+    // Check if any device has automated params (for dot indicator on device dropdown)
+    const automatedDevices = new Set();
+    for (const laneKey of existingLanes) {
+        const [rid, eidx] = laneKey.split(':');
+        automatedDevices.add(`${rid}:${eidx}`);
+    }
+
+    // Device dropdown (first tier)
+    let html = '<select class="track-auto-device" onclick="event.stopPropagation()" onchange="handleAutoDeviceSelect(' + trackIdx + ', this)">';
+    html += '<option value="">Device...</option>';
+    for (const dev of devices) {
+        const dot = automatedDevices.has(`${dev.regionId}:${dev.effectIndex}`) ? '\u25CF ' : '';
+        html += `<option value="${dev.regionId}:${dev.effectIndex}">${dot}${esc(dev.name)}</option>`;
+    }
+    html += '</select>';
+
+    // Param dropdown (second tier — populated on device selection)
+    html += '<select class="track-auto-param" onclick="event.stopPropagation()" onchange="handleAutoParamSelect(' + trackIdx + ', this)" disabled>';
+    html += '<option value="">Param...</option>';
+    html += '</select>';
+
+    return html;
+}
+
+function handleAutoDeviceSelect(trackIdx, selectEl) {
+    const val = selectEl.value;
+    const paramSelect = selectEl.parentElement.querySelector('.track-auto-param');
+    if (!val || !paramSelect || !window.timelineEditor) {
+        if (paramSelect) { paramSelect.innerHTML = '<option value="">Param...</option>'; paramSelect.disabled = true; }
+        return;
+    }
+    const [regionIdStr, effectIndexStr] = val.split(':');
+    const regionId = parseInt(regionIdStr);
+    const effectIndex = parseInt(effectIndexStr);
+    const track = tracks[trackIdx];
+    if (!track) return;
+
+    // Find the effect
+    let targetEffect = null;
+    for (const region of track.regions) {
+        if (region.id === regionId && region.effects[effectIndex]) {
+            targetEffect = region.effects[effectIndex];
+            break;
+        }
+    }
+    if (!targetEffect || !targetEffect.params) return;
+
+    // Build existing lanes lookup for this specific device
+    const existingLanes = new Set();
+    for (const lane of timelineEditor.automationLanes) {
+        if (lane.regionId === regionId && lane.effectIndex === effectIndex) {
+            existingLanes.add(lane.paramName);
+        }
+    }
+
+    // Populate param dropdown
+    let html = '<option value="">Param...</option>';
+    for (const [paramName, value] of Object.entries(targetEffect.params)) {
+        if (typeof value !== 'number' || isNaN(value)) continue;
+        const dot = existingLanes.has(paramName) ? '\u25CF ' : '';
+        html += `<option value="${regionId}:${effectIndex}:${esc(paramName)}">${dot}${esc(paramName)}</option>`;
+    }
+    paramSelect.innerHTML = html;
+    paramSelect.disabled = false;
+}
+
+function handleAutoParamSelect(trackIdx, selectEl) {
+    const val = selectEl.value;
+    if (!val || !window.timelineEditor) { selectEl.value = ''; return; }
+    const [regionIdStr, effectIndexStr, paramName] = val.split(':');
+    const regionId = parseInt(regionIdStr);
+    const effectIndex = parseInt(effectIndexStr);
+
+    // Check if lane already exists
+    const existing = timelineEditor.automationLanes.find(l =>
+        l.regionId === regionId && l.effectIndex === effectIndex && l.paramName === paramName
+    );
+    if (existing) {
+        timelineEditor.selectedLaneId = existing.id;
+        timelineEditor.automationVisible = true;
+        timelineEditor.draw();
+    } else {
+        const lane = timelineEditor.addAutomationLane(regionId, effectIndex, paramName);
+        timelineEditor.selectedLaneId = lane.id;
+        timelineEditor.automationVisible = true;
+        timelineEditor.draw();
+        applyAutomationMappedState();
+        showToast(`Automation lane: ${paramName}`, 'success');
+    }
+    selectEl.value = '';
+}
+
+// Legacy single-dropdown handler (kept for backwards compat with any external callers)
+function handleTrackAutomationSelect(trackIdx, selectEl) {
+    handleAutoParamSelect(trackIdx, selectEl);
+}
+
+function toggleDrawModeBtn() {
+    if (!window.timelineEditor) return;
+    timelineEditor.toggleDrawMode();
+}
+
+function onDrawModeChange(active) {
+    // Update draw button state in sidebar
+    const btn = document.querySelector('.track-draw-btn');
+    if (btn) btn.classList.toggle('active', active);
+}
+
 function selectTrack(idx) {
     if (idx < 0 || idx >= tracks.length) return;
     selectedTrackIdx = idx;
+    // Sync timeline selection
+    if (window.timelineEditor) {
+        timelineEditor.selectedTrackId = tracks[idx].id;
+        // Select the first region of this track if any
+        const track = tracks[idx];
+        if (track.regions && track.regions.length > 0) {
+            timelineEditor.selectedRegionId = track.regions[0].id;
+        } else {
+            // Clear stale region ID so _getSelectedRegion auto-creates for new track
+            timelineEditor.selectedRegionId = null;
+        }
+        timelineEditor.draw();
+    }
     renderTrackList();
     renderLayers();  // Update chain panel to show selected track's effects
     renderChain();
+    applyAutomationMappedState();
 }
 
 function toggleTrackCollapse(idx) {
@@ -2986,13 +3324,13 @@ function updateTrackOpacity(idx, value) {
 }
 
 function toggleTrackSolo(idx) {
-    tracks[idx].solo = !tracks[idx].solo;
+    tracks[idx].soloed = !tracks[idx].soloed;
     renderTrackList();
     schedulePreview();
 }
 
 function toggleTrackMute(idx) {
-    tracks[idx].mute = !tracks[idx].mute;
+    tracks[idx].muted = !tracks[idx].muted;
     renderTrackList();
     schedulePreview();
 }
@@ -3008,11 +3346,12 @@ function addTrack() {
         return;
     }
     const track = createTrack();
-    tracks.push(track);
+    if (!track) return;
     selectedTrackIdx = tracks.length - 1;
     pushHistory(`Add ${track.name}`);
     renderTrackList();
     renderLayers();
+    if (window.timelineEditor) timelineEditor.draw();
 }
 
 function showTrackContextMenu(event, idx) {
@@ -3054,12 +3393,22 @@ function addTrackAt(position) {
         showToast(`Maximum ${MAX_TRACKS} tracks`, 'warning');
         return;
     }
-    const track = createTrack();
-    tracks.splice(position, 0, track);
+    if (!window.timelineEditor) return;
+    const name = `Track ${tracks.length + 1}`;
+    const track = timelineEditor.addTrack(name, 'video');
+    track.color = track.color || TRACK_COLORS[(tracks.length - 1) % TRACK_COLORS.length];
+    // Move to desired position
+    const arr = timelineEditor.tracks;
+    const idx = arr.indexOf(track);
+    if (idx >= 0 && idx !== position) {
+        arr.splice(idx, 1);
+        arr.splice(position, 0, track);
+    }
     selectedTrackIdx = position;
     pushHistory(`Add ${track.name}`);
     renderTrackList();
     renderLayers();
+    timelineEditor.draw();
 }
 
 function duplicateTrack(idx) {
@@ -3068,18 +3417,31 @@ function duplicateTrack(idx) {
         showToast(`Maximum ${MAX_TRACKS} tracks`, 'warning');
         return;
     }
+    if (!window.timelineEditor) return;
     const original = tracks[idx];
-    const duplicate = {
-        ...original,
-        id: trackIdCounter++,
-        name: original.name + ' Copy',
-        effects: JSON.parse(JSON.stringify(original.effects))  // Deep copy
-    };
-    tracks.splice(idx + 1, 0, duplicate);
+    const duplicate = timelineEditor.addTrack(original.name + ' Copy', original.type);
+    duplicate.opacity = original.opacity;
+    duplicate.blendMode = original.blendMode;
+    duplicate.color = original.color;
+    // Deep-copy regions with effects
+    for (const r of original.regions) {
+        const newRegion = timelineEditor.addRegion(duplicate.id, r.startFrame, r.endFrame);
+        newRegion.effects = JSON.parse(JSON.stringify(r.effects));
+        newRegion.label = r.label;
+        newRegion.mask = r.mask ? { ...r.mask } : null;
+    }
+    // Move to correct position
+    const arr = timelineEditor.tracks;
+    const curIdx = arr.indexOf(duplicate);
+    if (curIdx >= 0 && curIdx !== idx + 1) {
+        arr.splice(curIdx, 1);
+        arr.splice(idx + 1, 0, duplicate);
+    }
     selectedTrackIdx = idx + 1;
     pushHistory(`Duplicate ${original.name}`);
     renderTrackList();
     renderLayers();
+    timelineEditor.draw();
 }
 
 function deleteTrack(idx) {
@@ -3097,6 +3459,7 @@ function deleteTrack(idx) {
     renderTrackList();
     renderLayers();
     schedulePreview();
+    if (window.timelineEditor) timelineEditor.draw();
 }
 
 function moveTrack(fromIdx, toIdx) {
@@ -3107,6 +3470,7 @@ function moveTrack(fromIdx, toIdx) {
     selectedTrackIdx = toIdx;
     pushHistory(`Move ${track.name}`);
     renderTrackList();
+    if (window.timelineEditor) timelineEditor.draw();
 }
 
 async function freezeTrack(idx) {
@@ -3148,8 +3512,10 @@ function flattenTrack(idx) {
     const track = tracks[idx];
     if (!track.frozen) return;
 
-    // Clear effects — frozen frames remain as the "baked" result
-    track.effects = [];
+    // Clear effects from all regions — frozen frames remain as the "baked" result
+    for (const region of track.regions) {
+        region.effects = [];
+    }
     pushHistory(`Flatten ${track.name}`);
     showToast('Track flattened (effects cleared)', 'info');
     renderTrackList();
@@ -3729,8 +4095,31 @@ function lfoWaveform(phase, waveform) {
     }
 }
 
+function toggleLfoEnabled() {
+    lfoState.enabled = !lfoState.enabled;
+    if (lfoState.enabled) {
+        startLfoAnimation();
+    } else {
+        stopLfoAnimation();
+        // Reset all mapped params to base values
+        for (const mapping of lfoState.mappings) {
+            const device = chain.find(d => d.id === mapping.deviceId);
+            if (!device) continue;
+            device.params[mapping.paramName] = mapping.baseValue;
+            const knobEl = document.querySelector(`.knob[data-device="${mapping.deviceId}"][data-param="${mapping.paramName}"]`);
+            if (knobEl) {
+                knobEl.dataset.value = mapping.baseValue;
+                updateKnobVisual(knobEl, mapping.baseValue, mapping.min, mapping.max, knobEl.dataset.type);
+            }
+        }
+        schedulePreview();
+    }
+    renderLfoPanel();
+}
+
 function startLfoAnimation() {
     if (lfoAnimFrame) return;
+    if (!lfoState.enabled) return;
     let lastPhase = -1;
 
     function tick() {
@@ -3808,13 +4197,18 @@ function renderLfoPanel() {
         `<option value="${wf}" ${wf === lfoState.waveform ? 'selected' : ''}>${wf}</option>`
     ).join('');
 
+    const lfoPowerClass = lfoState.enabled ? 'on' : 'off';
+    const lfoBodyStyle = lfoState.enabled ? '' : 'style="opacity:0.4;pointer-events:none"';
+
     panel.innerHTML = `
         <div class="lfo-header">
-            <span>LFO</span>
+            ${gripHTML()}
+            <button class="lfo-power ${lfoPowerClass}" onclick="toggleLfoEnabled()">${lfoState.enabled ? 'ON' : 'OFF'}</button>
+            <span class="lfo-title">LFO</span>
             <button class="lfo-map-btn" onclick="toggleMapMode()">Map</button>
-            <button class="lfo-clear-btn" onclick="clearAllMappings()">Clear</button>
+            <button class="lfo-clear-btn" onclick="clearAllMappings()" title="Remove all LFO mappings">Clear</button>
         </div>
-        <div class="lfo-body">
+        <div class="lfo-body" ${lfoBodyStyle}>
             <div class="knob-container" style="width:52px">
                 <label>Rate</label>
                 <div class="knob lfo-knob" data-lfo-param="rate" data-value="${lfoState.rate}" data-min="0" data-max="10" data-type="float"
@@ -4261,14 +4655,19 @@ function reorderChain(fromId, toId) {
 
 // ============ PREVIEW ============
 
+let _previewAbort = null;      // AbortController for in-flight preview requests
+let _previewInFlight = false;  // Guard against piling up requests during playback
+
 function schedulePreview(fromPlayhead) {
     if (!videoLoaded) return;
     clearTimeout(previewDebounce);
-    // During timeline playback, skip debounce for fluid updates
+    // During timeline playback, skip debounce but guard against request pile-up
     if (window.timelineEditor?.isPlaying) {
         // If called from param/chain change (not playhead advance), invalidate cache
         if (!fromPlayhead && frameCache.size > 0) clearFrameCache();
-        previewChain();
+        if (_previewInFlight) return;  // Skip — still rendering previous frame
+        _previewInFlight = true;
+        previewChain().finally(() => { _previewInFlight = false; });
         return;
     }
     // Non-playback call: invalidate cache (params/chain may have changed)
@@ -4291,6 +4690,15 @@ async function previewChain() {
         return;
     }
 
+    // Cancel any in-flight preview request
+    if (_previewAbort) _previewAbort.abort();
+    _previewAbort = new AbortController();
+    const signal = _previewAbort.signal;
+
+    // During playback: no retries (they compound lag), request lower quality
+    const retries = isPlaying ? 0 : 3;
+    const quality = isPlaying ? 'playback' : 'full';
+
     try {
         let res;
         const usePerformPreview = (appMode === 'perform' || (appMode === 'timeline' && performToggleActive)) && perfLayers.length > 0;
@@ -4303,7 +4711,8 @@ async function previewChain() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
-            }, { context: 'Perform preview' });
+                signal,
+            }, { maxRetries: retries, context: 'Perform preview' });
         } else if (appMode === 'timeline' && window.timelineEditor) {
             // Timeline mode: send all active regions to server
             const regions = timelineEditor.getActiveRegions().map(r => ({
@@ -4316,26 +4725,35 @@ async function previewChain() {
             res = await fetchWithRetry(`${API}/api/preview/timeline`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frame_number: currentFrame, regions, mix: mixLevel }),
-            }, { context: 'Timeline preview' });
+                body: JSON.stringify({ frame_number: currentFrame, regions, mix: mixLevel, quality }),
+                signal,
+            }, { maxRetries: retries, context: 'Timeline preview' });
         } else if (tracks.length > 1 || (tracks.length === 1 && tracks[0].effects.some(e => !e.bypassed))) {
-            // Multi-track preview: composite all tracks with blend modes + opacity
-            const trackData = tracks.map(t => ({
-                name: t.name,
-                effects: t.effects.filter(e => !e.bypassed).map(d => ({
-                    name: d.name, params: { ...d.params, mix: d.mix ?? 1.0 }
-                })),
-                opacity: t.opacity,
-                blend_mode: t.blendMode,
-                muted: t.mute,
-                solo: t.solo,
-                frozen: t.frozen || false
-            }));
+            // Multi-track preview: read from timeline tracks (unified)
+            const trackData = tracks.map(t => {
+                // Collect effects from all regions on this track
+                const allEffects = [];
+                for (const r of (t.regions || [])) {
+                    for (const e of (r.effects || [])) {
+                        if (!e.bypassed) allEffects.push({ name: e.name, params: { ...e.params, mix: e.mix ?? 1.0 } });
+                    }
+                }
+                return {
+                    name: t.name,
+                    effects: allEffects,
+                    opacity: t.opacity,
+                    blend_mode: t.blendMode,
+                    muted: t.muted,
+                    solo: t.soloed,
+                    frozen: t.frozen || false,
+                };
+            });
             res = await fetchWithRetry(`${API}/api/preview/multitrack`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frame_number: currentFrame, tracks: trackData }),
-            }, { context: 'Multi-track preview' });
+                body: JSON.stringify({ frame_number: currentFrame, tracks: trackData, quality }),
+                signal,
+            }, { maxRetries: retries, context: 'Multi-track preview' });
         } else {
             // Flat chain behavior (Quick mode legacy / fallback)
             const activeEffects = chain
@@ -4344,8 +4762,9 @@ async function previewChain() {
             res = await fetchWithRetry(`${API}/api/preview`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ effects: activeEffects, frame_number: currentFrame, mix: mixLevel }),
-            });
+                body: JSON.stringify({ effects: activeEffects, frame_number: currentFrame, mix: mixLevel, quality }),
+                signal,
+            }, { maxRetries: retries });
         }
         const data = await res.json();
         showPreview(data.preview);
@@ -4366,6 +4785,7 @@ async function previewChain() {
             perfSyncWithServer(data.layer_states);
         }
     } catch (err) {
+        if (err.name === 'AbortError') return;  // Cancelled by newer request — ignore
         if (err.response) {
             try { handleApiError(await err.response.json(), 'Preview failed'); } catch (_) {}
         } else {
@@ -4377,6 +4797,8 @@ async function previewChain() {
 // Pre-fetch upcoming frames during playback (fire-and-forget, overlapped)
 function prefetchFrames(fromFrame) {
     if (appMode !== 'timeline' || !window.timelineEditor) return;
+    // Don't prefetch during live playback — server can barely keep up with current frames
+    if (window.timelineEditor.isPlaying) return;
 
     // Evict old frames if cache is too large
     if (frameCache.size > FRAME_CACHE_MAX) {
@@ -4652,6 +5074,11 @@ function ctxAction(action, itemIdx) {
         case 'solo':
             soloDevice(id);
             break;
+        case 'createGroup':
+            selectedLayerId = id;
+            if (selectedIds.size === 0) selectedIds.add(id);
+            addGroup();
+            break;
         case 'flatten':
             flattenChain();
             break;
@@ -4659,6 +5086,7 @@ function ctxAction(action, itemIdx) {
             if (chain.length === 0) return;
             chain = [];
             selectedLayerId = null;
+            selectedIds.clear();
             pushHistory('Clear all');
             syncChainToRegion();
             renderChain();
@@ -4808,6 +5236,9 @@ function deviceContextMenu(e, deviceId) {
         { label: 'Move Up', action: 'moveUp', shortcut: idx > 0 ? '' : '(first)' },
         { label: 'Move Down', action: 'moveDown', shortcut: idx < chain.length - 1 ? '' : '(last)' },
     ];
+
+    items.push('---');
+    items.push({ label: 'Create New Group', action: 'createGroup', shortcut: 'Cmd+G' });
 
     if (automateItems.length > 0) {
         items.push('---');
@@ -4978,18 +5409,25 @@ async function startExport() {
         params: { ...d.params },
     }));
 
-    // Multi-track data for composited export
-    const hasMultiTrack = tracks.length > 1 || (tracks.length === 1 && tracks[0].effects.some(e => !e.bypassed));
-    const multiTrackData = hasMultiTrack ? tracks.map(t => ({
-        name: t.name,
-        effects: t.effects.filter(e => !e.bypassed).map(d => ({
-            name: d.name, params: { ...d.params, mix: d.mix ?? 1.0 }
-        })),
-        opacity: t.opacity,
-        blend_mode: t.blendMode,
-        muted: t.mute,
-        solo: t.solo,
-    })) : null;
+    // Multi-track data for composited export (from unified timeline tracks)
+    const _hasEffects = tracks.some(t => (t.regions || []).some(r => (r.effects || []).some(e => !e.bypassed)));
+    const hasMultiTrack = tracks.length > 1 || _hasEffects;
+    const multiTrackData = hasMultiTrack ? tracks.map(t => {
+        const allEffects = [];
+        for (const r of (t.regions || [])) {
+            for (const e of (r.effects || [])) {
+                if (!e.bypassed) allEffects.push({ name: e.name, params: { ...e.params, mix: e.mix ?? 1.0 } });
+            }
+        }
+        return {
+            name: t.name,
+            effects: allEffects,
+            opacity: t.opacity,
+            blend_mode: t.blendMode,
+            muted: t.muted,
+            solo: t.soloed,
+        };
+    }) : null;
 
     const fmt = document.getElementById('export-format').value;
     const resPre = document.getElementById('export-resolution').value;
@@ -5342,25 +5780,32 @@ function onRegionSelect(region) {
     if (!window.timelineEditor) return;
     timelineEditor.selectedRegionId = region.id;
 
-    // Load region's effects into the chain rack
-    chain = region.effects.map(eff => ({
-        id: deviceIdCounter++,
-        name: eff.name,
-        params: JSON.parse(JSON.stringify(eff.params || {})),
-        bypassed: eff.bypassed || false,
-    }));
-    selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
+    // Find which track owns this region and sync sidebar selection
+    for (let i = 0; i < tracks.length; i++) {
+        if (tracks[i].regions.some(r => r.id === region.id)) {
+            selectedTrackIdx = i;
+            break;
+        }
+    }
+
+    // Chain is now a live reference to region.effects via getCurrentChain()
+    // Just ensure IDs exist for the device rack UI
+    for (const eff of region.effects) {
+        if (!eff.id) eff.id = deviceIdCounter++;
+    }
+    selectedLayerId = region.effects.length > 0 ? region.effects[region.effects.length - 1].id : null;
 
     renderChain();
     renderLayers();
+    renderTrackList();
     updateMaskOverlay();
+    applyAutomationMappedState();
     timelineEditor.draw();
 }
 
 function onRegionDeselect() {
     if (appMode !== 'timeline') return;
-    // When no region is selected, show empty chain
-    chain = [];
+    if (window.timelineEditor) timelineEditor.selectedRegionId = null;
     selectedLayerId = null;
     renderChain();
     renderLayers();
@@ -5500,15 +5945,9 @@ async function flattenRegion(regionId) {
 }
 
 function syncChainToRegion() {
-    if (appMode !== 'timeline') return;
-    if (!window.timelineEditor || !timelineEditor.selectedRegionId) return;
-    const region = timelineEditor.findRegion(timelineEditor.selectedRegionId);
-    if (!region) return;
-    region.effects = chain.map(d => ({
-        name: d.name,
-        params: JSON.parse(JSON.stringify(d.params)),
-        bypassed: d.bypassed,
-    }));
+    // After unification, chain IS region.effects (same reference).
+    // This function is now a no-op for timeline mode.
+    // Perform mode override below still uses this hook for server sync.
 }
 
 // ============ PROJECT SAVE/LOAD ============
@@ -5518,10 +5957,12 @@ function getProjectState() {
         name: document.getElementById('file-name').textContent || 'Untitled',
         mode: appMode,
         timeline: window.timelineEditor ? timelineEditor.serialize() : null,
+        // Keep saving chain for backward compat with older versions
         chain: chain.map(d => ({ name: d.name, params: d.params, bypassed: d.bypassed, mix: d.mix ?? 1.0 })),
         mixLevel,
         currentFrame,
         totalFrames,
+        version: 2,  // Mark as unified format
     };
     // Include perform mode data (full perform mode or timeline+perform toggle)
     if ((appMode === 'perform' || performToggleActive) && perfLayers.length > 0) {
@@ -5594,24 +6035,39 @@ async function loadProject() {
             // Restore mode
             if (p.mode) setMode(p.mode);
 
-            // Restore timeline
+            // Restore timeline (now the single source of truth for tracks)
             if (p.timeline && window.timelineEditor) {
                 timelineEditor.deserialize(p.timeline);
             }
 
-            // Restore chain
-            if (p.chain) {
-                chain = p.chain.map(d => ({
-                    id: deviceIdCounter++,
-                    name: d.name,
-                    params: JSON.parse(JSON.stringify(d.params || {})),
-                    bypassed: d.bypassed || false,
-                    mix: d.mix ?? 1.0,
-                }));
-                selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
-                renderChain();
-                renderLayers();
+            // Migrate old format: if project has chain but no regions in timeline,
+            // load chain into the first track's first region
+            if (p.chain && p.chain.length > 0 && (!p.version || p.version < 2)) {
+                if (window.timelineEditor) {
+                    const track = timelineEditor.tracks[0];
+                    if (track) {
+                        let region = track.regions[0];
+                        if (!region) {
+                            region = timelineEditor.addRegion(track.id, 0, Math.max(0, timelineEditor.totalFrames - 1));
+                        }
+                        region.effects = p.chain.map(d => ({
+                            id: deviceIdCounter++,
+                            name: d.name,
+                            params: JSON.parse(JSON.stringify(d.params || {})),
+                            bypassed: d.bypassed || false,
+                            mix: d.mix ?? 1.0,
+                        }));
+                        timelineEditor.selectedRegionId = region.id;
+                    }
+                }
             }
+
+            // Sync sidebar to loaded state
+            selectedTrackIdx = 0;
+            selectedLayerId = chain.length > 0 ? chain[chain.length - 1].id : null;
+            renderChain();
+            renderLayers();
+            renderTrackList();
 
             // Restore mix
             if (p.mixLevel !== undefined) {
@@ -8136,6 +8592,18 @@ function toggleOverdub() {
         btn.classList.toggle('active', autoRecording);
         btn.classList.toggle('recording', autoRecording);
     }
+}
+
+function setLoopFromSelectedRegion() {
+    if (!window.timelineEditor) return;
+    if (!timelineEditor.selectedRegionId) {
+        showToast('Select a region first', 'info');
+        return;
+    }
+    timelineEditor.setLoopFromRegion(timelineEditor.selectedRegionId);
+    isLooping = timelineEditor.loopEnabled;
+    const btn = document.getElementById('transport-loop');
+    if (btn) btn.classList.toggle('active', isLooping);
 }
 
 function toggleLoop() {

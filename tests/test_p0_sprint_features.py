@@ -257,10 +257,10 @@ class TestCSS:
         assert 'cursor: text' in content  # knob-value should show text cursor
 
     def test_contrast_values_wcag(self):
-        """CSS variables must use WCAG-passing values."""
+        """CSS variables must use WCAG-passing values (accessible palette)."""
         with open(self.CSS_PATH) as f:
             content = f.read()
-        # text-dim should be #7a7a7a (not the old #555)
-        assert '--text-dim: #7a7a7a' in content
-        # text-secondary should be #999 (not the old #888)
-        assert '--text-secondary: #999' in content
+        # text-dim raised to #8a8a96 for WCAG AA compliance on primary backgrounds
+        assert '--text-dim: #8a8a96' in content
+        # text-secondary raised to #a0a0ac for WCAG AA
+        assert '--text-secondary: #a0a0ac' in content

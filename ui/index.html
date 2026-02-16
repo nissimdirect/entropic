@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ENTROPIC</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=20260216c">
 </head>
 <body>
 <!-- Boot Screen: visible immediately, dismissed when app.js init() completes -->
@@ -109,10 +109,10 @@
         <div class="transport-bar">
             <button class="transport-btn" id="transport-play" onclick="togglePlayback()" title="Play/Pause (Space)" onmouseenter="showInfoViewText('Play/Pause — start or stop timeline playback (Space)')" onmouseleave="showInfoViewText('')">&#9654;</button>
             <button class="transport-btn" id="transport-rec" onclick="toggleRecord()" title="Record (R)" onmouseenter="showInfoViewText('Record — capture perform events to session (R)')" onmouseleave="showInfoViewText('')">&#9679;</button>
-            <button class="transport-btn" id="transport-overdub" onclick="toggleOverdub()" title="Overdub (Shift+R)" onmouseenter="showInfoViewText('Overdub — layer new events on top of existing recording (Shift+R)')" onmouseleave="showInfoViewText('')">&#9678;</button>
+            <button class="transport-btn" id="transport-overdub" onclick="toggleOverdub()" title="Record Automation (Shift+R)" onmouseenter="showInfoViewText('Record Automation — overdub knob movements as timeline automation lanes (Shift+R)')" onmouseleave="showInfoViewText('')">&#9678;</button>
             <button class="transport-btn" id="transport-capture" onclick="capturePerformBuffer()" title="Capture (Cmd+Shift+C)" onmouseenter="showInfoViewText('Capture — claim the last 60s of performance input retroactively (Cmd+Shift+C)')" onmouseleave="showInfoViewText('')">&#8865;</button>
             <button class="transport-btn" id="transport-loop" onclick="toggleLoop()" title="Loop (L)" onmouseenter="showInfoViewText('Loop — repeat the in/out region continuously (L)')" onmouseleave="showInfoViewText('')">⟳</button>
-            <button class="transport-btn" id="kbd-midi-btn" onclick="toggleKeyboardMidi()" title="Keyboard MIDI (M)" onmouseenter="showInfoViewText('Keys — use QWERTY keys to trigger perform layers like a MIDI controller (M)')" onmouseleave="showInfoViewText('')">Keys</button>
+            <button class="transport-btn kbd-btn" id="kbd-midi-btn" onclick="toggleKeyboardMidi()" title="Keyboard MIDI (M)" onmouseenter="showInfoViewText('Keys — use QWERTY keys to trigger perform layers like a MIDI controller (M)')" onmouseleave="showInfoViewText('')"><span style="font-size:10px;font-weight:700;letter-spacing:-0.5px">MIDI</span></button>
             <span class="transport-time" id="transport-timecode">0:00:00 / 0:00:00</span>
             <span class="transport-frames" id="transport-frames">F:0/0</span>
         </div>
@@ -535,6 +535,9 @@
                 <div class="sc-row"><kbd>Cmd+0</kbd> Fit to window</div>
                 <div class="sc-row"><kbd>M</kbd> Mute track</div>
                 <div class="sc-row"><kbd>S</kbd> Solo track</div>
+                <div class="sc-row"><kbd>L</kbd> Toggle loop</div>
+                <div class="sc-row"><kbd>Cmd+L</kbd> Loop from selected region</div>
+                <div class="sc-row"><kbd>A</kbd> Toggle automation lanes</div>
                 <h3 data-shortcut-mode="perform">Perform</h3>
                 <div class="sc-row"><kbd>1-8</kbd> Trigger layers (one-shot)</div>
                 <div class="sc-row"><kbd>Space</kbd> Play/Pause</div>
@@ -583,7 +586,7 @@
 <!-- Context Menu (shared, repositioned dynamically) -->
 <div id="ctx-menu" class="ctx-menu"></div>
 
-<script src="/static/timeline.js"></script>
-<script src="/static/app.js"></script>
+<script src="/static/timeline.js?v=20260216c"></script>
+<script src="/static/app.js?v=20260216c"></script>
 </body>
 </html>

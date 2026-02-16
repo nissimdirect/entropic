@@ -13,6 +13,21 @@ class Track {
         this.soloed = false;
         this.regions = [];
         this.height = 60;
+        // Sidebar properties (unified — single source of truth)
+        this.opacity = 1.0;
+        this.blendMode = 'normal';
+        this.color = null;        // Set by app.js on creation
+        this.collapsed = false;
+        this.frozen = false;
+    }
+
+    // Convenience: aggregate effects from all regions (for sidebar display + legacy compat)
+    get effects() {
+        const all = [];
+        for (const r of this.regions) {
+            for (const e of r.effects) all.push(e);
+        }
+        return all;
     }
 }
 
@@ -52,7 +67,7 @@ class TimelineEditor {
         this.ctx = this.canvas.getContext('2d');
 
         // State
-        this.tracks = [new Track(0, 'Video 1', 'video')];
+        this.tracks = [new Track(0, 'Track 1', 'video')];
         this.playhead = 0;
         this.inPoint = null;
         this.outPoint = null;
@@ -64,7 +79,7 @@ class TimelineEditor {
         this.playInterval = null;
         this.fps = 30;
         this.totalFrames = 100;
-        this.trackHeaderWidth = 120;
+        this.trackHeaderWidth = 0;  // Sidebar DOM handles track headers — no canvas duplication
         this.rulerHeight = 24;
         this.nextTrackId = 1;
         this.nextRegionId = 0;
@@ -148,13 +163,15 @@ class TimelineEditor {
         if (!wrapper) return;
         const rect = wrapper.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
+        const totalH = this.getTotalHeight();
+        const displayH = Math.max(rect.height, totalH);
         this.canvas.width = rect.width * dpr;
-        this.canvas.height = rect.height * dpr;
+        this.canvas.height = displayH * dpr;
         this.canvas.style.width = rect.width + 'px';
-        this.canvas.style.height = rect.height + 'px';
+        this.canvas.style.height = displayH + 'px';
         this.ctx.scale(dpr, dpr);
         this.canvasW = rect.width;
-        this.canvasH = rect.height;
+        this.canvasH = displayH;
         this.draw();
     }
 
@@ -176,6 +193,22 @@ class TimelineEditor {
 
     draw() {
         if (!this.ctx) return;
+
+        // Resize canvas height if content exceeds wrapper
+        const wrapper = this.canvas.parentElement;
+        if (wrapper) {
+            const totalH = this.getTotalHeight();
+            const wrapperH = wrapper.getBoundingClientRect().height;
+            const displayH = Math.max(wrapperH, totalH);
+            if (Math.abs(displayH - this.canvasH) > 1) {
+                const dpr = window.devicePixelRatio || 1;
+                this.canvas.height = displayH * dpr;
+                this.canvas.style.height = displayH + 'px';
+                this.ctx.scale(dpr, dpr);
+                this.canvasH = displayH;
+            }
+        }
+
         const ctx = this.ctx;
         const w = this.canvasW;
         const h = this.canvasH;
@@ -212,22 +245,23 @@ class TimelineEditor {
         const ctx = this.ctx;
         const w = this.canvasW;
         const rh = this.rulerHeight;
+        const thw = this.trackHeaderWidth;
 
         // Background
         ctx.fillStyle = this.colors.ruler;
         ctx.fillRect(0, 0, w, rh);
 
-        // Header corner
-        ctx.fillStyle = this.colors.trackHeader;
-        ctx.fillRect(0, 0, this.trackHeaderWidth, rh);
-
-        // Border
-        ctx.strokeStyle = this.colors.trackHeaderBorder;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(this.trackHeaderWidth, 0);
-        ctx.lineTo(this.trackHeaderWidth, rh);
-        ctx.stroke();
+        // Header corner (only when header is visible)
+        if (thw > 0) {
+            ctx.fillStyle = this.colors.trackHeader;
+            ctx.fillRect(0, 0, thw, rh);
+            ctx.strokeStyle = this.colors.trackHeaderBorder;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(thw, 0);
+            ctx.lineTo(thw, rh);
+            ctx.stroke();
+        }
 
         // Time markers
         ctx.font = '9px Menlo, Monaco, monospace';
@@ -297,59 +331,64 @@ class TimelineEditor {
         const ctx = this.ctx;
         const w = this.canvasW;
         const h = track.height;
+        const thw = this.trackHeaderWidth;
 
         // Track background (alternating)
         ctx.fillStyle = index % 2 === 0 ? this.colors.trackBg : this.colors.trackAlt;
         if (track.muted) ctx.globalAlpha = 0.5;
-        ctx.fillRect(this.trackHeaderWidth, y, w - this.trackHeaderWidth, h);
+        ctx.fillRect(thw, y, w - thw, h);
         ctx.globalAlpha = 1.0;
 
-        // Track header
-        ctx.fillStyle = this.colors.trackHeader;
-        ctx.fillRect(0, y, this.trackHeaderWidth, h);
+        // Track header (only when trackHeaderWidth > 0)
+        if (thw > 0) {
+            ctx.fillStyle = this.colors.trackHeader;
+            ctx.fillRect(0, y, thw, h);
 
-        // Selected track highlight
-        if (track.id === this.selectedTrackId) {
-            ctx.fillStyle = 'rgba(255,61,61,0.05)';
-            ctx.fillRect(this.trackHeaderWidth, y, w - this.trackHeaderWidth, h);
-            ctx.strokeStyle = 'rgba(255,61,61,0.3)';
+            // Selected track highlight
+            if (track.id === this.selectedTrackId) {
+                ctx.strokeStyle = 'rgba(255,61,61,0.3)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(0.5, y + 0.5, thw - 1, h - 1);
+            }
+
+            // Track name
+            ctx.fillStyle = track.muted ? this.colors.textMuted : this.colors.text;
+            ctx.font = '10px Menlo, Monaco, monospace';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(track.name, 8, y + h / 2 - 8);
+
+            // S (solo) and M (mute) buttons
+            const btnY = y + h / 2 + 4;
+            const btnW = 16;
+            const btnH = 14;
+            ctx.fillStyle = track.soloed ? this.colors.soloBtn : this.colors.trackHeaderBorder;
+            ctx.fillRect(8, btnY, btnW, btnH);
+            ctx.fillStyle = track.soloed ? '#000' : this.colors.textDim;
+            ctx.font = '8px Menlo, Monaco, monospace';
+            ctx.fillText('S', 12, btnY + btnH / 2 + 1);
+            ctx.fillStyle = track.muted ? this.colors.muteBtn : this.colors.trackHeaderBorder;
+            ctx.fillRect(28, btnY, btnW, btnH);
+            ctx.fillStyle = track.muted ? '#fff' : this.colors.textDim;
+            ctx.fillText('M', 32, btnY + btnH / 2 + 1);
+
+            // Header right border
+            ctx.strokeStyle = this.colors.trackHeaderBorder;
             ctx.lineWidth = 1;
-            ctx.strokeRect(0.5, y + 0.5, this.trackHeaderWidth - 1, h - 1);
+            ctx.beginPath();
+            ctx.moveTo(thw, y);
+            ctx.lineTo(thw, y + h);
+            ctx.stroke();
         }
 
-        // Track name
-        ctx.fillStyle = track.muted ? this.colors.textMuted : this.colors.text;
-        ctx.font = '10px Menlo, Monaco, monospace';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(track.name, 8, y + h / 2 - 8);
-
-        // S (solo) and M (mute) buttons
-        const btnY = y + h / 2 + 4;
-        const btnW = 16;
-        const btnH = 14;
-
-        // Solo button
-        ctx.fillStyle = track.soloed ? this.colors.soloBtn : this.colors.trackHeaderBorder;
-        ctx.fillRect(8, btnY, btnW, btnH);
-        ctx.fillStyle = track.soloed ? '#000' : this.colors.textDim;
-        ctx.font = '8px Menlo, Monaco, monospace';
-        ctx.fillText('S', 12, btnY + btnH / 2 + 1);
-
-        // Mute button
-        ctx.fillStyle = track.muted ? this.colors.muteBtn : this.colors.trackHeaderBorder;
-        ctx.fillRect(28, btnY, btnW, btnH);
-        ctx.fillStyle = track.muted ? '#fff' : this.colors.textDim;
-        ctx.fillText('M', 32, btnY + btnH / 2 + 1);
-
-        // Header right border
-        ctx.strokeStyle = this.colors.trackHeaderBorder;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(this.trackHeaderWidth, y);
-        ctx.lineTo(this.trackHeaderWidth, y + h);
-        ctx.stroke();
+        // Selected track highlight (full-width when no header)
+        if (thw === 0 && track.id === this.selectedTrackId) {
+            ctx.fillStyle = 'rgba(255,61,61,0.05)';
+            ctx.fillRect(0, y, w, h);
+        }
 
         // Bottom border
+        ctx.strokeStyle = this.colors.trackHeaderBorder;
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(0, y + h);
         ctx.lineTo(w, y + h);
@@ -534,6 +573,43 @@ class TimelineEditor {
 
         ctx.setLineDash([]);
         ctx.globalAlpha = 1.0;
+
+        // Highlight region whose bounds match the loop brace
+        if (this.loopEnabled) {
+            for (const track of this.tracks) {
+                const trackY = this._getTrackY(track);
+                if (trackY === null) continue;
+                for (const region of track.regions) {
+                    if (region.startFrame === this.loopStart && region.endFrame === this.loopEnd) {
+                        const rx = this.frameToX(region.startFrame);
+                        const rw = this.frameToX(region.endFrame) - rx;
+                        ctx.strokeStyle = '#f5a623';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([4, 3]);
+                        ctx.globalAlpha = 0.9;
+                        ctx.strokeRect(rx, trackY, rw, track.height);
+                        ctx.setLineDash([]);
+                        ctx.globalAlpha = 1.0;
+                    }
+                }
+            }
+        }
+    }
+
+    _getTrackY(targetTrack) {
+        let y = this.rulerHeight;
+        for (const track of this.tracks) {
+            if (track === targetTrack) return y;
+            y += track.height;
+            // Account for automation lanes on this track
+            if (this.automationVisible) {
+                for (const lane of this.automationLanes) {
+                    const region = track.regions.find(r => r.id === lane.regionId);
+                    if (region && lane.visible) y += lane.height;
+                }
+            }
+        }
+        return null;
     }
 
     drawIOMarkers() {
@@ -651,33 +727,34 @@ class TimelineEditor {
         const ctx = this.ctx;
         const w = this.canvasW;
         const h = lane.height;
+        const thw = this.trackHeaderWidth;
 
         // Lane background
         ctx.fillStyle = 'rgba(20, 20, 24, 0.9)';
-        ctx.fillRect(this.trackHeaderWidth, y, w - this.trackHeaderWidth, h);
+        ctx.fillRect(thw, y, w - thw, h);
 
-        // Lane header (in track header area)
-        ctx.fillStyle = '#1a1a20';
-        ctx.fillRect(0, y, this.trackHeaderWidth, h);
+        // Lane header (only when canvas headers are visible)
+        if (thw > 0) {
+            ctx.fillStyle = '#1a1a20';
+            ctx.fillRect(0, y, thw, h);
 
-        // Lane label with dropdown indicator
+            ctx.fillStyle = lane.color;
+            ctx.font = '9px Menlo, Monaco, monospace';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(lane.paramName, 8, y + h / 2);
+            const textW = ctx.measureText(lane.paramName).width;
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.beginPath();
+            ctx.moveTo(12 + textW, y + h / 2 - 2);
+            ctx.lineTo(16 + textW, y + h / 2 - 2);
+            ctx.lineTo(14 + textW, y + h / 2 + 1);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Color indicator bar at left edge
         ctx.fillStyle = lane.color;
-        ctx.font = '9px Menlo, Monaco, monospace';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(lane.paramName, 8, y + h / 2);
-        // Small dropdown triangle after label
-        const textW = ctx.measureText(lane.paramName).width;
-        ctx.fillStyle = 'rgba(255,255,255,0.3)';
-        ctx.beginPath();
-        ctx.moveTo(12 + textW, y + h / 2 - 2);
-        ctx.lineTo(16 + textW, y + h / 2 - 2);
-        ctx.lineTo(14 + textW, y + h / 2 + 1);
-        ctx.closePath();
-        ctx.fill();
-
-        // Color indicator bar
-        ctx.fillStyle = lane.color;
-        ctx.fillRect(this.trackHeaderWidth - 3, y, 3, h);
+        ctx.fillRect(Math.max(0, thw - 3), y, 3, h);
 
         // Value grid lines (0.25, 0.5, 0.75)
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
@@ -976,9 +1053,12 @@ class TimelineEditor {
 
     toggleDrawMode() {
         this.drawMode = !this.drawMode;
-        this.canvas.style.cursor = this.drawMode ? 'cell' : 'crosshair';
+        this.canvas.style.cursor = this.drawMode ? 'crosshair' : 'default';
         if (typeof showToast === 'function') {
-            showToast(this.drawMode ? 'Draw mode ON' : 'Draw mode OFF', 'info');
+            showToast(this.drawMode ? 'Draw mode ON — click+drag in automation lanes to draw' : 'Draw mode OFF', 'info');
+        }
+        if (typeof onDrawModeChange === 'function') {
+            onDrawModeChange(this.drawMode);
         }
     }
 
@@ -1237,6 +1317,15 @@ class TimelineEditor {
         }
     }
 
+    setLoopFromRegion(regionId) {
+        const region = this.findRegion(regionId);
+        if (!region) {
+            if (typeof showToast === 'function') showToast('Select a region first', 'info');
+            return;
+        }
+        this.setLoop(region.startFrame, region.endFrame);
+    }
+
     toggleLoop() {
         if (this.loopStart === null || this.loopEnd === null) {
             // No loop set — create one from I/O points, or default to full video
@@ -1357,6 +1446,15 @@ class TimelineEditor {
         this.tracks.push(track);
         this.draw();
         return track;
+    }
+
+    addRegion(trackId, startFrame, endFrame) {
+        const track = this.tracks.find(t => t.id === trackId);
+        if (!track) return null;
+        const region = new Region(this.nextRegionId++, trackId, startFrame, endFrame);
+        track.regions.push(region);
+        this.draw();
+        return region;
     }
 
     findRegion(regionId) {
@@ -1970,9 +2068,8 @@ class TimelineEditor {
     }
 
     onWheel(e) {
-        e.preventDefault();
-
         if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
             // Zoom at cursor position
             const pos = this.getCanvasPos(e);
             const frameAtCursor = this.xToFrame(pos.x);
@@ -1987,13 +2084,17 @@ class TimelineEditor {
             // Keep frame under cursor at same screen position
             this.scrollX += frameAtCursor * (this.zoom - oldZoom);
             this.clampScroll();
-        } else {
-            // Horizontal scroll
+            this.draw();
+        } else if (e.shiftKey) {
+            e.preventDefault();
+            // Shift+scroll = horizontal scroll
             this.scrollX += e.deltaY * 2;
             this.clampScroll();
+            this.draw();
+        } else {
+            // Default: let the wrapper handle vertical scroll natively
+            // (overflow-y: auto on #timeline-canvas-wrapper)
         }
-
-        this.draw();
     }
 
     onDblClick(e) {
@@ -2044,6 +2145,11 @@ class TimelineEditor {
                 type: t.type,
                 muted: t.muted,
                 soloed: t.soloed,
+                opacity: t.opacity,
+                blendMode: t.blendMode,
+                color: t.color,
+                collapsed: t.collapsed,
+                frozen: t.frozen,
                 regions: t.regions.map(r => ({
                     id: r.id,
                     startFrame: r.startFrame,
@@ -2081,6 +2187,11 @@ class TimelineEditor {
             const track = new Track(t.id, t.name, t.type);
             track.muted = t.muted || false;
             track.soloed = t.soloed || false;
+            track.opacity = t.opacity ?? 1.0;
+            track.blendMode = t.blendMode || 'normal';
+            track.color = t.color || null;
+            track.collapsed = t.collapsed || false;
+            track.frozen = t.frozen || false;
             track.regions = (t.regions || []).map(r => {
                 const region = new Region(r.id, t.id, r.startFrame, r.endFrame);
                 region.effects = r.effects || [];

@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import base64
 import time
+import threading
 from pathlib import Path
 from io import BytesIO
 
@@ -27,7 +28,7 @@ from PIL import Image
 from effects import EFFECTS, CATEGORIES, CATEGORY_ORDER, apply_chain, is_video_level
 from effects.color import compute_histogram
 from packages import PACKAGES
-from core.video_io import probe_video, extract_single_frame
+from core.video_io import probe_video, extract_single_frame, stream_frames, open_output_pipe
 from core.export_models import ExportSettings
 
 # Preset system — use writable location for bundled app
@@ -74,6 +75,48 @@ _render_progress = {
     "phase": "idle",  # "extracting", "processing", "encoding", "idle"
     "cancel_requested": False,
 }
+_render_progress_lock = threading.Lock()
+
+
+# Chunk preview progress tracking (polled by frontend during chunk playback)
+_chunk_progress = {
+    "active": False,
+    "frame": 0,
+    "total": 0,
+    "ready": False,
+    "cancel": False,
+    "url": "",
+    "error": "",
+}
+_chunk_progress_lock = threading.Lock()
+
+# Temp dir for chunk files (cleaned up per-request)
+_CHUNK_DIR = Path(tempfile.gettempdir()) / "entropic_chunks"
+_CHUNK_DIR.mkdir(exist_ok=True)
+
+
+def _set_chunk_progress(**kwargs):
+    """Thread-safe update of chunk progress dict."""
+    with _chunk_progress_lock:
+        _chunk_progress.update(kwargs)
+
+
+def _get_chunk_progress():
+    """Thread-safe snapshot of chunk progress dict."""
+    with _chunk_progress_lock:
+        return dict(_chunk_progress)
+
+
+def _set_progress(**kwargs):
+    """SEC-1: Thread-safe update of render progress dict."""
+    with _render_progress_lock:
+        _render_progress.update(kwargs)
+
+
+def _get_progress():
+    """SEC-1: Thread-safe snapshot of render progress dict."""
+    with _render_progress_lock:
+        return dict(_render_progress)
 
 
 class ExportCancelledError(Exception):
@@ -85,6 +128,10 @@ MAX_FRAMES_PER_RENDER = 10000
 
 # Per-frame processing timeout (seconds)
 FRAME_TIMEOUT_SECONDS = 30
+PREVIEW_TIMEOUT_SECONDS = 5  # Shorter timeout for preview (vs render)
+
+# Playback preview resolution cap
+PLAYBACK_MAX_PIXELS = 640 * 360
 
 # Structured error recovery hints for user-facing errors
 ERROR_RECOVERY = {
@@ -127,14 +174,12 @@ def _run_ffmpeg(cmd: list, timeout: int = 600) -> subprocess.CompletedProcess:
         # Extract the most useful part of FFmpeg stderr (last 500 chars usually has the error)
         stderr_tail = stderr[-500:] if len(stderr) > 500 else stderr
         msg = f"FFmpeg encoding failed (exit code {e.returncode}): {stderr_tail}"
-        _render_progress["active"] = False
-        _render_progress["phase"] = "idle"
+        _set_progress(active=False, phase="idle")
         detail = _error_detail("render_failed", msg)
         detail["ffmpeg_stderr"] = stderr_tail
         raise HTTPException(status_code=500, detail=detail)
     except subprocess.TimeoutExpired:
-        _render_progress["active"] = False
-        _render_progress["phase"] = "idle"
+        _set_progress(active=False, phase="idle")
         raise HTTPException(status_code=500, detail=_error_detail(
             "render_failed", f"FFmpeg encoding timed out after {timeout}s. Try a shorter video or simpler codec."
         ))
@@ -170,19 +215,20 @@ def _validate_output(output_path: Path) -> None:
         pass  # If ffprobe times out, file is probably fine — don't block
 
 
-def _apply_chain_with_timeout(frame, effects, frame_index, total_frames, watermark=True):
+def _apply_chain_with_timeout(frame, effects, frame_index, total_frames, watermark=True, timeout=None):
     """Apply effect chain with per-frame timeout protection."""
     import concurrent.futures
+    t = timeout or FRAME_TIMEOUT_SECONDS
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(
             apply_chain, frame, effects,
             frame_index=frame_index, total_frames=total_frames, watermark=watermark
         )
         try:
-            return future.result(timeout=FRAME_TIMEOUT_SECONDS)
+            return future.result(timeout=t)
         except concurrent.futures.TimeoutError:
             raise TimeoutError(
-                f"Frame {frame_index + 1} processing timed out after {FRAME_TIMEOUT_SECONDS}s"
+                f"Frame {frame_index + 1} processing timed out after {t}s"
             )
 
 
@@ -190,6 +236,7 @@ class EffectChain(BaseModel):
     effects: list[dict]  # [{"name": "pixelsort", "params": {"threshold": 0.5}}, ...]
     frame_number: int = 0
     mix: float = 1.0  # Wet/dry blend: 0.0 = original, 1.0 = fully processed
+    quality: str = 'full'  # 'full' or 'playback' (lower res for live playback)
 
 
 class RenderRequest(BaseModel):
@@ -215,15 +262,16 @@ async def health_check():
 @app.get("/api/render/progress")
 async def render_progress():
     """Poll render progress during export. Returns frame counts and phase."""
-    return _render_progress
+    return _get_progress()
 
 
 @app.post("/api/export/cancel")
 async def cancel_export():
     """Request cancellation of a running export."""
-    if not _render_progress["active"]:
+    progress = _get_progress()
+    if not progress["active"]:
         return {"status": "no_export_running"}
-    _render_progress["cancel_requested"] = True
+    _set_progress(cancel_requested=True)
     return {"status": "cancel_requested"}
 
 
@@ -578,10 +626,10 @@ async def preview_effect(chain: EffectChain):
         frame = extract_single_frame(_state["video_path"], chain.frame_number)
 
         # Cap resolution before applying effects to prevent CPU spikes
-        MAX_PREVIEW_PIXELS = 1920 * 1080
+        max_pixels = PLAYBACK_MAX_PIXELS if chain.quality == 'playback' else 1920 * 1080
         h, w = frame.shape[:2]
-        if h * w > MAX_PREVIEW_PIXELS:
-            scale = (MAX_PREVIEW_PIXELS / (h * w)) ** 0.5
+        if h * w > max_pixels:
+            scale = (max_pixels / (h * w)) ** 0.5
             new_h, new_w = int(h * scale), int(w * scale)
             frame = np.array(Image.fromarray(frame).resize((new_w, new_h)))
 
@@ -595,10 +643,11 @@ async def preview_effect(chain: EffectChain):
 
             if filtered_effects:
                 original = frame.copy() if chain.mix < 1.0 else None
-                frame = apply_chain(frame, filtered_effects,
+                frame = _apply_chain_with_timeout(frame, filtered_effects,
                                     frame_index=chain.frame_number,
                                     total_frames=_state["video_info"].get("total_frames", 1),
-                                    watermark=False)
+                                    watermark=False,
+                                    timeout=PREVIEW_TIMEOUT_SECONDS)
                 # Wet/dry mix
                 if original is not None:
                     mix = max(0.0, min(1.0, chain.mix))
@@ -630,6 +679,7 @@ async def preview_effect(chain: EffectChain):
 class MultiTrackPreviewRequest(BaseModel):
     frame_number: int
     tracks: list[dict]  # [{name, effects, opacity, blend_mode, muted, solo}]
+    quality: str = 'full'
 
 
 @app.post("/api/preview/multitrack")
@@ -691,11 +741,11 @@ async def preview_multitrack(req: MultiTrackPreviewRequest):
         # Load the source frame once and apply each track's effects
         raw_frame = extract_single_frame(_state["video_path"], req.frame_number)
 
-        # Cap resolution
-        MAX_PREVIEW_PIXELS = 1920 * 1080
+        # Cap resolution (lower for playback)
+        max_pixels = PLAYBACK_MAX_PIXELS if req.quality == 'playback' else 1920 * 1080
         h, w = raw_frame.shape[:2]
-        if h * w > MAX_PREVIEW_PIXELS:
-            scale = (MAX_PREVIEW_PIXELS / (h * w)) ** 0.5
+        if h * w > max_pixels:
+            scale = (max_pixels / (h * w)) ** 0.5
             new_h, new_w = int(h * scale), int(w * scale)
             raw_frame = np.array(Image.fromarray(raw_frame).resize((new_w, new_h)))
 
@@ -719,11 +769,12 @@ async def preview_multitrack(req: MultiTrackPreviewRequest):
             if effects:
                 filtered, _ = _filter_video_level_effects(effects)
                 if filtered:
-                    processed = apply_chain(
+                    processed = _apply_chain_with_timeout(
                         raw_frame.copy(), filtered,
                         frame_index=req.frame_number,
                         total_frames=total_frames,
                         watermark=False,
+                        timeout=PREVIEW_TIMEOUT_SECONDS,
                     )
                 else:
                     processed = raw_frame.copy()
@@ -902,6 +953,7 @@ class TimelinePreviewRequest(BaseModel):
     frame_number: int
     regions: list[dict]  # [{start, end, effects, muted, mask}]
     mix: float = 1.0
+    quality: str = 'full'
 
 
 @app.post("/api/preview/timeline")
@@ -913,11 +965,11 @@ async def preview_timeline(req: TimelinePreviewRequest):
     try:
         frame = extract_single_frame(_state["video_path"], req.frame_number)
 
-        # Cap resolution
-        MAX_PREVIEW_PIXELS = 1920 * 1080
+        # Cap resolution (lower for playback)
+        max_pixels = PLAYBACK_MAX_PIXELS if req.quality == 'playback' else 1920 * 1080
         h, w = frame.shape[:2]
-        if h * w > MAX_PREVIEW_PIXELS:
-            scale_factor = (MAX_PREVIEW_PIXELS / (h * w)) ** 0.5
+        if h * w > max_pixels:
+            scale_factor = (max_pixels / (h * w)) ** 0.5
             new_h, new_w = int(h * scale_factor), int(w * scale_factor)
             frame = np.array(Image.fromarray(frame).resize((new_w, new_h)))
             h, w = new_h, new_w
@@ -954,17 +1006,19 @@ async def preview_timeline(req: TimelinePreviewRequest):
                     if mw > 0 and mh > 0:
                         # Extract sub-region, apply effects, composite back
                         sub_frame = processed[my:my+mh, mx:mx+mw].copy()
-                        sub_frame = apply_chain(sub_frame, filtered_effects,
+                        sub_frame = _apply_chain_with_timeout(sub_frame, filtered_effects,
                                                 frame_index=req.frame_number,
                                                 total_frames=_state["video_info"].get("total_frames", 1),
-                                                watermark=False)
+                                                watermark=False,
+                                                timeout=PREVIEW_TIMEOUT_SECONDS)
                         processed[my:my+mh, mx:mx+mw] = sub_frame
                 else:
                     # Full frame
-                    processed = apply_chain(processed, filtered_effects,
+                    processed = _apply_chain_with_timeout(processed, filtered_effects,
                                             frame_index=req.frame_number,
                                             total_frames=_state["video_info"].get("total_frames", 1),
-                                            watermark=False)
+                                            watermark=False,
+                                            timeout=PREVIEW_TIMEOUT_SECONDS)
 
         # Wet/dry mix
         if req.mix < 1.0:
@@ -1083,7 +1137,11 @@ async def unfreeze_region(region_id: int):
     """Delete a frozen region's pre-rendered video."""
     if region_id < 0:
         raise HTTPException(status_code=400, detail=_error_detail("invalid_track", f"Region ID {region_id} must be >= 0"))
-    freeze_path = EXPORT_DIR / "frozen" / f"freeze_region_{region_id}.mp4"
+    freeze_path = (EXPORT_DIR / "frozen" / f"freeze_region_{region_id}.mp4").resolve()
+    # SEC-3: Validate path is inside frozen dir (prevent path traversal via crafted region_id)
+    frozen_dir = (EXPORT_DIR / "frozen").resolve()
+    if not str(freeze_path).startswith(str(frozen_dir) + "/"):
+        raise HTTPException(status_code=403, detail=_error_detail("invalid_track", "Invalid region ID"))
     if freeze_path.exists():
         freeze_path.unlink()
         return {"status": "ok", "region_id": region_id}
@@ -1160,22 +1218,17 @@ async def export_timeline(req: TimelineExportRequest):
         if len(frame_files) > MAX_FRAMES_PER_RENDER:
             raise HTTPException(status_code=400, detail=_error_detail("video_too_long", f"Video too long ({len(frame_files)} frames, max {MAX_FRAMES_PER_RENDER})"))
 
-        _render_progress["active"] = True
-        _render_progress["total_frames"] = len(frame_files)
-        _render_progress["phase"] = "processing"
-        _render_progress["cancel_requested"] = False
+        _set_progress(active=True, total_frames=len(frame_files), phase="processing", cancel_requested=False, current_frame=0)
 
         for i, fp in enumerate(frame_files):
             # Check for cancellation
-            if _render_progress.get("cancel_requested"):
-                _render_progress["active"] = False
-                _render_progress["phase"] = "idle"
-                _render_progress["cancel_requested"] = False
+            if _get_progress().get("cancel_requested"):
+                _set_progress(active=False, phase="idle", cancel_requested=False)
                 raise HTTPException(status_code=499, detail=_error_detail(
                     "render_failed", f"Export cancelled by user at frame {i + 1}/{len(frame_files)}"
                 ))
 
-            _render_progress["current_frame"] = i
+            _set_progress(current_frame=i)
             frame = load_frame(fp)
             h, w = frame.shape[:2]
             original = frame.copy()
@@ -1232,7 +1285,7 @@ async def export_timeline(req: TimelineExportRequest):
 
             save_frame(processed, str(processed_dir / f"frame_{i+1:06d}.png"))
 
-        _render_progress["phase"] = "encoding"
+        _set_progress(phase="encoding")
 
         # Build output
         timestamp = int(_time.time())
@@ -1291,8 +1344,7 @@ async def export_timeline(req: TimelineExportRequest):
             seq_dir.mkdir()
             for f in sorted(processed_dir.glob("*.png")):
                 shutil.copy2(str(f), str(seq_dir / f.name))
-            _render_progress["active"] = False
-            _render_progress["phase"] = "idle"
+            _set_progress(active=False, phase="idle")
             return {
                 "status": "ok", "path": str(seq_dir),
                 "frames": len(list(seq_dir.glob("*.png"))),
@@ -1302,8 +1354,7 @@ async def export_timeline(req: TimelineExportRequest):
         # Validate output file integrity
         _validate_output(output_path)
 
-        _render_progress["active"] = False
-        _render_progress["phase"] = "idle"
+        _set_progress(active=False, phase="idle")
 
         size_mb = output_path.stat().st_size / (1024 * 1024)
         return {
@@ -1376,8 +1427,11 @@ async def load_project(body: dict):
     import json as _json
     path = body.get("path")
     if path:
-        filepath = Path(path)
-        # Validate path is inside projects dir
+        filepath = Path(path).resolve()
+        # SEC-2: Validate path is inside projects dir (prevent path traversal)
+        projects_resolved = PROJECTS_DIR.resolve()
+        if not str(filepath).startswith(str(projects_resolved) + "/") and filepath != projects_resolved:
+            raise HTTPException(status_code=403, detail="Access denied: path outside projects directory")
         if not filepath.exists():
             raise HTTPException(status_code=404, detail="Project not found")
         try:
@@ -1705,9 +1759,7 @@ async def export_video(export: ExportSettings):
             end_idx = min(end_idx, len(frame_files))
         frame_files = frame_files[start_idx:end_idx]
 
-        _render_progress["active"] = True
-        _render_progress["total_frames"] = len(frame_files)
-        _render_progress["phase"] = "processing"
+        _set_progress(active=True, total_frames=len(frame_files), phase="processing", cancel_requested=False, current_frame=0)
 
         # Build multi-track layer stack if tracks provided
         use_multitrack = export.tracks and len(export.tracks) > 0
@@ -1756,17 +1808,15 @@ async def export_video(export: ExportSettings):
         try:
             for i, fp in enumerate(frame_files):
                 # Check for cancellation
-                if _render_progress.get("cancel_requested"):
-                    _render_progress["active"] = False
-                    _render_progress["phase"] = "idle"
-                    _render_progress["cancel_requested"] = False
+                if _get_progress().get("cancel_requested"):
+                    _set_progress(active=False, phase="idle", cancel_requested=False)
                     detail = _error_detail("render_failed", f"Export cancelled by user at frame {i + 1}/{len(frame_files)}")
                     detail["last_successful_frame"] = last_successful_frame
                     detail["total_frames"] = len(frame_files)
                     detail["cancelled"] = True
                     raise HTTPException(status_code=499, detail=detail)
 
-                _render_progress["current_frame"] = i
+                _set_progress(current_frame=i)
                 frame = load_frame(fp)
 
                 if use_multitrack and mt_stack:
@@ -1836,8 +1886,7 @@ async def export_video(export: ExportSettings):
         except Exception as e:
             import logging
             logging.exception(f"Export failed at frame {i}")
-            _render_progress["active"] = False
-            _render_progress["phase"] = "idle"
+            _set_progress(active=False, phase="idle")
             effect_info = f" (effect: {current_effect_name})" if current_effect_name else ""
             detail = _error_detail("render_failed", f"Export failed at frame {i + 1}/{len(frame_files)}{effect_info}: {str(e)[:200]}")
             detail["last_successful_frame"] = last_successful_frame
@@ -1879,7 +1928,7 @@ async def export_video(export: ExportSettings):
                 "-loop", str(export.gif.loop_count),
                 str(output_path),
             ]
-            _render_progress["phase"] = "encoding"
+            _set_progress(phase="encoding")
             _run_ffmpeg(cmd, timeout=300)
 
         elif export.format == ExportFormat.WEBM:
@@ -1897,7 +1946,7 @@ async def export_video(export: ExportSettings):
                     "-i", _state["video_path"], "-map", "0:v", "-map", "1:a?",
                     "-c:a", "libopus", "-shortest", str(output_path)
                 ]
-            _render_progress["phase"] = "encoding"
+            _set_progress(phase="encoding")
             _run_ffmpeg(cmd, timeout=600)
 
         elif export.format == ExportFormat.MOV:
@@ -1917,7 +1966,7 @@ async def export_video(export: ExportSettings):
                 cmd += ["-i", _state["video_path"], "-map", "0:v", "-map", "1:a?",
                         "-c:a", "aac", "-b:a", export.audio.bitrate, "-shortest"]
             cmd.append(str(output_path))
-            _render_progress["phase"] = "encoding"
+            _set_progress(phase="encoding")
             _run_ffmpeg(cmd, timeout=600)
 
         else:  # MP4 (H.264)
@@ -1939,14 +1988,13 @@ async def export_video(export: ExportSettings):
                     cmd += ["-i", _state["video_path"], "-map", "0:v", "-map", "1:a?",
                             "-c:a", "aac", "-b:a", export.audio.bitrate, "-shortest"]
             cmd.append(str(output_path))
-            _render_progress["phase"] = "encoding"
+            _set_progress(phase="encoding")
             _run_ffmpeg(cmd, timeout=600)
 
         # Validate output file integrity
         _validate_output(output_path)
 
-        _render_progress["active"] = False
-        _render_progress["phase"] = "idle"
+        _set_progress(active=False, phase="idle")
 
         size_mb = output_path.stat().st_size / (1024 * 1024)
         return {
