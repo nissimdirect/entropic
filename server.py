@@ -72,10 +72,19 @@ _render_progress = {
     "current_frame": 0,
     "total_frames": 0,
     "phase": "idle",  # "extracting", "processing", "encoding", "idle"
+    "cancel_requested": False,
 }
+
+
+class ExportCancelledError(Exception):
+    """Raised when user cancels an in-progress export."""
+    pass
 
 # Safety guard: max frames per render to prevent CPU/memory exhaustion
 MAX_FRAMES_PER_RENDER = 10000
+
+# Per-frame processing timeout (seconds)
+FRAME_TIMEOUT_SECONDS = 30
 
 # Structured error recovery hints for user-facing errors
 ERROR_RECOVERY = {
@@ -109,6 +118,74 @@ def _error_detail(key: str, message: str, effect_name: str = "") -> dict:
     return result
 
 
+def _run_ffmpeg(cmd: list, timeout: int = 600) -> subprocess.CompletedProcess:
+    """Run an FFmpeg command with detailed error surfacing on failure."""
+    try:
+        return subprocess.run(cmd, capture_output=True, check=True, timeout=timeout)
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or b"").decode("utf-8", errors="replace").strip()
+        # Extract the most useful part of FFmpeg stderr (last 500 chars usually has the error)
+        stderr_tail = stderr[-500:] if len(stderr) > 500 else stderr
+        msg = f"FFmpeg encoding failed (exit code {e.returncode}): {stderr_tail}"
+        _render_progress["active"] = False
+        _render_progress["phase"] = "idle"
+        detail = _error_detail("render_failed", msg)
+        detail["ffmpeg_stderr"] = stderr_tail
+        raise HTTPException(status_code=500, detail=detail)
+    except subprocess.TimeoutExpired:
+        _render_progress["active"] = False
+        _render_progress["phase"] = "idle"
+        raise HTTPException(status_code=500, detail=_error_detail(
+            "render_failed", f"FFmpeg encoding timed out after {timeout}s. Try a shorter video or simpler codec."
+        ))
+
+
+def _validate_output(output_path: Path) -> None:
+    """Validate that an exported video file is valid using ffprobe."""
+    if not output_path.exists():
+        raise HTTPException(status_code=500, detail=_error_detail(
+            "render_failed", "Export produced no output file."
+        ))
+    if output_path.stat().st_size == 0:
+        output_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=_error_detail(
+            "render_failed", "Export produced an empty file (0 bytes)."
+        ))
+    # Probe with ffprobe for valid container
+    ffprobe = shutil.which("ffprobe") or "ffprobe"
+    try:
+        probe_result = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(output_path)],
+            capture_output=True, timeout=30
+        )
+        duration_str = probe_result.stdout.decode("utf-8", errors="replace").strip()
+        if probe_result.returncode != 0 or not duration_str:
+            stderr = probe_result.stderr.decode("utf-8", errors="replace").strip()
+            output_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail=_error_detail(
+                "render_failed", f"Export produced an invalid file. ffprobe: {stderr[:200]}"
+            ))
+    except subprocess.TimeoutExpired:
+        pass  # If ffprobe times out, file is probably fine — don't block
+
+
+def _apply_chain_with_timeout(frame, effects, frame_index, total_frames, watermark=True):
+    """Apply effect chain with per-frame timeout protection."""
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            apply_chain, frame, effects,
+            frame_index=frame_index, total_frames=total_frames, watermark=watermark
+        )
+        try:
+            return future.result(timeout=FRAME_TIMEOUT_SECONDS)
+        except concurrent.futures.TimeoutError:
+            raise TimeoutError(
+                f"Frame {frame_index + 1} processing timed out after {FRAME_TIMEOUT_SECONDS}s"
+            )
+
+
 class EffectChain(BaseModel):
     effects: list[dict]  # [{"name": "pixelsort", "params": {"threshold": 0.5}}, ...]
     frame_number: int = 0
@@ -139,6 +216,15 @@ async def health_check():
 async def render_progress():
     """Poll render progress during export. Returns frame counts and phase."""
     return _render_progress
+
+
+@app.post("/api/export/cancel")
+async def cancel_export():
+    """Request cancellation of a running export."""
+    if not _render_progress["active"]:
+        return {"status": "no_export_running"}
+    _render_progress["cancel_requested"] = True
+    return {"status": "cancel_requested"}
 
 
 @app.get("/api/file-types")
@@ -1077,8 +1163,18 @@ async def export_timeline(req: TimelineExportRequest):
         _render_progress["active"] = True
         _render_progress["total_frames"] = len(frame_files)
         _render_progress["phase"] = "processing"
+        _render_progress["cancel_requested"] = False
 
         for i, fp in enumerate(frame_files):
+            # Check for cancellation
+            if _render_progress.get("cancel_requested"):
+                _render_progress["active"] = False
+                _render_progress["phase"] = "idle"
+                _render_progress["cancel_requested"] = False
+                raise HTTPException(status_code=499, detail=_error_detail(
+                    "render_failed", f"Export cancelled by user at frame {i + 1}/{len(frame_files)}"
+                ))
+
             _render_progress["current_frame"] = i
             frame = load_frame(fp)
             h, w = frame.shape[:2]
@@ -1105,13 +1201,13 @@ async def export_timeline(req: TimelineExportRequest):
                         mh = min(h - my, int(mask.get("h", 1) * h))
                         if mw > 0 and mh > 0:
                             sub_frame = processed[my:my+mh, mx:mx+mw].copy()
-                            sub_frame = apply_chain(sub_frame, effects,
+                            sub_frame = _apply_chain_with_timeout(sub_frame, effects,
                                                     frame_index=i,
                                                     total_frames=len(frame_files),
                                                     watermark=True)
                             processed[my:my+mh, mx:mx+mw] = sub_frame
                     else:
-                        processed = apply_chain(processed, effects,
+                        processed = _apply_chain_with_timeout(processed, effects,
                                                 frame_index=i,
                                                 total_frames=len(frame_files),
                                                 watermark=True)
@@ -1159,7 +1255,7 @@ async def export_timeline(req: TimelineExportRequest):
                 else:
                     cmd += ["-i", _state["video_path"], "-map", "0:v", "-map", "1:a?", "-c:a", "aac", "-b:a", "192k", "-shortest"]
             cmd.append(str(output_path))
-            subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+            _run_ffmpeg(cmd, timeout=600)
         elif req.format == "mov":
             profile_map = {"proxy": "0", "lt": "1", "422": "2", "422hq": "3", "4444": "4"}
             profile_num = profile_map.get(req.prores_profile, "2")
@@ -1171,7 +1267,7 @@ async def export_timeline(req: TimelineExportRequest):
                 "-pix_fmt", "yuv422p10le" if profile_num != "4" else "yuva444p10le",
                 str(output_path),
             ]
-            subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+            _run_ffmpeg(cmd, timeout=600)
         elif req.format == "gif":
             cmd = [
                 shutil.which("ffmpeg") or "ffmpeg", "-y",
@@ -1180,7 +1276,7 @@ async def export_timeline(req: TimelineExportRequest):
                 "-vf", f"fps=15,split[s0][s1];[s0]palettegen=max_colors={req.gif_colors}[p];[s1][p]paletteuse",
                 "-loop", "0", str(output_path),
             ]
-            subprocess.run(cmd, capture_output=True, check=True, timeout=300)
+            _run_ffmpeg(cmd, timeout=300)
         elif req.format == "webm":
             cmd = [
                 shutil.which("ffmpeg") or "ffmpeg", "-y",
@@ -1189,17 +1285,22 @@ async def export_timeline(req: TimelineExportRequest):
                 "-c:v", "libvpx-vp9", "-crf", str(req.webm_crf),
                 "-b:v", "0", "-pix_fmt", "yuv420p", str(output_path),
             ]
-            subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+            _run_ffmpeg(cmd, timeout=600)
         elif req.format == "png_seq":
             seq_dir = EXPORT_DIR / f"entropic_{timestamp}_seq"
             seq_dir.mkdir()
             for f in sorted(processed_dir.glob("*.png")):
                 shutil.copy2(str(f), str(seq_dir / f.name))
+            _render_progress["active"] = False
+            _render_progress["phase"] = "idle"
             return {
                 "status": "ok", "path": str(seq_dir),
                 "frames": len(list(seq_dir.glob("*.png"))),
                 "format": "png_seq", "dimensions": f"{target_w}x{target_h}",
             }
+
+        # Validate output file integrity
+        _validate_output(output_path)
 
         _render_progress["active"] = False
         _render_progress["phase"] = "idle"
@@ -1651,8 +1752,20 @@ async def export_video(export: ExportSettings):
 
         # Process each frame
         last_successful_frame = -1
+        current_effect_name = ""
         try:
             for i, fp in enumerate(frame_files):
+                # Check for cancellation
+                if _render_progress.get("cancel_requested"):
+                    _render_progress["active"] = False
+                    _render_progress["phase"] = "idle"
+                    _render_progress["cancel_requested"] = False
+                    detail = _error_detail("render_failed", f"Export cancelled by user at frame {i + 1}/{len(frame_files)}")
+                    detail["last_successful_frame"] = last_successful_frame
+                    detail["total_frames"] = len(frame_files)
+                    detail["cancelled"] = True
+                    raise HTTPException(status_code=499, detail=detail)
+
                 _render_progress["current_frame"] = i
                 frame = load_frame(fp)
 
@@ -1662,8 +1775,9 @@ async def export_video(export: ExportSettings):
                         if layer.effects:
                             filtered, _ = _filter_video_level_effects(layer.effects)
                             if filtered:
+                                current_effect_name = f"track '{layer.name}' effects"
                                 eff = lfo_mod.apply_to_chain(filtered, i, info["fps"]) if lfo_mod else filtered
-                                processed = apply_chain(
+                                processed = _apply_chain_with_timeout(
                                     frame.copy(), eff,
                                     frame_index=i,
                                     total_frames=len(frame_files),
@@ -1674,6 +1788,7 @@ async def export_video(export: ExportSettings):
                         else:
                             processed = frame.copy()
                         frame_dict[layer.layer_id] = processed
+                    current_effect_name = ""
                     frame = mt_stack.composite(frame_dict)
                 elif use_multitrack and not mt_stack:
                     frame = np.zeros_like(frame)
@@ -1681,11 +1796,15 @@ async def export_video(export: ExportSettings):
                     effects = export.effects
                     if lfo_mod:
                         effects = lfo_mod.apply_to_chain(effects, i, info["fps"])
+                    current_effect_name = ", ".join(e.get("name", "?") for e in effects[:3])
+                    if len(effects) > 3:
+                        current_effect_name += f" (+{len(effects) - 3} more)"
                     original = frame.copy() if export.mix < 1.0 else None
-                    frame = apply_chain(frame, effects,
+                    frame = _apply_chain_with_timeout(frame, effects,
                                         frame_index=i,
                                         total_frames=len(frame_files),
                                         watermark=True)
+                    current_effect_name = ""
                     if original is not None:
                         mix = max(0.0, min(1.0, export.mix))
                         blend_frame = frame[:, :, :3] if frame.ndim == 3 and frame.shape[2] == 4 else frame
@@ -1712,14 +1831,19 @@ async def export_video(export: ExportSettings):
 
                 save_frame(frame, str(processed_dir / f"frame_{i+1:06d}.png"))
                 last_successful_frame = i
+        except HTTPException:
+            raise  # Re-raise cancellation HTTPException
         except Exception as e:
             import logging
             logging.exception(f"Export failed at frame {i}")
             _render_progress["active"] = False
             _render_progress["phase"] = "idle"
-            detail = _error_detail("render_failed", f"Export failed at frame {i + 1}/{len(frame_files)}: {str(e)[:100]}")
+            effect_info = f" (effect: {current_effect_name})" if current_effect_name else ""
+            detail = _error_detail("render_failed", f"Export failed at frame {i + 1}/{len(frame_files)}{effect_info}: {str(e)[:200]}")
             detail["last_successful_frame"] = last_successful_frame
             detail["total_frames"] = len(frame_files)
+            if current_effect_name:
+                detail["failed_effect"] = current_effect_name
             raise HTTPException(status_code=500, detail=detail)
 
         # Build output filename
@@ -1755,7 +1879,8 @@ async def export_video(export: ExportSettings):
                 "-loop", str(export.gif.loop_count),
                 str(output_path),
             ]
-            subprocess.run(cmd, capture_output=True, check=True, timeout=300)
+            _render_progress["phase"] = "encoding"
+            _run_ffmpeg(cmd, timeout=300)
 
         elif export.format == ExportFormat.WEBM:
             output_path = EXPORT_DIR / output_name
@@ -1772,7 +1897,8 @@ async def export_video(export: ExportSettings):
                     "-i", _state["video_path"], "-map", "0:v", "-map", "1:a?",
                     "-c:a", "libopus", "-shortest", str(output_path)
                 ]
-            subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+            _render_progress["phase"] = "encoding"
+            _run_ffmpeg(cmd, timeout=600)
 
         elif export.format == ExportFormat.MOV:
             output_path = EXPORT_DIR / output_name
@@ -1791,7 +1917,8 @@ async def export_video(export: ExportSettings):
                 cmd += ["-i", _state["video_path"], "-map", "0:v", "-map", "1:a?",
                         "-c:a", "aac", "-b:a", export.audio.bitrate, "-shortest"]
             cmd.append(str(output_path))
-            subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+            _render_progress["phase"] = "encoding"
+            _run_ffmpeg(cmd, timeout=600)
 
         else:  # MP4 (H.264)
             output_path = EXPORT_DIR / output_name
@@ -1812,7 +1939,11 @@ async def export_video(export: ExportSettings):
                     cmd += ["-i", _state["video_path"], "-map", "0:v", "-map", "1:a?",
                             "-c:a", "aac", "-b:a", export.audio.bitrate, "-shortest"]
             cmd.append(str(output_path))
-            subprocess.run(cmd, capture_output=True, check=True, timeout=600)
+            _render_progress["phase"] = "encoding"
+            _run_ffmpeg(cmd, timeout=600)
+
+        # Validate output file integrity
+        _validate_output(output_path)
 
         _render_progress["active"] = False
         _render_progress["phase"] = "idle"
@@ -1828,7 +1959,7 @@ async def export_video(export: ExportSettings):
         }
 
 
-MAX_PREVIEW_DIMENSION = 1280  # Cap preview size to limit data URL bloat
+MAX_PREVIEW_DIMENSION = 1920  # Cap preview size to limit data URL bloat
 
 
 def _frame_to_data_url(frame: np.ndarray) -> str:
@@ -1889,7 +2020,7 @@ _MAX_EFFECTS_PER_LAYER = 20
 
 
 class TriggerEvent(BaseModel):
-    layer_id: int
+    layer_id: int = Field(ge=0, lt=MAX_TRACKS)
     event: Literal["on", "off", "opacity", "panic"]
     value: float = Field(default=1.0, ge=0.0, le=1.0)
 
@@ -1901,7 +2032,7 @@ class PerformFrameRequest(BaseModel):
 
 
 class PerformUpdateLayerRequest(BaseModel):
-    layer_id: int
+    layer_id: int = Field(ge=0, lt=MAX_TRACKS)
     trigger_mode: Literal["toggle", "gate", "adsr", "one_shot", "always_on"] | None = None
     adsr_preset: str | None = None
     blend_mode: str | None = None

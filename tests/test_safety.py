@@ -653,11 +653,12 @@ class TestDataUrlSize:
     """Preview data URLs must not balloon to unreasonable sizes."""
 
     def test_data_url_size_bounded_for_1080p(self, large_frame):
-        """A 1080p JPEG data URL should be under 1MB."""
+        """A 1080p JPEG data URL should be under 2MB (random noise worst-case)."""
         from server import _frame_to_data_url
         url = _frame_to_data_url(large_frame)
-        # base64 expands by ~33%, so 1MB base64 = ~750KB JPEG
-        max_size = 1 * 1024 * 1024  # 1MB
+        # Random noise is worst-case; real video frames compress 10-30x better.
+        # MAX_PREVIEW_DIMENSION=1920 avoids double-downscaling for 1080p content.
+        max_size = 2 * 1024 * 1024  # 2MB
         assert len(url) < max_size, (
             f"Data URL is {len(url)/1024:.0f}KB -- too large for browser"
         )

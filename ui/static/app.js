@@ -217,7 +217,7 @@ function showConfirmDialog(title, message) {
 
 // ============ LOADING OVERLAY (canvas processing feedback) ============
 
-function showLoading(message = 'Processing...') {
+function showLoading(message = 'Processing...', showCancel = false) {
     let overlay = document.getElementById('loading-overlay');
     if (!overlay) {
         overlay = document.createElement('div');
@@ -230,12 +230,15 @@ function showLoading(message = 'Processing...') {
                     <div class="loading-progress-bar"><div class="loading-progress-fill"></div></div>
                     <div class="loading-progress-text"></div>
                 </div>
+                <button class="loading-cancel-btn" style="display:none" onclick="cancelExport()">Cancel Export</button>
             </div>`;
         const canvasArea = document.getElementById('canvas-area');
         if (canvasArea) canvasArea.appendChild(overlay);
     }
     overlay.querySelector('.loading-message').textContent = message;
     overlay.querySelector('.loading-progress').style.display = 'none';
+    const cancelBtn = overlay.querySelector('.loading-cancel-btn');
+    if (cancelBtn) cancelBtn.style.display = showCancel ? 'block' : 'none';
     overlay.style.display = 'flex';
 }
 
@@ -665,7 +668,6 @@ let lfoState = {
 };
 let lfoAnimFrame = null;
 let lfoPhase = 0;
-let lfoLastTime = 0;
 
 // ============ INFO VIEW (Ableton-style) ============
 
@@ -3433,8 +3435,31 @@ function createKnob(deviceId, paramName, spec, value, label) {
                 </svg>
                 <div class="indicator" style="transform: translateX(-50%) rotate(${angle}deg)"></div>
             </div>
-            <span class="knob-value">${displayVal}</span>
+            <span class="knob-value">${_formatParamValue(typeof value === 'number' ? value : parseFloat(value), paramName, spec.type)}</span>
         </div>`;
+}
+
+function _inferUnit(paramName) {
+    if (/^(rate|frequency)$|_rate$/.test(paramName)) return 'Hz';
+    if (/_time$|_delay$/.test(paramName)) return 'ms';
+    if (/^(delay_frames|hold_frames|echo_count|generations|ramp_frames|envelope_frames|ir_interval)$/.test(paramName)) return 'f';
+    if (/^(opacity|amount|strength|intensity|mix|depth|blend|wet|feedback|chance|sustain|saturation|contrast_gain|softness|density|diffusion_rate|viscosity|stiffness|damping|compression_bands|crackle|dither|flicker|surface_tension|decoherence|uncertainty|superposition)$/.test(paramName)) return '%';
+    if (/^(hue|hue_shift|degrees|phase_blend)$|angle|rotation/.test(paramName)) return '\u00b0';
+    if (/^(gain|drive)$/.test(paramName)) return 'dB';
+    if (/^(temperature|warmth|temp)$/.test(paramName)) return 'K';
+    if (/size|radius|width|height|_offset$/.test(paramName)) return 'px';
+    if (/^(speed|flow_speed|drift_speed|scan_speed|warp_speed|spin_strength)$/.test(paramName)) return 'x';
+    return '';
+}
+
+// Format a param value with its unit, handling percentage scaling
+function _formatParamValue(value, paramName, type) {
+    const unit = _inferUnit(paramName);
+    if (unit === '%' && typeof value === 'number' && value >= 0 && value <= 1.01) {
+        return `${Math.round(value * 100)}%`;
+    }
+    const displayVal = type === 'int' ? Math.round(value) : value.toFixed(2);
+    return `${displayVal}${unit}`;
 }
 
 function setupKnobInteraction(knobEl) {
@@ -3670,7 +3695,8 @@ function updateKnobVisual(knobEl, value, min, max, type) {
     if (indicator) indicator.style.transform = `translateX(-50%) rotate(${angle}deg)`;
     if (arcFill) arcFill.setAttribute('stroke-dasharray', `${dashLen} ${arcLen}`);
     if (valueSpan && !valueSpan.querySelector('.knob-value-input')) {
-        valueSpan.textContent = type === 'int' ? Math.round(value) : value.toFixed(2);
+        const paramName = knobEl.dataset.param || '';
+        valueSpan.textContent = _formatParamValue(value, paramName, type);
     }
 }
 
@@ -3705,42 +3731,52 @@ function lfoWaveform(phase, waveform) {
 
 function startLfoAnimation() {
     if (lfoAnimFrame) return;
-    lfoLastTime = performance.now();
-    lfoPhase = 0;
+    let lastPhase = -1;
 
-    function tick(now) {
-        const dt = (now - lfoLastTime) / 1000;
-        lfoLastTime = now;
+    function tick() {
+        // Compute LFO phase from video position (synced to timeline)
+        // Matches server-side formula: time_sec = frame_index / fps
+        const fps = videoFps || 30;
+        const videoTimeSec = currentFrame / fps;
 
         if (lfoState.rate > 0) {
-            lfoPhase = (lfoPhase + dt * lfoState.rate) % 1.0;
+            lfoPhase = (videoTimeSec * lfoState.rate) % 1.0;
+        } else {
+            lfoPhase = 0;
         }
 
         const phase = (lfoPhase + lfoState.phase_offset) % 1.0;
         const lfoVal = lfoWaveform(phase, lfoState.waveform);
         const bipolar = (lfoVal - 0.5) * 2.0;
 
-        for (const mapping of lfoState.mappings) {
-            const device = chain.find(d => d.id === mapping.deviceId);
-            if (!device) continue;
+        // Only update params and trigger preview if phase actually changed
+        const phaseChanged = Math.abs(phase - lastPhase) > 0.0001;
+        if (phaseChanged) {
+            lastPhase = phase;
 
-            const paramRange = mapping.max - mapping.min;
-            const modulated = mapping.baseValue + bipolar * lfoState.depth * paramRange * 0.5;
-            const clamped = Math.max(mapping.min, Math.min(mapping.max, modulated));
-            device.params[mapping.paramName] = clamped;
+            for (const mapping of lfoState.mappings) {
+                const device = chain.find(d => d.id === mapping.deviceId);
+                if (!device) continue;
 
-            // Update knob visual
-            const knobEl = document.querySelector(`.knob[data-device="${mapping.deviceId}"][data-param="${mapping.paramName}"]`);
-            if (knobEl) {
-                knobEl.dataset.value = clamped;
-                updateKnobVisual(knobEl, clamped, mapping.min, mapping.max, knobEl.dataset.type);
+                const paramRange = mapping.max - mapping.min;
+                const modulated = mapping.baseValue + bipolar * lfoState.depth * paramRange * 0.5;
+                const clamped = Math.max(mapping.min, Math.min(mapping.max, modulated));
+                device.params[mapping.paramName] = clamped;
+
+                // Update knob visual
+                const knobEl = document.querySelector(`.knob[data-device="${mapping.deviceId}"][data-param="${mapping.paramName}"]`);
+                if (knobEl) {
+                    knobEl.dataset.value = clamped;
+                    updateKnobVisual(knobEl, clamped, mapping.min, mapping.max, knobEl.dataset.type);
+                }
             }
+
+            schedulePreview();
         }
 
-        // Update waveform mini-display
+        // Always update waveform mini-display
         drawLfoWaveformDisplay();
 
-        schedulePreview();
         lfoAnimFrame = requestAnimationFrame(tick);
     }
     lfoAnimFrame = requestAnimationFrame(tick);
@@ -4888,7 +4924,8 @@ function onMixChange(value) {
 
 function renderVideo() {
     if (!videoLoaded) { showToast('Load a file first.', 'info'); return; }
-    if (chain.length === 0) { showToast('Add at least one effect.', 'info'); return; }
+    const hasTrackEffects = tracks.some(t => t.effects && t.effects.length > 0);
+    if (chain.length === 0 && !hasTrackEffects) { showToast('Add at least one effect.', 'info'); return; }
     openExportDialog();
 }
 
@@ -5034,7 +5071,7 @@ async function startExport() {
         settings.tracks = multiTrackData;
     }
 
-    showLoading('Exporting...');
+    showLoading('Exporting...', true);
     // Poll render progress during export
     const progressInterval = setInterval(async () => {
         try {
@@ -5095,6 +5132,25 @@ async function startExport() {
         hideLoading();
         btn.textContent = origText;
         btn.disabled = false;
+    }
+}
+
+// ============ EXPORT CANCEL ============
+
+async function cancelExport() {
+    try {
+        const res = await fetch(`${API}/api/export/cancel`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'cancel_requested') {
+            showToast('Cancelling export...', 'warning');
+            const cancelBtn = document.querySelector('.loading-cancel-btn');
+            if (cancelBtn) {
+                cancelBtn.disabled = true;
+                cancelBtn.textContent = 'Cancelling...';
+            }
+        }
+    } catch (_) {
+        showErrorToast('Failed to cancel export');
     }
 }
 
@@ -5827,7 +5883,8 @@ function loadPreset(effectsJson, lfoJson) {
 }
 
 async function saveCurrentAsPreset() {
-    if (chain.length === 0) { showToast('Add effects to the chain first.', 'info'); return; }
+    const hasTrackEffects = tracks.some(t => t.effects && t.effects.length > 0);
+    if (chain.length === 0 && !hasTrackEffects) { showToast('Add effects to the chain first.', 'info'); return; }
     showInputModal('Save Preset', 'Preset name', async (name) => {
         await _doSavePreset(name, '');
     });

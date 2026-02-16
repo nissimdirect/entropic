@@ -1400,6 +1400,8 @@ _CHAIN_BLEND_FNS = {
     "add": lambda b, t: np.minimum(255.0, b + t),
     "difference": lambda b, t: np.abs(b - t),
     "soft_light": lambda b, t: (1.0 - 2.0 * t / 255.0) * (b ** 2 / 255.0) + 2.0 * t / 255.0 * b,
+    "darken": lambda b, t: np.minimum(b, t),
+    "lighten": lambda b, t: np.maximum(b, t),
 }
 
 

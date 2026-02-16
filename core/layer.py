@@ -181,7 +181,7 @@ class Layer:
 
 BLEND_MODES = [
     "normal", "multiply", "screen", "overlay",
-    "add", "difference", "soft_light",
+    "add", "difference", "soft_light", "darken", "lighten",
 ]
 
 
@@ -218,6 +218,14 @@ def _blend_soft_light(bottom, top):
     return (1.0 - 2.0 * t) * (bottom ** 2 / 255.0) + 2.0 * t * bottom
 
 
+def _blend_darken(bottom, top):
+    return np.minimum(bottom, top)
+
+
+def _blend_lighten(bottom, top):
+    return np.maximum(bottom, top)
+
+
 _BLEND_FNS = {
     "multiply": _blend_multiply,
     "screen": _blend_screen,
@@ -225,6 +233,8 @@ _BLEND_FNS = {
     "add": _blend_add,
     "difference": _blend_difference,
     "soft_light": _blend_soft_light,
+    "darken": _blend_darken,
+    "lighten": _blend_lighten,
 }
 
 

@@ -2007,6 +2007,27 @@ h3 .count {
     to { transform: rotate(360deg); }
 }
 
+.loading-cancel-btn {
+    margin-top: 12px;
+    padding: 6px 16px;
+    background: transparent;
+    border: 1px solid var(--text-dim);
+    color: var(--text-primary);
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'Menlo', monospace;
+    font-size: 11px;
+    transition: border-color 0.2s, color 0.2s;
+}
+.loading-cancel-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.loading-cancel-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* --- Input Modal --- */
 .input-modal-dialog {
     width: 380px;
@@ -2194,10 +2215,14 @@ h3 .count {
 }
 
 .track-controls {
-    display: flex;
-    align-items: center;
-    gap: 4px;
+    display: grid;
+    grid-template-columns: auto auto 1fr auto;
+    gap: 2px 4px;
     padding-left: 18px;
+    align-items: center;
+}
+.track-controls .track-blend {
+    grid-column: 1 / -1;
 }
 
 .track-collapse {
