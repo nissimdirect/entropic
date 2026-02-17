@@ -587,7 +587,8 @@ let effectDefs = [];      // Effect definitions from server
 let categoryOrder = [];   // Server-provided category ordering
 let categoryLabels = {};  // Server-provided category display names
 let controlMap = null;    // UI control type mapping (loaded from control-map.json)
-let chain = [];           // Current effect chain: [{name, params, bypassed, id}, ...] — LEGACY, migrated to tracks
+// chain is accessed via window.chain getter/setter (defined below, backed by region.effects)
+// DO NOT re-declare as let/var — that shadows the getter and breaks timeline preview
 let videoLoaded = false;
 let currentFrame = 0;
 let totalFrames = 100;
@@ -1087,6 +1088,14 @@ async function init() {
     setupKeyboard();
     initWebMidi();
     setupMaskDrawing();
+    // Timeline editor must be initialized BEFORE _loadHistory() and renderChain()
+    // because chain is backed by region.effects via window.chain getter/setter
+    window.timelineEditor = new TimelineEditor('timeline-canvas');
+    // Set color on the default Track 1
+    if (timelineEditor.tracks.length > 0 && !timelineEditor.tracks[0].color) {
+        timelineEditor.tracks[0].color = TRACK_COLORS[0];
+    }
+    selectedTrackIdx = 0;
     _loadHistory();
     if (history.length === 0) {
         pushHistory('Open');
@@ -1094,14 +1103,6 @@ async function init() {
     renderChain();
     renderLayers();
     renderHistory();
-    // Timeline editor must be initialized before track operations
-    // (moved up to enable unified track system)
-    window.timelineEditor = new TimelineEditor('timeline-canvas');
-    // Set color on the default Track 1
-    if (timelineEditor.tracks.length > 0 && !timelineEditor.tracks[0].color) {
-        timelineEditor.tracks[0].color = TRACK_COLORS[0];
-    }
-    selectedTrackIdx = 0;
     renderTrackList();  // Initialize track strip UI
     startHeartbeat();
     showOnboarding();
@@ -1936,6 +1937,11 @@ function setupKeyboard() {
                 browser.style.display = browser.style.display === 'none' ? '' : 'none';
             }
             return;
+        }
+
+        // F = Toggle frame cutout
+        if (e.key === 'f' && !isMod(e)) {
+            e.preventDefault(); toggleFrameCutout(); return;
         }
 
         // H = Show help panel
@@ -4661,6 +4667,17 @@ let _previewInFlight = false;  // Guard against piling up requests during playba
 function schedulePreview(fromPlayhead) {
     if (!videoLoaded) return;
     clearTimeout(previewDebounce);
+
+    // During chunk playback, param changes trigger re-render (not single-frame preview)
+    if (_chunkPlaying) {
+        if (!fromPlayhead) {
+            // Param/chain changed during chunk playback — trigger re-render
+            _onChunkParamChange();
+        }
+        // During chunk playback, playhead syncs come from video timeupdate — skip preview
+        return;
+    }
+
     // During timeline playback, skip debounce but guard against request pile-up
     if (window.timelineEditor?.isPlaying) {
         // If called from param/chain change (not playhead advance), invalidate cache
@@ -4725,7 +4742,7 @@ async function previewChain() {
             res = await fetchWithRetry(`${API}/api/preview/timeline`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frame_number: currentFrame, regions, mix: mixLevel, quality }),
+                body: JSON.stringify({ frame_number: currentFrame, regions, mix: mixLevel, quality, frame_cutout: _getFrameCutoutForRequest() }),
                 signal,
             }, { maxRetries: retries, context: 'Timeline preview' });
         } else if (tracks.length > 1 || (tracks.length === 1 && tracks[0].effects.some(e => !e.bypassed))) {
@@ -4762,7 +4779,7 @@ async function previewChain() {
             res = await fetchWithRetry(`${API}/api/preview`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ effects: activeEffects, frame_number: currentFrame, mix: mixLevel, quality }),
+                body: JSON.stringify({ effects: activeEffects, frame_number: currentFrame, mix: mixLevel, quality, frame_cutout: _getFrameCutoutForRequest() }),
                 signal,
             }, { maxRetries: retries });
         }
@@ -4858,6 +4875,486 @@ function showPreview(dataUrl) {
     // DO NOT auto-show diff toolbar — user accesses via View menu
     // Auto-update diff if active
     if (_diffMode && _diffRef) diffShow(_diffMode);
+    // Redraw cutout overlay to match updated preview position
+    if (frameCutoutEnabled) requestAnimationFrame(_drawCutoutOverlay);
+}
+
+// ============ FRAME CUTOUT ============
+
+let frameCutoutEnabled = false;
+let frameCutoutParams = {
+    center_x: 0.5,
+    center_y: 0.5,
+    width: 0.6,
+    height: 0.6,
+    feather: 0.15,
+    opacity: 1.0,
+    invert: false,
+    shape: 'rectangle'
+};
+
+function toggleFrameCutout() {
+    frameCutoutEnabled = !frameCutoutEnabled;
+    const btn = document.getElementById('frame-cutout-btn');
+    if (btn) btn.classList.toggle('active', frameCutoutEnabled);
+
+    const panel = document.getElementById('frame-cutout-panel');
+    if (panel) {
+        panel.style.display = frameCutoutEnabled ? 'flex' : 'none';
+        if (frameCutoutEnabled) _renderCutoutPanel();
+    }
+
+    _drawCutoutOverlay();
+    showToast(frameCutoutEnabled ? 'Frame cutout ON — drag sliders to adjust shape' : 'Frame cutout OFF', 'info', null, 2000);
+
+    // Clear frame cache so preview re-renders with/without cutout
+    clearFrameCache();
+    schedulePreview();
+}
+
+function updateCutoutParam(key, value) {
+    if (key === 'invert') {
+        frameCutoutParams.invert = value;
+    } else if (key === 'shape') {
+        frameCutoutParams.shape = value;
+    } else {
+        frameCutoutParams[key] = parseFloat(value);
+    }
+    // Update label text without full re-render (avoids slider reset)
+    const panel = document.getElementById('frame-cutout-panel');
+    if (panel && key !== 'shape' && key !== 'invert') {
+        const labels = panel.querySelectorAll('label');
+        labels.forEach(lbl => {
+            const span = lbl.querySelector('span');
+            if (span && lbl.textContent.trim().toLowerCase().startsWith(key.replace('_', ' '))) {
+                span.textContent = Math.round(frameCutoutParams[key] * 100) + '%';
+            }
+        });
+    }
+    _drawCutoutOverlay();
+    clearFrameCache();
+    schedulePreview();
+}
+
+function _getFrameCutoutForRequest() {
+    if (!frameCutoutEnabled) return undefined;
+    return { ...frameCutoutParams };
+}
+
+function _renderCutoutPanel() {
+    const container = document.getElementById('frame-cutout-panel');
+    if (!container) return;
+
+    const p = frameCutoutParams;
+    container.innerHTML = `
+        <div class="cutout-row">
+            <label>Shape</label>
+            <select onchange="updateCutoutParam('shape', this.value)">
+                <option value="rectangle" ${p.shape === 'rectangle' ? 'selected' : ''}>Rectangle</option>
+                <option value="ellipse" ${p.shape === 'ellipse' ? 'selected' : ''}>Ellipse</option>
+            </select>
+            <label class="cutout-toggle">
+                <input type="checkbox" ${p.invert ? 'checked' : ''} onchange="updateCutoutParam('invert', this.checked)">
+                Invert
+            </label>
+        </div>
+        <div class="cutout-row">
+            <label>Width <span>${Math.round(p.width * 100)}%</span></label>
+            <input type="range" min="0" max="100" value="${p.width * 100}" oninput="updateCutoutParam('width', this.value / 100)">
+        </div>
+        <div class="cutout-row">
+            <label>Height <span>${Math.round(p.height * 100)}%</span></label>
+            <input type="range" min="0" max="100" value="${p.height * 100}" oninput="updateCutoutParam('height', this.value / 100)">
+        </div>
+        <div class="cutout-row">
+            <label>Feather <span>${Math.round(p.feather * 100)}%</span></label>
+            <input type="range" min="0" max="100" value="${p.feather * 100}" oninput="updateCutoutParam('feather', this.value / 100)">
+        </div>
+        <div class="cutout-row">
+            <label>Opacity <span>${Math.round(p.opacity * 100)}%</span></label>
+            <input type="range" min="0" max="100" value="${p.opacity * 100}" oninput="updateCutoutParam('opacity', this.value / 100)">
+        </div>
+        <div class="cutout-row">
+            <label>Center X <span>${Math.round(p.center_x * 100)}%</span></label>
+            <input type="range" min="0" max="100" value="${p.center_x * 100}" oninput="updateCutoutParam('center_x', this.value / 100)">
+        </div>
+        <div class="cutout-row">
+            <label>Center Y <span>${Math.round(p.center_y * 100)}%</span></label>
+            <input type="range" min="0" max="100" value="${p.center_y * 100}" oninput="updateCutoutParam('center_y', this.value / 100)">
+        </div>
+    `;
+}
+
+function _drawCutoutOverlay() {
+    const canvas = document.getElementById('cutout-overlay');
+    if (!canvas) return;
+
+    if (!frameCutoutEnabled) {
+        canvas.style.display = 'none';
+        return;
+    }
+
+    // Size canvas to match the preview image
+    const img = document.getElementById('preview-img');
+    if (!img || img.style.display === 'none') {
+        canvas.style.display = 'none';
+        return;
+    }
+
+    const rect = img.getBoundingClientRect();
+    const parentRect = img.parentElement.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    canvas.style.display = 'block';
+    canvas.style.left = (rect.left - parentRect.left) + 'px';
+    canvas.style.top = (rect.top - parentRect.top) + 'px';
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const p = frameCutoutParams;
+    const w = canvas.width;
+    const h = canvas.height;
+    const cx = p.center_x * w;
+    const cy = p.center_y * h;
+    const rw = p.width * w;
+    const rh = p.height * h;
+
+    // Draw the cutout boundary
+    ctx.strokeStyle = p.invert ? '#ff4444' : '#44ff88';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+
+    if (p.shape === 'ellipse') {
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rw / 2, rh / 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+    } else {
+        const x1 = cx - rw / 2;
+        const y1 = cy - rh / 2;
+        ctx.strokeRect(x1, y1, rw, rh);
+    }
+
+    // Label
+    ctx.setLineDash([]);
+    ctx.font = '11px monospace';
+    ctx.fillStyle = ctx.strokeStyle;
+    const label = p.invert ? 'INVERT' : 'CLEAN';
+    ctx.fillText(label, cx - ctx.measureText(label).width / 2, cy - rh / 2 - 6);
+}
+
+// ============ CHUNK PLAYBACK (Hybrid Real-Time Preview) ============
+
+let _chunkVideo = null;          // <video> element ref
+let _chunkPlaying = false;       // Is chunk playback active?
+let _chunkStartFrame = 0;        // Frame offset of current chunk
+let _chunkDuration = 90;         // Frames per chunk (~3 sec at 30fps)
+let _chunkPollTimer = null;      // Progress polling interval
+let _chunkNextUrl = null;        // Pre-fetched next chunk URL
+let _chunkPrefetching = false;   // Is next chunk being rendered?
+let _chunkPrefetchPollTimer = null;  // Prefetch progress poll interval
+
+function _initChunkVideo() {
+    if (_chunkVideo) return _chunkVideo;
+    _chunkVideo = document.getElementById('preview-video');
+    if (!_chunkVideo) return null;
+
+    _chunkVideo.addEventListener('timeupdate', _onChunkTimeUpdate);
+    _chunkVideo.addEventListener('ended', _onChunkEnded);
+    _chunkVideo.addEventListener('error', _onChunkError);
+    return _chunkVideo;
+}
+
+function _onChunkTimeUpdate() {
+    if (!_chunkPlaying || !_chunkVideo || !window.timelineEditor) return;
+    // Sync timeline playhead from video position
+    const videoFrame = Math.floor(_chunkVideo.currentTime * videoFps);
+    const timelineFrame = _chunkStartFrame + videoFrame;
+    if (timelineFrame >= 0 && timelineFrame < totalFrames) {
+        timelineEditor.setPlayheadSilent(timelineFrame);
+        currentFrame = timelineFrame;
+        updateTransportTimecode();
+    }
+}
+
+function _onChunkEnded() {
+    if (!_chunkPlaying) return;
+    // Check loop brace
+    if (window.timelineEditor?.loopEnabled && timelineEditor.loopStart !== null) {
+        // Loop: restart from loop start
+        startChunkPlayback(timelineEditor.loopStart);
+        return;
+    }
+    // If next chunk is ready, seamless transition
+    if (_chunkNextUrl) {
+        const nextStart = _chunkStartFrame + _chunkDuration;
+        if (nextStart < totalFrames) {
+            _playChunkUrl(_chunkNextUrl, nextStart);
+            _chunkNextUrl = null;
+            // Prefetch the one after
+            _prefetchNextChunk(nextStart + _chunkDuration);
+            return;
+        }
+    }
+    // End of video or no next chunk
+    stopChunkPlayback();
+}
+
+function _onChunkError() {
+    showToast('Chunk playback error — falling back to frame preview', 'warning', null, 4000);
+    stopChunkPlayback();
+}
+
+function startChunkPlayback(fromFrame) {
+    if (!videoLoaded) return;
+    _initChunkVideo();
+    if (!_chunkVideo) return;
+
+    _chunkPlaying = true;
+    _chunkStartFrame = fromFrame;
+    _chunkNextUrl = null;
+    _chunkPrefetching = false;
+
+    // Determine chunk boundaries respecting loop brace
+    let duration = _chunkDuration;
+    if (window.timelineEditor?.loopEnabled && timelineEditor.loopEnd !== null) {
+        const loopEnd = timelineEditor.loopEnd;
+        duration = Math.min(duration, loopEnd - fromFrame + 1);
+    }
+    // Cap to remaining video
+    duration = Math.min(duration, totalFrames - fromFrame);
+    if (duration <= 0) {
+        stopChunkPlayback();
+        return;
+    }
+
+    // Show buffer indicator
+    _showChunkBuffer('Buffering...');
+
+    // Build request body from current effects
+    const body = _buildChunkRequestBody(fromFrame, duration);
+
+    // Request chunk render
+    fetch(`${API}/api/preview/chunk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    }).then(res => res.json()).then(data => {
+        if (!_chunkPlaying) return; // Cancelled while waiting
+
+        if (data.status === 'ready' && data.url) {
+            // No effects — source video ready immediately
+            _playChunkUrl(`${API}${data.url}`, fromFrame);
+            _hideChunkBuffer();
+        } else if (data.status === 'rendering') {
+            // Poll for progress
+            _startChunkPoll(fromFrame);
+        }
+    }).catch(err => {
+        console.error('Chunk request failed:', err);
+        _hideChunkBuffer();
+        showToast('Chunk render failed — using frame preview', 'warning', null, 4000);
+        stopChunkPlayback();
+        // Fall back to regular playback
+        if (window.timelineEditor) timelineEditor.startPlayback();
+    });
+}
+
+function _buildChunkRequestBody(fromFrame, duration) {
+    const body = {
+        start_frame: fromFrame,
+        duration_frames: duration,
+        mix: mixLevel,
+        quality: 'playback',
+        frame_cutout: _getFrameCutoutForRequest(),
+    };
+
+    if (appMode === 'timeline' && window.timelineEditor) {
+        body.mode = 'timeline';
+        body.regions = timelineEditor.getActiveRegions().map(r => ({
+            start: r.startFrame,
+            end: r.endFrame,
+            effects: (r.effects || []).filter(e => !e.bypassed),
+            muted: timelineEditor.isTrackMuted(r.trackId),
+            mask: r.mask || null,
+        }));
+    } else {
+        body.mode = 'flat';
+        body.effects = chain
+            .filter(d => !d.bypassed)
+            .map(d => ({ name: d.name, params: { ...d.params, mix: d.mix ?? 1.0 } }));
+    }
+
+    return body;
+}
+
+function _startChunkPoll(fromFrame) {
+    if (_chunkPollTimer) clearInterval(_chunkPollTimer);
+    const startTime = Date.now();
+
+    _chunkPollTimer = setInterval(async () => {
+        try {
+            const res = await fetch(`${API}/api/preview/chunk/progress`);
+            const prog = await res.json();
+
+            if (!_chunkPlaying) {
+                clearInterval(_chunkPollTimer);
+                _chunkPollTimer = null;
+                return;
+            }
+
+            // Timeout: 10 seconds max
+            if (Date.now() - startTime > 10000) {
+                clearInterval(_chunkPollTimer);
+                _chunkPollTimer = null;
+                _hideChunkBuffer();
+                showToast('Chunk render timed out — using frame preview', 'warning', null, 4000);
+                stopChunkPlayback();
+                if (window.timelineEditor) timelineEditor.startPlayback();
+                return;
+            }
+
+            if (prog.error) {
+                clearInterval(_chunkPollTimer);
+                _chunkPollTimer = null;
+                _hideChunkBuffer();
+                showToast(`Chunk error: ${prog.error}`, 'warning', null, 4000);
+                stopChunkPlayback();
+                return;
+            }
+
+            // Update buffer text with progress
+            if (prog.total > 0) {
+                const pct = Math.round((prog.frame / prog.total) * 100);
+                _showChunkBuffer(`Rendering... ${pct}%`);
+            }
+
+            if (prog.ready && prog.url) {
+                clearInterval(_chunkPollTimer);
+                _chunkPollTimer = null;
+                _playChunkUrl(`${API}${prog.url}`, fromFrame);
+                _hideChunkBuffer();
+                // Prefetch next chunk
+                _prefetchNextChunk(fromFrame + _chunkDuration);
+            }
+        } catch (err) {
+            // Network error during poll — ignore, will retry
+        }
+    }, 200);
+}
+
+function _playChunkUrl(url, startFrame) {
+    if (!_chunkVideo) return;
+    _chunkStartFrame = startFrame;
+
+    // Switch display: hide img, show video
+    document.getElementById('preview-img').style.display = 'none';
+    _chunkVideo.style.display = 'block';
+    document.getElementById('empty-state').style.display = 'none';
+
+    _chunkVideo.src = url;
+    _chunkVideo.play().catch(err => {
+        console.error('Chunk video play failed:', err);
+        _onChunkError();
+    });
+}
+
+function _prefetchNextChunk(fromFrame) {
+    if (_chunkPrefetching || fromFrame >= totalFrames) return;
+    _chunkPrefetching = true;
+
+    let duration = _chunkDuration;
+    if (window.timelineEditor?.loopEnabled && timelineEditor.loopEnd !== null) {
+        duration = Math.min(duration, timelineEditor.loopEnd - fromFrame + 1);
+    }
+    duration = Math.min(duration, totalFrames - fromFrame);
+    if (duration <= 0) { _chunkPrefetching = false; return; }
+
+    const body = _buildChunkRequestBody(fromFrame, duration);
+
+    fetch(`${API}/api/preview/chunk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    }).then(res => res.json()).then(data => {
+        if (!_chunkPlaying) { _chunkPrefetching = false; return; }
+        if (data.status === 'ready' && data.url) {
+            _chunkNextUrl = `${API}${data.url}`;
+            _chunkPrefetching = false;
+        } else {
+            // Poll for prefetch completion
+            _pollPrefetch();
+        }
+    }).catch(() => { _chunkPrefetching = false; });
+}
+
+function _pollPrefetch() {
+    if (_chunkPrefetchPollTimer) clearInterval(_chunkPrefetchPollTimer);
+    const timer = _chunkPrefetchPollTimer = setInterval(async () => {
+        if (!_chunkPlaying) { clearInterval(timer); _chunkPrefetchPollTimer = null; _chunkPrefetching = false; return; }
+        try {
+            const res = await fetch(`${API}/api/preview/chunk/progress`);
+            const prog = await res.json();
+            if (prog.ready && prog.url) {
+                clearInterval(timer);
+                _chunkNextUrl = `${API}${prog.url}`;
+                _chunkPrefetching = false;
+            } else if (prog.error || !prog.active) {
+                clearInterval(timer);
+                _chunkPrefetching = false;
+            }
+        } catch (_) { clearInterval(timer); _chunkPrefetching = false; }
+    }, 300);
+}
+
+function stopChunkPlayback() {
+    _chunkPlaying = false;
+    if (_chunkPollTimer) { clearInterval(_chunkPollTimer); _chunkPollTimer = null; }
+    if (_chunkPrefetchPollTimer) { clearInterval(_chunkPrefetchPollTimer); _chunkPrefetchPollTimer = null; }
+    _chunkNextUrl = null;
+    _chunkPrefetching = false;
+    _hideChunkBuffer();
+
+    // Cancel server-side render
+    fetch(`${API}/api/preview/chunk/cancel`, { method: 'POST' }).catch(() => {});
+
+    // Switch display back: show img, hide video
+    if (_chunkVideo) {
+        _chunkVideo.pause();
+        _chunkVideo.removeAttribute('src');
+        _chunkVideo.load();  // P2-2: fully release media resource
+        _chunkVideo.style.display = 'none';
+    }
+    document.getElementById('preview-img').style.display = videoLoaded ? 'block' : 'none';
+
+    // Update transport button
+    const btn = document.getElementById('transport-play');
+    if (btn) { btn.classList.remove('active'); btn.textContent = '\u25B6'; }
+}
+
+function _onChunkParamChange() {
+    if (!_chunkPlaying) return;
+    // Param/effect changed during chunk playback: pause, re-render from current position
+    const resumeFrame = currentFrame;
+    stopChunkPlayback();
+    showToast('Re-rendering...', 'info', null, 1500);
+    // Short delay to let the stop settle, then restart
+    setTimeout(() => startChunkPlayback(resumeFrame), 100);
+}
+
+function _showChunkBuffer(text) {
+    const el = document.getElementById('chunk-buffer-indicator');
+    if (!el) return;
+    const span = el.querySelector('.chunk-buffer-text');
+    if (span) span.textContent = text || 'Buffering...';
+    el.style.display = 'flex';
+}
+
+function _hideChunkBuffer() {
+    const el = document.getElementById('chunk-buffer-indicator');
+    if (el) el.style.display = 'none';
 }
 
 // ============ FRAME DIFF COMPARISON TOOL ============
@@ -8546,7 +9043,7 @@ function togglePlayback() {
 
     if (btn) {
         btn.classList.toggle('active', isPlaying);
-        btn.textContent = isPlaying ? '▮▮' : '▶';
+        btn.textContent = isPlaying ? '\u25AE\u25AE' : '\u25B6';
     }
 
     updateTransportTimecode();

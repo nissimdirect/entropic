@@ -1275,6 +1275,17 @@ class TimelineEditor {
         }
     }
 
+    setPlayheadSilent(frame) {
+        // Move playhead visually WITHOUT triggering schedulePreview (used during chunk playback)
+        this.playhead = Math.max(0, Math.min(frame, this.totalFrames - 1));
+        this.draw();
+        // Auto-scroll to follow playhead
+        const px = this.frameToX(this.playhead);
+        if (px > this.canvasW - 50 || px < this.trackHeaderWidth + 50) {
+            this.scrollTo(this.playhead);
+        }
+    }
+
     setInPoint() {
         this.inPoint = this.playhead;
         if (this.outPoint !== null && this.inPoint > this.outPoint) {
@@ -1400,6 +1411,10 @@ class TimelineEditor {
         if (this.playInterval) {
             clearInterval(this.playInterval);
             this.playInterval = null;
+        }
+        // Stop chunk playback if active
+        if (typeof stopChunkPlayback === 'function' && typeof _chunkPlaying !== 'undefined' && _chunkPlaying) {
+            stopChunkPlayback();
         }
         // Free cached frames
         if (typeof clearFrameCache === 'function') {

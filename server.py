@@ -18,9 +18,10 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 import numpy as np
 from PIL import Image
@@ -42,6 +43,20 @@ except OSError:
     PRESETS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Entropic")
+
+
+class NoCacheStaticMiddleware(BaseHTTPMiddleware):
+    """Prevent browsers (especially Safari) from caching static files during development."""
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static") or request.url.path == "/":
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+
+app.add_middleware(NoCacheStaticMiddleware)
 
 # Serve static files (UI)
 UI_DIR = Path(__file__).parent / "ui"
@@ -232,11 +247,83 @@ def _apply_chain_with_timeout(frame, effects, frame_index, total_frames, waterma
             )
 
 
+def _apply_frame_cutout(original, processed, params):
+    """Composite a clean center rectangle over a processed frame (or inverse).
+
+    Creates a "picture frame" effect: border = processed/effected, center = clean original.
+    With invert=True: center = effected, border = clean.
+
+    Args:
+        original: Clean frame (H, W, 3) uint8 numpy array.
+        processed: Effected frame (H, W, 3) uint8 numpy array.
+        params: Dict with center_x, center_y, width, height, feather, opacity, invert, shape.
+
+    Returns:
+        Composited frame (H, W, 3) uint8 numpy array.
+    """
+    h, w = original.shape[:2]
+
+    cx = float(params.get('center_x', 0.5))
+    cy = float(params.get('center_y', 0.5))
+    rw = float(params.get('width', 0.6))
+    rh = float(params.get('height', 0.6))
+    feather = float(params.get('feather', 0.15))
+    opacity = float(params.get('opacity', 1.0))
+    invert = bool(params.get('invert', False))
+    shape = params.get('shape', 'rectangle')
+
+    # Clamp params
+    opacity = max(0.0, min(1.0, opacity))
+    feather = max(0.0, min(1.0, feather))
+
+    # Build mask (1.0 = show original, 0.0 = show processed)
+    mask = np.zeros((h, w), dtype=np.float32)
+
+    if shape == 'ellipse':
+        # Ellipse mask using distance from center
+        yy, xx = np.mgrid[0:h, 0:w]
+        # Normalize to 0-1
+        nx = (xx / w - cx) / (rw / 2 + 1e-6)
+        ny = (yy / h - cy) / (rh / 2 + 1e-6)
+        dist = nx * nx + ny * ny
+        mask = np.clip(1.0 - dist, 0.0, 1.0)
+        # Sharpen if low feather
+        if feather < 0.01:
+            mask = (dist <= 1.0).astype(np.float32)
+    else:
+        # Rectangle mask
+        x1 = int(max(0, (cx - rw / 2) * w))
+        y1 = int(max(0, (cy - rh / 2) * h))
+        x2 = int(min(w, (cx + rw / 2) * w))
+        y2 = int(min(h, (cy + rh / 2) * h))
+        if x2 > x1 and y2 > y1:
+            mask[y1:y2, x1:x2] = 1.0
+
+    # Feathering via gaussian blur
+    if feather > 0.005:
+        from scipy.ndimage import gaussian_filter
+        sigma = feather * min(w, h) * 0.15
+        sigma = max(1.0, sigma)
+        mask = gaussian_filter(mask, sigma=sigma)
+
+    if invert:
+        mask = 1.0 - mask
+
+    # Apply opacity
+    mask = mask * opacity
+
+    # Composite: result = original * mask + processed * (1 - mask)
+    mask_3d = mask[:, :, np.newaxis]
+    result = original.astype(np.float32) * mask_3d + processed.astype(np.float32) * (1.0 - mask_3d)
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
 class EffectChain(BaseModel):
     effects: list[dict]  # [{"name": "pixelsort", "params": {"threshold": 0.5}}, ...]
     frame_number: int = 0
     mix: float = 1.0  # Wet/dry blend: 0.0 = original, 1.0 = fully processed
     quality: str = 'full'  # 'full' or 'playback' (lower res for live playback)
+    frame_cutout: dict | None = None  # {center_x, center_y, width, height, feather, opacity, invert, shape}
 
 
 class RenderRequest(BaseModel):
@@ -634,6 +721,10 @@ async def preview_effect(chain: EffectChain):
             frame = np.array(Image.fromarray(frame).resize((new_w, new_h)))
 
         warning = None
+        # Preserve original for frame cutout compositing
+        need_original = chain.mix < 1.0 or chain.frame_cutout
+        original = frame.copy() if need_original else None
+
         if chain.effects:
             # Filter out video-level effects that can't preview as single frames
             filtered_effects, skipped = _filter_video_level_effects(chain.effects)
@@ -642,19 +733,22 @@ async def preview_effect(chain: EffectChain):
                 warning = f"Skipped video-level effects (require full render): {', '.join(skipped)}"
 
             if filtered_effects:
-                original = frame.copy() if chain.mix < 1.0 else None
                 frame = _apply_chain_with_timeout(frame, filtered_effects,
                                     frame_index=chain.frame_number,
                                     total_frames=_state["video_info"].get("total_frames", 1),
                                     watermark=False,
                                     timeout=PREVIEW_TIMEOUT_SECONDS)
                 # Wet/dry mix
-                if original is not None:
+                if original is not None and chain.mix < 1.0:
                     mix = max(0.0, min(1.0, chain.mix))
                     frame = np.clip(
                         original.astype(float) * (1 - mix) + frame.astype(float) * mix,
                         0, 255
                     ).astype(np.uint8)
+
+        # Frame cutout: composite clean center over processed frame
+        if chain.frame_cutout and original is not None:
+            frame = _apply_frame_cutout(original, frame, chain.frame_cutout)
 
         result = {"preview": _frame_to_data_url(frame)}
         if warning:
@@ -954,6 +1048,7 @@ class TimelinePreviewRequest(BaseModel):
     regions: list[dict]  # [{start, end, effects, muted, mask}]
     mix: float = 1.0
     quality: str = 'full'
+    frame_cutout: dict | None = None  # {center_x, center_y, width, height, feather, opacity, invert, shape}
 
 
 @app.post("/api/preview/timeline")
@@ -1027,6 +1122,10 @@ async def preview_timeline(req: TimelinePreviewRequest):
                 original.astype(float) * (1 - mix) + processed.astype(float) * mix,
                 0, 255
             ).astype(np.uint8)
+
+        # Frame cutout: composite clean center over processed frame
+        if req.frame_cutout:
+            processed = _apply_frame_cutout(original, processed, req.frame_cutout)
 
         result = {"preview": _frame_to_data_url(processed)}
         if all_skipped:
@@ -2445,14 +2544,257 @@ async def perform_render(req: PerformRenderRequest):
             os.unlink(automation_path)
 
 
+# ============ CHUNK PREVIEW (Sprint 1: Hybrid Real-Time Preview) ============
+
+# Chunk cleanup interval (seconds) — delete chunk files older than this
+_CHUNK_TTL_SECONDS = 60
+
+
+class ChunkRequest(BaseModel):
+    start_frame: int = 0
+    duration_frames: int = 90  # ~3 seconds at 30fps
+    regions: list[dict] = []   # Same format as timeline preview
+    tracks: list[dict] = []    # Same format as multitrack preview
+    mix: float = 1.0
+    mode: str = 'timeline'     # 'timeline' | 'multitrack' | 'flat'
+    effects: list[dict] = []   # For flat mode
+    quality: str = 'playback'  # 'playback' (640x360) | 'full'
+    frame_cutout: dict | None = None  # {center_x, center_y, width, height, feather, opacity, invert, shape}
+
+
+def _cleanup_old_chunks():
+    """Delete chunk files older than TTL."""
+    now = time.time()
+    for f in _CHUNK_DIR.glob("chunk_*.mp4"):
+        try:
+            if now - f.stat().st_mtime > _CHUNK_TTL_SECONDS:
+                f.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _render_chunk_sync(video_path, chunk_path, req: ChunkRequest, video_info: dict):
+    """Render a preview chunk to disk (runs in thread pool).
+
+    Decodes frames via stream_frames(), applies effect chain, encodes to H.264.
+    """
+    fps = video_info.get("fps", 30)
+    total_video_frames = video_info.get("total_frames", 1)
+
+    # Determine scale from quality
+    max_pixels = PLAYBACK_MAX_PIXELS if req.quality == 'playback' else 1920 * 1080
+
+    # Probe to get dimensions at scale
+    orig_w = video_info.get("width", 640)
+    orig_h = video_info.get("height", 360)
+    if orig_w * orig_h > max_pixels:
+        scale = (max_pixels / (orig_w * orig_h)) ** 0.5
+    else:
+        scale = 1.0
+
+    # Cap duration to remaining frames
+    remaining = max(0, total_video_frames - req.start_frame)
+    num_frames = min(req.duration_frames, remaining)
+    if num_frames <= 0:
+        _set_chunk_progress(active=False, ready=False, error="No frames to render")
+        return
+
+    _set_chunk_progress(active=True, frame=0, total=num_frames, ready=False, cancel=False, error="")
+
+    pipe_out = None
+    frame_gen = None
+    try:
+        frame_gen = stream_frames(video_path, scale=scale, start_frame=req.start_frame)
+        first_frame = True
+
+        for i, raw_frame in enumerate(frame_gen):
+            if i >= num_frames:
+                break
+
+            # Check for cancellation
+            if _get_chunk_progress().get("cancel"):
+                _set_chunk_progress(active=False, ready=False, error="Cancelled")
+                break
+
+            frame = raw_frame
+            frame_index = req.start_frame + i
+
+            # Apply effects based on mode
+            if req.mode == 'timeline' and req.regions:
+                for region in req.regions:
+                    if region.get("muted"):
+                        continue
+                    start = region.get("start", 0)
+                    end = region.get("end", 0)
+                    if start <= frame_index <= end:
+                        effects = region.get("effects", [])
+                        if not effects:
+                            continue
+                        filtered, _ = _filter_video_level_effects(effects)
+                        if filtered:
+                            frame = _apply_chain_with_timeout(
+                                frame, filtered,
+                                frame_index=frame_index,
+                                total_frames=total_video_frames,
+                                watermark=False,
+                                timeout=PREVIEW_TIMEOUT_SECONDS
+                            )
+            elif req.mode == 'flat' and req.effects:
+                filtered, _ = _filter_video_level_effects(req.effects)
+                if filtered:
+                    frame = _apply_chain_with_timeout(
+                        frame, filtered,
+                        frame_index=frame_index,
+                        total_frames=total_video_frames,
+                        watermark=False,
+                        timeout=PREVIEW_TIMEOUT_SECONDS
+                    )
+
+            # Wet/dry mix
+            if req.mix < 1.0:
+                mix = max(0.0, min(1.0, req.mix))
+                frame = np.clip(
+                    raw_frame.astype(float) * (1 - mix) + frame.astype(float) * mix,
+                    0, 255
+                ).astype(np.uint8)
+
+            # Frame cutout: composite clean center over processed frame
+            if req.frame_cutout:
+                frame = _apply_frame_cutout(raw_frame, frame, req.frame_cutout)
+
+            # Open output pipe on first frame (now we know dimensions)
+            if first_frame:
+                h, w = frame.shape[:2]
+                pipe_out = open_output_pipe(str(chunk_path), w, h, fps=fps, crf=28)
+                first_frame = False
+
+            pipe_out.stdin.write(frame.tobytes())
+            _set_chunk_progress(frame=i + 1)
+
+        # Close encode pipe
+        if pipe_out:
+            pipe_out.stdin.close()
+            pipe_out.wait(timeout=30)
+
+        if _get_chunk_progress().get("cancel"):
+            # Clean up cancelled chunk
+            Path(chunk_path).unlink(missing_ok=True)
+            return
+
+        if Path(chunk_path).exists() and Path(chunk_path).stat().st_size > 0:
+            _set_chunk_progress(active=False, ready=True, url=f"/api/preview/chunk/file/{Path(chunk_path).name}")
+        else:
+            _set_chunk_progress(active=False, ready=False, error="Chunk encoding produced no output")
+
+    except Exception as e:
+        import logging
+        logging.exception("Chunk render failed")
+        _set_chunk_progress(active=False, ready=False, error=str(e)[:200])
+        if pipe_out:
+            try:
+                pipe_out.stdin.close()
+                pipe_out.kill()
+                pipe_out.wait(timeout=5)
+            except Exception:
+                pass
+    finally:
+        # P1-3: Explicitly close the generator to release FFmpeg subprocess immediately
+        if frame_gen is not None:
+            frame_gen.close()
+
+
+@app.post("/api/preview/chunk")
+async def preview_chunk(req: ChunkRequest):
+    """Start rendering a preview chunk. Returns immediately; poll progress endpoint."""
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
+
+    # Clean up old chunks
+    _cleanup_old_chunks()
+
+    # Cancel any in-flight chunk render before starting a new one (P1-1: race condition guard)
+    if _get_chunk_progress().get("active"):
+        _set_chunk_progress(cancel=True)
+        # Brief wait for the render thread to notice the cancel flag
+        await asyncio.sleep(0.1)
+
+    # If no effects, return source video path directly (no re-encode needed)
+    has_effects = bool(req.regions) or bool(req.tracks) or bool(req.effects)
+    if not has_effects:
+        _set_chunk_progress(active=False, ready=True, frame=0, total=0, cancel=False, error="",
+                           url="/api/preview/chunk/source")
+        return {"status": "ready", "url": "/api/preview/chunk/source"}
+
+    # P1-2: Reject unsupported multitrack mode (not implemented in chunk render)
+    if req.mode == 'multitrack':
+        raise HTTPException(status_code=400, detail="Multitrack chunk preview not yet supported. Use timeline mode.")
+
+    # Generate unique chunk filename
+    chunk_name = f"chunk_{int(time.time() * 1000)}.mp4"
+    chunk_path = _CHUNK_DIR / chunk_name
+
+    video_path = _state["video_path"]
+    video_info = _state["video_info"]
+
+    # Reset progress
+    _set_chunk_progress(active=True, frame=0, total=req.duration_frames, ready=False, cancel=False, error="", url="")
+
+    # Run chunk render in background thread
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _render_chunk_sync, video_path, chunk_path, req, video_info)
+
+    return {"status": "rendering", "poll": "/api/preview/chunk/progress"}
+
+
+@app.get("/api/preview/chunk/progress")
+async def chunk_progress():
+    """Poll chunk render progress."""
+    return _get_chunk_progress()
+
+
+@app.post("/api/preview/chunk/cancel")
+async def chunk_cancel():
+    """Cancel in-flight chunk rendering."""
+    progress = _get_chunk_progress()
+    if not progress["active"]:
+        return {"status": "no_chunk_rendering"}
+    _set_chunk_progress(cancel=True)
+    return {"status": "cancel_requested"}
+
+
+@app.get("/api/preview/chunk/file/{filename}")
+async def chunk_file(filename: str):
+    """Serve a rendered chunk file."""
+    # SEC: sanitize filename to prevent path traversal
+    safe_name = Path(filename).name
+    chunk_path = _CHUNK_DIR / safe_name
+    if not chunk_path.exists():
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    return FileResponse(str(chunk_path), media_type="video/mp4")
+
+
+@app.get("/api/preview/chunk/source")
+async def chunk_source():
+    """Serve the source video directly (for no-effects playback)."""
+    if _state["video_path"] is None:
+        raise HTTPException(status_code=400, detail=_error_detail("no_video", "No video loaded"))
+    return FileResponse(str(_state["video_path"]), media_type="video/mp4")
+
+
 import atexit
 
 
 def _cleanup_on_shutdown():
-    """Remove temp video file on exit."""
+    """Remove temp video file and chunk files on exit."""
     path = _state.get("video_path")
     if path and os.path.exists(path):
         os.unlink(path)
+    # Clean up all chunk files
+    for f in _CHUNK_DIR.glob("chunk_*.mp4"):
+        try:
+            f.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 atexit.register(_cleanup_on_shutdown)

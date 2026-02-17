@@ -157,15 +157,23 @@
             <p class="hint">Drop video, image, GIF — or anything else for creative interpretation</p>
         </div>
         <img id="preview-img" style="display:none">
+        <video id="preview-video" style="display:none" muted playsinline></video>
+        <div id="chunk-buffer-indicator" style="display:none">
+            <div class="chunk-buffer-spinner"></div>
+            <span class="chunk-buffer-text">Buffering...</span>
+        </div>
+        <canvas id="cutout-overlay" style="display:none"></canvas>
         <div id="preview-controls">
-            <button onclick="togglePlayback()" class="preview-ctrl-btn" id="preview-play" title="Play/Pause">&#9654;</button>
+            <button onclick="togglePlayback()" class="preview-ctrl-btn" id="preview-play" title="Play/Pause">Play</button>
             <div id="preview-progress-bar" onclick="clickScrubPreview(event)">
                 <div id="preview-progress-fill"></div>
                 <input type="range" id="preview-scrubber" min="0" max="100" value="0" oninput="scrubPreview(this.value)">
             </div>
-            <button onclick="toggleDiffToolbar()" class="preview-ctrl-btn" title="Split Compare" onmouseenter="showInfoViewText('Split Compare — before/after comparison view')" onmouseleave="showInfoViewText('')">&#9645;</button>
-            <button onclick="fullscreenPreview()" class="preview-ctrl-btn" title="Fullscreen" onmouseenter="showInfoViewText('Fullscreen — expand preview to fill the screen')" onmouseleave="showInfoViewText('')">&#9974;</button>
+            <button onclick="toggleFrameCutout()" class="preview-ctrl-btn" id="frame-cutout-btn" title="Frame Cutout (F)">Cutout</button>
+            <button onclick="toggleDiffToolbar()" class="preview-ctrl-btn" title="Split Compare">Compare</button>
+            <button onclick="fullscreenPreview()" class="preview-ctrl-btn" title="Fullscreen">Full</button>
         </div>
+        <div id="frame-cutout-panel" style="display:none"></div>
         <div id="perf-hud" style="display:none">
             <span id="perf-hud-rec"></span>
             <span id="perf-hud-time"></span>
