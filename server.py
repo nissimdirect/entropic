@@ -18,6 +18,16 @@ from io import BytesIO
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Sentry observability — only active when SENTRY_DSN env var is set
+import sentry_sdk
+if os.environ.get("SENTRY_DSN"):
+    sentry_sdk.init(
+        dsn=os.environ["SENTRY_DSN"],
+        traces_sample_rate=1.0,
+        profiles_sample_rate=0.1,
+        environment=os.environ.get("SENTRY_ENV", "development"),
+    )
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
