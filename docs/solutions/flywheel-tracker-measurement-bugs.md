@@ -42,13 +42,32 @@ This made the flywheel appear less healthy than it was (4/10 spinning instead of
 - **Ground truth validation:** Any metric tool should print its raw data source on first run so discrepancies are visible immediately.
 - **Pattern:** When reading a file format, always read the actual file first — don't assume the format from the variable name.
 
+## Structural Fix (prevents recurrence)
+
+The individual bug fixes were correct but didn't prevent future silent zeros. Two structural additions:
+
+### 1. `verify()` function (in flywheel_tracker.py)
+Runs automatically on every invocation. Checks:
+- If data source EXISTS but measurement returned 0 → WARNING
+- If measurement dropped below known minimum → WARNING (regression)
+- With `--verify` flag: exits with code 1 on any warning
+
+### 2. Regression tests (test_flywheel_tracker.py, 20 tests)
+- Ground truth assertions: learnings >= 100, KB articles >= 50K, graduated >= 5
+- Schema validation: all 10 loops present, required fields, no spinning+zero
+- Self-test validation: verify() catches injected silent zeros
+- Type safety: all readers return correct types
+
 ## Verification
 
 ```bash
-python3 ~/Development/tools/flywheel_tracker.py
-# Expected: Loop 1 shows ~149 learnings, Loop 3 shows ~87K articles, Loop 7 shows ~61 delegations
+python3 ~/Development/tools/flywheel_tracker.py --verify
+# Expected: All measurements pass sanity checks
+
+cd ~/Development/tools && python3 -m pytest tests/test_flywheel_tracker.py -v
+# Expected: 20/20 pass
 ```
 
 ## Related Learnings
-- L#5: Working from memory — ALWAYS read/grep files
-- L#19: Not verifying data accuracy — verify all data sources before displaying metrics
+- L#5: Working from memory — ALWAYS read/grep files (violation count bumped)
+- L#19/P86: Filesystem Is Ground Truth — scan disk, don't assume formats
